@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BONC Moderation Demo</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5b6573; --line: #e2e6eb;
+    --allow: #1f8f4e; --allow-bg: #e3f5ea; --review: #b26a00; --review-bg: #fff1d6;
+    --reject: #c62828; --reject-bg: #fde4e4; --accent: #2f5bd3; --skip: #b9c0ca;
+    --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --panel: #1a1e24; --ink: #e8ebef; --muted: #98a2ae; --line: #2b313a;
+      --allow: #4cc684; --allow-bg: #16301f; --review: #f0ad3c; --review-bg: #33270f;
+      --reject: #ff6b6b; --reject-bg: #3a1a1a; --accent: #7b9cff; --skip: #4a525d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line); background: var(--panel);
+           display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; }
+  h1 { font-size: 19px; margin: 0; }
+  h1 small { font-weight: 400; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { font-size: 12.5px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .chip.bad { border-color: var(--reject); color: var(--reject); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 20px;
+         padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 4px; }
+  select, textarea { width: 100%; font: inherit; color: var(--ink); background: var(--bg);
+                     border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; }
+  textarea { min-height: 130px; resize: vertical; }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+  .row .grow { flex: 1; color: var(--muted); font-size: 12.5px; }
+  button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+                   padding: 9px 18px; font: 600 14px system-ui, sans-serif; cursor: pointer; }
+  button.primary:disabled { opacity: .6; cursor: wait; }
+  .examples { margin-top: 18px; display: grid; gap: 8px; }
+  .ex { text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+        padding: 8px 10px; cursor: pointer; color: var(--ink); font: inherit; font-size: 13.5px; }
+  .ex:hover { border-color: var(--accent); }
+  .ex .tag { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; margin-right: 6px; }
+  .pipeline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; font-size: 13px; }
+  .step { padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line); color: var(--muted); }
+  .step.on { border-color: var(--accent); color: var(--ink); font-weight: 600; }
+  .step.skip { color: var(--skip); text-decoration: line-through; }
+  .arrow { color: var(--muted); }
+  .verdict { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .badge { font: 800 26px system-ui, sans-serif; letter-spacing: .04em; padding: 8px 18px; border-radius: 10px; text-transform: uppercase; }
+  .allow { color: var(--allow); background: var(--allow-bg); }
+  .review { color: var(--review); background: var(--review-bg); }
+  .reject { color: var(--reject); background: var(--reject-bg); }
+  .why { color: var(--muted); }
+  .why b { color: var(--ink); }
+  .meter { position: relative; height: 14px; border-radius: 7px; margin: 26px 0 8px;
+           background: linear-gradient(to right, var(--allow) 0 30%, var(--review) 30% 70%, var(--reject) 70% 100%); opacity: .9; }
+  .meter .pin { position: absolute; top: -8px; width: 3px; height: 30px; background: var(--ink); border-radius: 2px; transform: translateX(-1px); }
+  .meter .pin span { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font: 600 12px var(--mono); white-space: nowrap; }
+  .meter .pin.lo span { left: 0; transform: none; }
+  .meter .pin.hi span { left: auto; right: 0; transform: none; }
+  .scale { position: relative; height: 16px; font: 11.5px var(--mono); color: var(--muted); }
+  .scale span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  .scale span:first-child { transform: none; } .scale span:last-child { transform: translateX(-100%); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+  @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
+  .bar { display: grid; grid-template-columns: 64px 1fr 48px; gap: 8px; align-items: center; font-size: 13px; margin: 5px 0; }
+  .bar .track { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); }
+  .bar .fill { height: 100%; }
+  .num { font-family: var(--mono); text-align: right; }
+  .kv { font-size: 13px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; font-family: var(--mono); }
+  .match { display: inline-block; font: 12px var(--mono); padding: 2px 8px; border-radius: 6px; margin: 2px 4px 2px 0; }
+  .match.block { background: var(--reject-bg); color: var(--reject); }
+  .match.flag { background: var(--review-bg); color: var(--review); }
+  details { margin-top: 16px; font-size: 13px; }
+  pre { font: 12px/1.5 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+        padding: 10px; overflow: auto; max-height: 320px; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  .error { color: var(--reject); background: var(--reject-bg); border-radius: 8px; padding: 10px 12px; }
+  .history { grid-column: 1 / -1; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.text { white-space: normal; min-width: 260px; }
+  td .pill { font-weight: 700; font-size: 11.5px; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
+  .stats { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>BONC Content Moderation <small>· live demo</small></h1>
+  <div class="chips" id="status"><span class="chip">connecting…</span></div>
+</header>
+
+<main>
+  <section>
+    <h2>Submit content</h2>
+    <label for="ctype">Content type</label>
+    <select id="ctype">
+      <option value="product_listing">Product listing</option>
+      <option value="business_profile">Business profile</option>
+      <option value="post">Post</option>
+      <option value="advertisement">Advertisement</option>
+    </select>
+    <label for="content" style="margin-top:10px">Content</label>
+    <textarea id="content" placeholder="Paste a listing, profile, post or ad…"></textarea>
+    <div class="row">
+      <span class="grow" id="count">0 characters · Ctrl+Enter to submit</span>
+      <button class="primary" id="go">Moderate</button>
+    </div>
+
+    <div class="examples" id="examples"></div>
+  </section>
+
+  <section id="result">
+    <h2>Decision</h2>
+    <div class="empty">Pick an example or type your own text.</div>
+  </section>
+
+  <section class="history">
+    <h2>This session</h2>
+    <div class="stats" id="stats"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Type</th><th>Content</th><th>Decision</th><th>By</th><th>Risk</th><th>Safety</th><th>Inference</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="empty">No requests yet.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const EXAMPLES = [
+  { tag: "allow", note: "clean listing", type: "product_listing",
+    text: "Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order." },
+  { tag: "review", note: "model: suspicious recruitment", type: "post",
+    text: "Looking for distributors in Gujarat. Very high margins, no investment needed, just register with a small fee." },
+  { tag: "review", note: "gate flag overrides a 'safe' model score", type: "product_listing",
+    text: "Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order. We also accept payment in crypto." },
+  { tag: "reject", note: "model: phishing", type: "post",
+    text: "Send your bank details and OTP to claim your prize money today" },
+  { tag: "reject", note: "model: abuse / threat", type: "post",
+    text: "You people are idiots and I will destroy your business" },
+  { tag: "reject", note: "gate block, model skipped", type: "advertisement",
+    text: "Invest now and double your money in 7 days" },
+];
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (x, d = 3) => (x === null || x === undefined ? "—" : Number(x).toFixed(d));
+const history = [];
+let thresholds = { allow_max: 0.3, reject_min: 0.7 };
+
+$("examples").innerHTML = EXAMPLES.map((e, i) =>
+  `<button class="ex" data-i="${i}"><span class="tag ${e.tag}">${e.tag}</span><span class="why">${esc(e.note)}</span><br>${esc(e.text)}</button>`
+).join("");
+$("examples").addEventListener("click", (ev) => {
+  const b = ev.target.closest(".ex"); if (!b) return;
+  const e = EXAMPLES[b.dataset.i];
+  $("ctype").value = e.type; $("content").value = e.text; updateCount(); moderate();
+});
+
+function updateCount() { $("count").textContent = `${$("content").value.length} characters · Ctrl+Enter to submit`; }
+$("content").addEventListener("input", updateCount);
+$("content").addEventListener("keydown", (ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) moderate(); });
+$("go").addEventListener("click", moderate);
+
+async function loadStatus() {
+  try {
+    const r = await fetch("/ready"); const s = await r.json();
+    thresholds = s.thresholds || thresholds;
+    const chips = [
+      `<span class="chip ${s.status === "ready" ? "" : "bad"}">status <b>${esc(s.status)}</b></span>`,
+      `<span class="chip">mode <b>${esc(s.mode)}</b></span>`,
+      s.model_version ? `<span class="chip">model <b>${esc(s.model_version)}</b></span>` : "",
+      `<span class="chip">gate rules <b>${esc(s.gate_rules)}</b></span>`,
+      `<span class="chip">allow ≤ <b>${fmt(thresholds.allow_max, 2)}</b> · reject ≥ <b>${fmt(thresholds.reject_min, 2)}</b> (risk)</span>`,
+    ];
+    $("status").innerHTML = chips.join("");
+  } catch { $("status").innerHTML = `<span class="chip bad">service unreachable</span>`; }
+}
+
+async function moderate() {
+  const content = $("content").value;
+  if (!content.trim()) { $("content").focus(); return; }
+  $("go").disabled = true;
+  const t0 = performance.now();
+  try {
+    const r = await fetch("/v1/moderate", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, content_type: $("ctype").value, content_id: `DEMO-${history.length + 1}` }) });
+    const body = await r.json();
+    const roundTrip = performance.now() - t0;
+    if (!r.ok) return showError(r.status, body);
+    if (body.status === "pending") return showPending(body);
+    showResult(body, roundTrip);
+    history.unshift({ ...body, roundTrip }); renderHistory();
+  } catch (e) { showError(0, { error: { message: String(e) } }); }
+  finally { $("go").disabled = false; }
+}
+
+function showError(status, body) {
+  const e = body.error || {};
+  $("result").innerHTML = `<h2>Decision</h2><div class="error"><b>HTTP ${status}</b> · ${esc(e.code || "error")}<br>${esc(e.message || "")}</div>
+    <details open><summary>Response</summary><pre>${esc(JSON.stringify(body, null, 2))}</pre></details>`;
+}
+
+function showPending(body) {
+  $("result").innerHTML = `<h2>Decision</h2><div class="verdict"><span class="badge review">pending</span>
+    <span class="why">Async mode: queued for the Celery worker. Status: <code>${esc(body.status_url)}</code></span></div>
+    <details open><summary>Response</summary><pre>${esc(JSON.stringify(body, null, 2))}</pre></details>`;
+}
+
+function reason(b) {
+  const blocks = b.gate_matches.filter((m) => m.action === "block");
+  const flags = b.gate_matches.filter((m) => m.action === "flag");
+  if (b.decided_by === "gate") return `Blocked by Layer 1 rule <b>${esc(blocks[0]?.rule_id)}</b>. The model was not called.`;
+  const s = b.risk_score, t = thresholds;
+  let why = s >= t.reject_min ? `risk ${fmt(s)} ≥ ${t.reject_min}` : s <= t.allow_max ? `risk ${fmt(s)} ≤ ${t.allow_max}` : `${t.allow_max} < risk ${fmt(s)} < ${t.reject_min}`;
+  if (flags.length && b.decision === "review" && s <= t.allow_max)
+    why += `, but Layer 1 flagged <b>${esc(flags[0].rule_id)}</b>, which forces at least review`;
+  return `Model says <b>${esc(b.predicted_label)}</b>: ${why}.`;
+}
+
+function showResult(b, roundTrip) {
+  const gate = b.decided_by === "gate";
+  const risk = b.risk_score;
+  const labels = b.label_scores ? Object.entries(b.label_scores).sort((a, c) => c[1] - a[1]) : [];
+  const colour = { safe: "var(--allow)", review: "var(--review)", reject: "var(--reject)" };
+  $("result").innerHTML = `
+    <h2>Decision</h2>
+    <div class="pipeline">
+      <span class="step on">1 · Regex gate</span><span class="arrow">→</span>
+      <span class="step ${gate ? "skip" : "on"}">2 · DeBERTa model</span><span class="arrow">→</span>
+      <span class="step ${gate ? "skip" : "on"}">3 · Threshold routing</span><span class="arrow">→</span>
+      <span class="step on">4 · SQL log</span>
+    </div>
+    <div class="verdict"><span class="badge ${b.decision}">${b.decision}</span><span class="why">${reason(b)}</span></div>
+    ${gate ? "" : `
+      <div class="meter"><div class="pin ${risk < 0.15 ? "lo" : risk > 0.85 ? "hi" : ""}" style="left:${Math.min(100, risk * 100)}%"><span>risk ${fmt(risk)} · safety ${fmt(1 - risk)}</span></div></div>
+      <div class="scale"><span style="left:0">0 · allow</span><span style="left:${thresholds.allow_max * 100}%">${thresholds.allow_max}</span><span style="left:${thresholds.reject_min * 100}%">${thresholds.reject_min}</span><span style="left:100%">reject · 1</span></div>`}
+    <div class="grid2">
+      <div>
+        <h2>Model output</h2>
+        ${labels.length ? labels.map(([k, v]) => `
+          <div class="bar"><span>${esc(k)}</span><span class="track"><span class="fill" style="display:block;width:${v * 100}%;background:${colour[k] || "var(--accent)"}"></span></span><span class="num">${fmt(v, 3)}</span></div>`).join("")
+          : `<div class="why">Skipped: the gate already decided.</div>`}
+        <h2 style="margin-top:14px">Layer 1 matches</h2>
+        ${b.gate_matches.length ? b.gate_matches.map((m) => `<span class="match ${m.action}">${esc(m.action)} · ${esc(m.rule_id)}</span>`).join("") : `<span class="why">none</span>`}
+      </div>
+      <div>
+        <h2>Latency</h2>
+        <dl class="kv">
+          <dt>gate</dt><dd>${fmt(b.latency_ms.gate, 2)} ms</dd>
+          <dt>inference</dt><dd>${b.latency_ms.inference === null ? "skipped" : fmt(b.latency_ms.inference, 1) + " ms"}</dd>
+          <dt>total (server)</dt><dd>${fmt(b.latency_ms.total, 1)} ms</dd>
+          <dt>round trip</dt><dd>${fmt(roundTrip, 1)} ms</dd>
+        </dl>
+        <h2 style="margin-top:14px">Logged as</h2>
+        <dl class="kv">
+          <dt>request_id</dt><dd>${esc(b.request_id.slice(0, 8))}…</dd>
+          <dt>model</dt><dd>${esc(b.model_version || "—")}</dd>
+          <dt>gate</dt><dd>v${esc(b.gate_version)}</dd>
+        </dl>
+      </div>
+    </div>
+    <details><summary>Full result payload (what Intern 3's pipeline stores)</summary><pre>${esc(JSON.stringify(b, null, 2))}</pre></details>`;
+}
+
+function renderHistory() {
+  const n = history.length;
+  const inf = history.map((h) => h.latency_ms.inference).filter((x) => x !== null);
+  const by = (d) => history.filter((h) => h.decision === d).length;
+  $("stats").textContent = `${n} request${n === 1 ? "" : "s"} · allow ${by("allow")} · review ${by("review")} · reject ${by("reject")}` +
+    (inf.length ? ` · mean inference ${fmt(inf.reduce((a, c) => a + c, 0) / inf.length, 1)} ms` : "");
+  $("rows").innerHTML = history.map((h) => `<tr>
+    <td>${new Date(h.decided_at).toLocaleTimeString()}</td>
+    <td>${esc(h.content_type.replace("_", " "))}</td>
+    <td class="text">${esc(h.content.length > 90 ? h.content.slice(0, 90) + "…" : h.content)}</td>
+    <td><span class="pill ${h.decision}">${h.decision}</span></td>
+    <td>${esc(h.decided_by)}</td>
+    <td class="num">${fmt(h.risk_score)}</td>
+    <td class="num">${h.risk_score === null ? "—" : fmt(1 - h.risk_score)}</td>
+    <td class="num">${h.latency_ms.inference === null ? "skipped" : fmt(h.latency_ms.inference, 1) + " ms"}</td></tr>`).join("");
+}
+
+// /demo#3 runs example 3 on load: handy for deep links during a presentation.
+loadStatus().then(() => {
+  const m = location.hash.match(/^#(\d+)$/);
+  if (m && EXAMPLES[m[1] - 1]) document.querySelector(`.ex[data-i="${m[1] - 1}"]`).click();
+});
+</script>
+</body>
+</html>

@@ -31,12 +31,15 @@ curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
   -d '{"content":"Bulk cotton yarn supplier","content_type":"product_listing","content_id":"LST-1"}'
 ```
 
+For a live walkthrough in the browser, see [DEMO.md](DEMO.md).
+
 ## Endpoints
 
 | Method | Path | |
 |---|---|---|
 | POST | `/v1/moderate` | Moderates one piece of content. Returns `200` with the result, or `202` pending in async mode. |
 | GET | `/v1/moderate/<request_id>` | Looks up a result (async mode only). |
+| GET | `/demo` | Browser demo UI. Only served when `DEMO_PAGE=1`. |
 | GET | `/health` | Liveness check. |
 | GET | `/ready` | Readiness check. Returns `503` if no model is loaded in sync mode. |
 | POST | `/v1/admin/model/reload` | Hot-swaps the model. Needs the `X-Admin-Token` header and the `ADMIN_TOKEN` env var. |

@@ -28,6 +28,8 @@ limits:
 
 latency_budget_ms: 30      # inference-only budget; overruns are logged, not failed
 
+demo_page: false           # true (or DEMO_PAGE=1) serves the browser demo at /demo
+
 result_sink: sql           # sql -> write to SQL Server (failures are logged, never fail the request)
                            # log -> JSON log lines only (dev / tests)
 
