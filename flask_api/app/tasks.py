@@ -23,7 +23,7 @@ from app.config import Settings, load_settings
 from app.gate import Gate
 from app.model import ModelRegistry
 from app.pipeline import ModerationRequest, Pipeline
-from app.sinks import LoggingSink, ResultSink
+from app.sinks import LoggingSink, ResultSink, SqlServerSink
 
 log = logging.getLogger(__name__)
 TASK_NAME = "moderation.moderate"
@@ -40,7 +40,7 @@ celery_app.conf.update(
 )
 
 _pipeline: Pipeline | None = None
-_sink: ResultSink = LoggingSink()
+_sink: ResultSink = SqlServerSink()
 
 
 @worker_process_init.connect

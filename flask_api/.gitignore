@@ -9,3 +9,4 @@ models/*
 
 # Private term lists (slurs etc.) from the policy team
 config/private/
+.env
