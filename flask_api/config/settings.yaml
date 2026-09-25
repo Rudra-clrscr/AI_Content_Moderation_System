@@ -1,0 +1,29 @@
+# Runtime settings for the moderation service.
+# Any key can be overridden with an env var — see app/config.py.
+
+mode: sync                 # sync  -> inference inline, final decision in the response
+                           # async -> gate inline, model inference enqueued to Celery (202 pending)
+
+model:
+  backend: onnx            # onnx | stub   (stub = dev only, never deploy)
+  dir: models/current      # must contain model.onnx, tokenizer.json, model_meta.json
+  intra_op_threads: 1      # 1 thread per worker process keeps latency predictable on CPU
+  inter_op_threads: 1
+
+thresholds:                # placeholder values until Intern 1's model is calibrated
+  allow_below: 0.30        # score <  allow_below              -> allow
+  reject_at: 0.85          # score >= reject_at                -> reject
+                           # allow_below <= score < reject_at  -> review
+
+gate:
+  patterns_file: config/gate_patterns.yaml
+
+limits:
+  max_chars: 10000
+
+latency_budget_ms: 30      # inference-only budget; overruns are logged, not failed
+
+celery:
+  broker_url: redis://localhost:6379/0
+  result_backend: redis://localhost:6379/1
+  queue: moderation

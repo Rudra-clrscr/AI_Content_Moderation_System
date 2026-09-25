@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Model artifacts come from Intern 1's export, not git
+models/*
+!models/.gitkeep
+
+# Private term lists (slurs etc.) from the policy team
+config/private/
