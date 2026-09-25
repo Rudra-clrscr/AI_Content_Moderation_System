@@ -143,3 +143,14 @@ def test_admin_reload_swaps_model(client):
 def test_admin_disabled_without_token(make_settings, scorer):
     c = create_app(make_settings(admin_token=None), scorer=scorer).test_client()
     assert c.post("/v1/admin/model/reload", headers={"X-Admin-Token": ""}).status_code == 404
+
+
+def test_demo_page_disabled_by_default(client):
+    assert client.get("/demo").status_code == 404
+    assert client.get("/static/demo.html").status_code == 404
+
+
+def test_demo_page_when_enabled(make_settings, scorer):
+    c = create_app(make_settings(demo_page=True), scorer=scorer).test_client()
+    r = c.get("/demo")
+    assert r.status_code == 200 and b"BONC Moderation Demo" in r.data

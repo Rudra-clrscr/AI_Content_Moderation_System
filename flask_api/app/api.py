@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import hmac
 import logging
+from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 from app.model import ModelNotReady
@@ -99,6 +100,14 @@ def moderation_status(request_id: str):
         return _error(404, "not_supported", "status lookup is only available in async mode")
     result = svc.fetch_result(request_id)
     return jsonify(result), 200
+
+
+@bp.get("/demo")
+def demo_page():
+    """Browser demo UI. Enabled with DEMO_PAGE=1; never on in production."""
+    if not _svc().settings.demo_page:
+        return _error(404, "not_found", "demo page disabled (set DEMO_PAGE=1)")
+    return send_from_directory(Path(__file__).parent / "static", "demo.html")
 
 
 @bp.get("/health")

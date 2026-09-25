@@ -11,6 +11,7 @@ Env overrides (all optional):
     CELERY_BROKER_URL / CELERY_RESULT_BACKEND
     ADMIN_TOKEN           enables POST /v1/admin/model/reload when set
     RESULT_SINK           sql | log
+    DEMO_PAGE             1 to serve the demo UI at /demo (off by default)
     DB_SERVER, DB_NAME    SQL Server host and database
     DB_USER, DB_PASSWORD  SQL auth; if DB_USER is unset, Windows auth (Trusted_Connection) is used
     DB_DRIVER             ODBC driver name (default "ODBC Driver 18 for SQL Server")
@@ -58,6 +59,7 @@ class Settings:
     db_trust_server_certificate: bool = True
     db_timeout_seconds: int = 5
     result_sink: str = "sql"
+    demo_page: bool = False
 
     def model_kwargs(self) -> dict:
         """Keyword args for ModelRegistry.load / OnnxScorer."""
@@ -114,6 +116,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
             env("DB_TRUST_SERVER_CERTIFICATE", db.get("trust_server_certificate", True))),
         db_timeout_seconds=int(env("DB_TIMEOUT_SECONDS", db.get("timeout_seconds", 5))),
         result_sink=env("RESULT_SINK", raw.get("result_sink", "sql")),
+        demo_page=_as_bool(env("DEMO_PAGE", raw.get("demo_page", False))),
     )
 
 
