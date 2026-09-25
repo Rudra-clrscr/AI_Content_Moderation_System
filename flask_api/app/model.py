@@ -84,6 +84,10 @@ class OnnxScorer:
         self.meta = ModelMeta.from_file(model_dir / "model_meta.json")
         self.version = self.meta.version
         model_path = _find_model_file(model_dir, self.meta.model_file)
+        with model_path.open("rb") as f:
+            if f.read(40).startswith(b"version https://git-lfs"):
+                raise FileNotFoundError(
+                    f"{model_path} is a Git LFS pointer, not the model. Install Git LFS, then run `git lfs pull`.")
         # Operator override (settings.yaml) wins over the bundle's own weights.
         self.label_weights = label_weights or self.meta.label_weights
         if self.label_weights is not None:

@@ -80,3 +80,16 @@ def test_find_model_file(tmp_path):
     assert _find_model_file(tmp_path, "other.onnx").name == "other.onnx"
     (tmp_path / "model.onnx").write_bytes(b"x")
     assert _find_model_file(tmp_path, None).name == "model.onnx"
+
+
+def test_lfs_pointer_gives_clear_error(tmp_path):
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    from app.model import OnnxScorer
+    (tmp_path / "model_meta.json").write_text(json.dumps(
+        {"version": "v", "labels": ["safe", "bad"], "safe_label": "safe"}))
+    (tmp_path / "tokenizer.json").write_text("{}")
+    (tmp_path / "model.onnx").write_text(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 172266637\n")
+    with pytest.raises(FileNotFoundError, match="git lfs pull"):
+        OnnxScorer(tmp_path)

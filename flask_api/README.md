@@ -17,9 +17,12 @@ python -m venv .venv && .venv/Scripts/activate      # Windows; on Linux/macOS: s
 pip install -r requirements-dev.txt
 pytest -q
 
-# Download Intern 1's model (github.com/Gupta35251/BONC, ~180 MB) into models/current, then run:
-python scripts/fetch_model.py
+# The model is committed under models/current via Git LFS (install from https://git-lfs.com,
+# then `git lfs install` once). If you cloned before installing LFS, run `git lfs pull`.
 python wsgi.py
+
+# To update to Intern 1's latest model (github.com/Gupta35251/BONC), then commit it:
+python scripts/fetch_model.py
 
 # Or without a real model (dev only):
 MODEL_BACKEND=stub python wsgi.py
