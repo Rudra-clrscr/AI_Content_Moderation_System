@@ -138,8 +138,7 @@ def reload_model():
     previous = svc.models.version
     s = svc.settings
     try:
-        svc.models.load(s.model_backend, s.model_dir,
-                        intra_op_threads=s.intra_op_threads, inter_op_threads=s.inter_op_threads)
+        svc.models.load(s.model_backend, s.model_dir, **s.model_kwargs())
     except Exception as exc:
         return _error(500, "reload_failed", f"{type(exc).__name__}: {exc}", active_version=previous)
     return jsonify({"status": "reloaded", "previous_version": previous, "model_version": svc.models.version}), 200

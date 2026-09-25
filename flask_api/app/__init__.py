@@ -53,9 +53,7 @@ def create_app(
         # Load once at startup. On failure keep serving: /ready and /v1/moderate return 503
         # until an admin reload succeeds, instead of crash-looping the process.
         try:
-            models.load(settings.model_backend, settings.model_dir,
-                        intra_op_threads=settings.intra_op_threads,
-                        inter_op_threads=settings.inter_op_threads)
+            models.load(settings.model_backend, settings.model_dir, **settings.model_kwargs())
         except Exception:
             pass  # already logged with traceback in ModelRegistry.load
 

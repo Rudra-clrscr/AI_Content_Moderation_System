@@ -48,8 +48,7 @@ def _load_model(**_):
     global _pipeline
     s = _settings
     models = ModelRegistry()
-    models.load(s.model_backend, s.model_dir,
-                intra_op_threads=s.intra_op_threads, inter_op_threads=s.inter_op_threads)
+    models.load(s.model_backend, s.model_dir, **s.model_kwargs())
     _pipeline = Pipeline(Gate.from_yaml(s.gate_patterns_file), models, s.thresholds, s.latency_budget_ms)
 
 

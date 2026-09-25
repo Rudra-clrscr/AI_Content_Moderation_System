@@ -54,3 +54,29 @@ def test_registry_keeps_old_model_when_reload_fails(tmp_path):
 
 def test_stub_is_deterministic():
     assert StubScorer().score("abc").risk_score == StubScorer().score("abc").risk_score
+
+
+def test_weighted_risk_for_decision_labels():
+    w = {"safe": 0.0, "review": 0.5, "reject": 1.0}
+    assert _risk_from({"safe": 0.0, "review": 1.0, "reject": 0.0}, "safe", "softmax", w) == 0.5
+    assert _risk_from({"safe": 0.0, "review": 0.0, "reject": 1.0}, "safe", "softmax", w) == 1.0
+    assert _risk_from({"safe": 1.0, "review": 0.0, "reject": 0.0}, "safe", "softmax", w) == 0.0
+
+
+def test_meta_label_weights_validated(tmp_path):
+    with pytest.raises(ValueError, match="must match labels"):
+        ModelMeta.from_file(_meta(tmp_path, label_weights={"safe": 0.0}))
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        ModelMeta.from_file(_meta(tmp_path, label_weights={"safe": 0.0, "violation": 2.0}))
+
+
+def test_find_model_file(tmp_path):
+    from app.model import _find_model_file
+    (tmp_path / "model_int8.onnx").write_bytes(b"x")
+    assert _find_model_file(tmp_path, None).name == "model_int8.onnx"
+    (tmp_path / "other.onnx").write_bytes(b"x")
+    with pytest.raises(FileNotFoundError, match="multiple"):
+        _find_model_file(tmp_path, None)
+    assert _find_model_file(tmp_path, "other.onnx").name == "other.onnx"
+    (tmp_path / "model.onnx").write_bytes(b"x")
+    assert _find_model_file(tmp_path, None).name == "model.onnx"

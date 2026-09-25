@@ -5,6 +5,7 @@ Env overrides (all optional):
     MODERATION_MODE       sync | async
     MODEL_BACKEND         onnx | stub
     MODEL_DIR             directory holding the ONNX model bundle
+    MODEL_INTRA_OP_THREADS  ONNX Runtime threads per inference (default 4)
     THRESHOLD_ALLOW_BELOW float
     THRESHOLD_REJECT_AT   float
     CELERY_BROKER_URL / CELERY_RESULT_BACKEND
@@ -30,8 +31,9 @@ class Settings:
     mode: str = "sync"
     model_backend: str = "onnx"
     model_dir: Path = PROJECT_ROOT / "models" / "current"
-    intra_op_threads: int = 1
+    intra_op_threads: int = 4
     inter_op_threads: int = 1
+    label_weights: dict[str, float] | None = None
     thresholds: Thresholds = field(default_factory=lambda: Thresholds(0.30, 0.85))
     gate_patterns_file: Path = PROJECT_ROOT / "config" / "gate_patterns.yaml"
     max_chars: int = 10_000
@@ -44,6 +46,11 @@ class Settings:
     db_name: str | None = None
     db_user: str | None = None
     db_password: str | None = None
+
+    def model_kwargs(self) -> dict:
+        """Keyword args for ModelRegistry.load / OnnxScorer."""
+        return {"intra_op_threads": self.intra_op_threads, "inter_op_threads": self.inter_op_threads,
+                "label_weights": self.label_weights}
 
     def __post_init__(self) -> None:
         if self.mode not in ("sync", "async"):
@@ -69,8 +76,9 @@ def load_settings(path: str | Path | None = None) -> Settings:
         mode=env("MODERATION_MODE", raw.get("mode", "sync")),
         model_backend=env("MODEL_BACKEND", model.get("backend", "onnx")),
         model_dir=_resolve(env("MODEL_DIR", model.get("dir", "models/current"))),
-        intra_op_threads=int(model.get("intra_op_threads", 1)),
+        intra_op_threads=int(env("MODEL_INTRA_OP_THREADS", model.get("intra_op_threads", 4))),
         inter_op_threads=int(model.get("inter_op_threads", 1)),
+        label_weights=model.get("label_weights"),
         thresholds=Thresholds(
             allow_below=float(env("THRESHOLD_ALLOW_BELOW", thr.get("allow_below", 0.30))),
             reject_at=float(env("THRESHOLD_REJECT_AT", thr.get("reject_at", 0.85))),

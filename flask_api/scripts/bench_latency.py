@@ -40,8 +40,7 @@ def main() -> int:
 
     s = load_settings()
     gate = Gate.from_yaml(s.gate_patterns_file)
-    scorer = OnnxScorer(args.model_dir or s.model_dir,
-                        intra_op_threads=s.intra_op_threads, inter_op_threads=s.inter_op_threads)
+    scorer = OnnxScorer(args.model_dir or s.model_dir, **s.model_kwargs())
 
     gate_ms, model_ms = [], []
     for i in range(args.n):
