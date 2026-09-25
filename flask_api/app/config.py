@@ -9,15 +9,23 @@ Env overrides (all optional):
     THRESHOLD_REJECT_AT   float
     CELERY_BROKER_URL / CELERY_RESULT_BACKEND
     ADMIN_TOKEN           enables POST /v1/admin/model/reload when set
+    RESULT_SINK           sql | log
+    DB_SERVER, DB_NAME    SQL Server host and database
+    DB_USER, DB_PASSWORD  SQL auth; if DB_USER is unset, Windows auth (Trusted_Connection) is used
+    DB_DRIVER             ODBC driver name (default "ODBC Driver 18 for SQL Server")
+    DB_TRUST_SERVER_CERTIFICATE  yes | no (default yes; set no in production with a real cert)
+    DB_TIMEOUT_SECONDS    login timeout (default 5)
+
+Values can also come from flask_api/.env (gitignored); real env vars win.
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from dotenv import load_dotenv
 
 import yaml
+from dotenv import load_dotenv
 
 from app.routing import Thresholds
 
@@ -44,8 +52,14 @@ class Settings:
     db_name: str | None = None
     db_user: str | None = None
     db_password: str | None = None
+    db_driver: str = "ODBC Driver 18 for SQL Server"
+    db_trust_server_certificate: bool = True
+    db_timeout_seconds: int = 5
+    result_sink: str = "sql"
 
     def __post_init__(self) -> None:
+        if self.result_sink not in ("sql", "log"):
+            raise ValueError(f"result sink must be 'sql' or 'log', got {self.result_sink!r}")
         if self.mode not in ("sync", "async"):
             raise ValueError(f"mode must be 'sync' or 'async', got {self.mode!r}")
         if self.model_backend not in ("onnx", "stub"):
@@ -63,6 +77,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
     model = raw.get("model", {})
     thr = raw.get("thresholds", {})
     celery = raw.get("celery", {})
+    db = raw.get("database", {})
     env = os.environ.get
 
     return Settings(
@@ -86,4 +101,15 @@ def load_settings(path: str | Path | None = None) -> Settings:
         db_name=env("DB_NAME"),
         db_user=env("DB_USER"),
         db_password=env("DB_PASSWORD"),
+        db_driver=env("DB_DRIVER", db.get("driver", "ODBC Driver 18 for SQL Server")),
+        db_trust_server_certificate=_as_bool(
+            env("DB_TRUST_SERVER_CERTIFICATE", db.get("trust_server_certificate", True))),
+        db_timeout_seconds=int(env("DB_TIMEOUT_SECONDS", db.get("timeout_seconds", 5))),
+        result_sink=env("RESULT_SINK", raw.get("result_sink", "sql")),
     )
+
+
+def _as_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")

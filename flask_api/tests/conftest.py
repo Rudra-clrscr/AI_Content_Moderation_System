@@ -54,7 +54,8 @@ def gate_file(tmp_path):
 def make_settings(gate_file):
     def _make(**overrides):
         base = dict(gate_patterns_file=gate_file, thresholds=Thresholds(0.3, 0.85),
-                    model_backend="stub", max_chars=500, admin_token="secret")
+                    model_backend="stub", max_chars=500, admin_token="secret",
+                    result_sink="log")
         base.update(overrides)
         return Settings(**base)
     return _make

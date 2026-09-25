@@ -27,6 +27,7 @@ from app.sinks import LoggingSink, ResultSink, SqlServerSink
 
 log = logging.getLogger(__name__)
 TASK_NAME = "moderation.moderate"
+PERSIST_TASK_NAME = "moderation.persist_result"
 
 _settings = load_settings()
 celery_app = Celery("moderation", broker=_settings.celery_broker_url, backend=_settings.celery_result_backend)
@@ -40,7 +41,8 @@ celery_app.conf.update(
 )
 
 _pipeline: Pipeline | None = None
-_sink: ResultSink = SqlServerSink()
+# Unwrapped on purpose: a failed write is retried by persist_result_task below.
+_sink: ResultSink = SqlServerSink(_settings) if _settings.result_sink == "sql" else LoggingSink()
 
 
 @worker_process_init.connect
@@ -58,13 +60,25 @@ def run_moderation(payload: dict) -> dict:
     if _pipeline is None:
         _load_model()
     result = _pipeline.moderate(ModerationRequest.from_dict(payload))
-    _sink.emit(result)
+    try:
+        _sink.emit(result)
+    except Exception:
+        # Don't fail (and re-run inference for) the moderation task over a storage error:
+        # hand the finished result to a separate task that retries just the write.
+        log.exception("db write failed for %s, scheduling retry", result["request_id"])
+        persist_result_task.apply_async(args=[result], countdown=5, queue=_settings.celery_queue)
     return result
 
 
 @celery_app.task(name=TASK_NAME, autoretry_for=(ConnectionError,), retry_backoff=True, max_retries=3)
 def moderate_task(payload: dict) -> dict:
     return run_moderation(payload)
+
+
+@celery_app.task(name=PERSIST_TASK_NAME, autoretry_for=(Exception,), retry_backoff=True,
+                 retry_backoff_max=600, max_retries=8)
+def persist_result_task(result: dict) -> None:
+    _sink.emit(result)
 
 
 def celery_enqueue(settings: Settings):

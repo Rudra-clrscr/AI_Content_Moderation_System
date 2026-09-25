@@ -75,21 +75,36 @@ job failed.
 | 503 | `model_not_ready` (sync), `queue_unavailable` (async) |
 | 500 | `inference_failed` |
 
-## Who writes to SQL Server: proposal
+## Who writes to SQL Server
 
 Whichever process produces the **final** result calls `sink.emit(result)` exactly once:
 
 - In sync mode, and for gate blocks, that's the Flask process.
 - In async mode, when the model runs, that's the Celery worker (`app/tasks.py::run_moderation`).
 
-Intern 3 would implement a `ResultSink`, for example a `SqlServerSink` or an
-"enqueue a DB-write task" sink, and it plugs in without changing the API code.
-Today the default `LoggingSink` just writes JSON lines, with `content` left out.
+`SqlServerSink` (`app/sinks.py`) inserts one row into `dbo.moderation_events`
+(`sql/create_table.sql`). `content` itself is not stored, only `content_sha256`.
+Set `result_sink: log` to write JSON log lines instead.
+
+A storage failure never costs the caller its decision:
+
+- **Flask:** the sink is wrapped in `FailSafeSink`. A failed write is logged as
+  `db_write_failed`, with the full result minus content so it can be replayed,
+  and the API still returns `200` with the decision.
+- **Celery worker:** a failed write is handed to the `moderation.persist_result`
+  task, which retries only the write, with backoff, up to 8 times. Inference
+  doesn't run again.
+- **Duplicates:** inserts are idempotent on `request_id`. A retried or
+  redelivered job that hits the primary key is treated as already stored.
+
+Connection settings come from the environment or `flask_api/.env`: `DB_SERVER`,
+`DB_NAME`, `DB_USER`/`DB_PASSWORD` (if these are unset, Windows authentication is
+used), `DB_DRIVER`, `DB_TRUST_SERVER_CERTIFICATE` and `DB_TIMEOUT_SECONDS`.
 
 ## Open questions for Intern 3
 
-1. Should the sink write to SQL Server synchronously, or enqueue a separate write task so the API latency doesn't include the DB write?
-2. Should raw `content` be stored, or only `content_sha256` plus a reference to the platform's own content table?
-3. Should `request_id` be the primary key of the moderation-events table? It's a UUID4 string today.
+1. In sync mode the insert still happens inside the request. Should it move to a background writer or queue so API latency doesn't include the DB round-trip?
+2. ~~Should raw `content` be stored?~~ Settled: hash only.
+3. ~~Should `request_id` be the primary key?~~ Settled: yes.
 4. Queue and broker names: I've assumed queue `moderation` and Redis DBs 0 (broker) and 1 (results). Are those right?
 5. Do the four `content_type` values match your schema's enum?
