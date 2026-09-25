@@ -20,28 +20,32 @@ _SEVERITY = {Decision.ALLOW: 0, Decision.REVIEW: 1, Decision.REJECT: 2}
 
 @dataclass(frozen=True)
 class Thresholds:
-    """score < allow_below -> ALLOW; score >= reject_at -> REJECT; otherwise REVIEW."""
+    """risk <= allow_max -> ALLOW; risk >= reject_min -> REJECT; otherwise REVIEW.
 
-    allow_below: float
-    reject_at: float
+    Equivalently, on a safety scale (1 - risk): safety >= 1 - allow_max is safe,
+    safety <= 1 - reject_min is rejected.
+    """
+
+    allow_max: float
+    reject_min: float
 
     def __post_init__(self) -> None:
-        if not 0.0 <= self.allow_below <= self.reject_at <= 1.0:
+        if not 0.0 <= self.allow_max <= self.reject_min <= 1.0:
             raise ValueError(
-                f"need 0 <= allow_below <= reject_at <= 1, got "
-                f"allow_below={self.allow_below}, reject_at={self.reject_at}"
+                f"need 0 <= allow_max <= reject_min <= 1, got "
+                f"allow_max={self.allow_max}, reject_min={self.reject_min}"
             )
 
     def as_dict(self) -> dict[str, float]:
-        return {"allow_below": self.allow_below, "reject_at": self.reject_at}
+        return {"allow_max": self.allow_max, "reject_min": self.reject_min}
 
 
 def route(score: float, thresholds: Thresholds, *, floor: Decision = Decision.ALLOW) -> Decision:
     """Map a risk score to a decision. `floor` lets a gate "flag" force at least REVIEW."""
-    if score >= thresholds.reject_at:
+    if score >= thresholds.reject_min:
         decision = Decision.REJECT
-    elif score >= thresholds.allow_below:
-        decision = Decision.REVIEW
-    else:
+    elif score <= thresholds.allow_max:
         decision = Decision.ALLOW
+    else:
+        decision = Decision.REVIEW
     return max(decision, floor, key=lambda d: d.severity)

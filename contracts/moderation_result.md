@@ -42,7 +42,7 @@ Layer 1 gate blocks the content:
   "gate_matches": [],
   "gate_version": 1,
   "model_version": "deberta-v3-small-int8-2026.10.01",
-  "thresholds": {"allow_below": 0.3, "reject_at": 0.85},
+  "thresholds": {"allow_max": 0.3, "reject_min": 0.7},
   "latency_ms": {"gate": 0.02, "inference": 11.4, "total": 11.6},
   "decided_at": "2026-09-25T14:03:11.204+00:00"
 }

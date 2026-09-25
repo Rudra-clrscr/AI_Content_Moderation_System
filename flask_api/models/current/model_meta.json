@@ -1,0 +1,8 @@
+{
+  "version": "deberta-v3-small-int8-bonc-v1",
+  "labels": ["safe", "review", "reject"],
+  "safe_label": "safe",
+  "max_length": 256,
+  "activation": "softmax",
+  "pad_to_max_length": false
+}
