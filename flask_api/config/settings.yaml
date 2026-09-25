@@ -6,9 +6,14 @@ mode: sync                 # sync  -> inference inline, final decision in the re
 
 model:
   backend: onnx            # onnx | stub   (stub = dev only, never deploy)
-  dir: models/current      # must contain model.onnx, tokenizer.json, model_meta.json
-  intra_op_threads: 1      # 1 thread per worker process keeps latency predictable on CPU
+  dir: models/current      # fetch with: python scripts/fetch_model.py
+  intra_op_threads: 4      # measured on bonc-v1: 70-token text p95 58 ms @1 thread, 28 ms @4.
+                           # Keep workers x threads <= CPU cores.
   inter_op_threads: 1
+  label_weights:           # risk = sum(P(label) * weight). bonc-v1's labels are decisions,
+    safe: 0.0              # so 1 - P(safe) would score a confident "review" as ~1.0 (reject).
+    review: 0.5            # Remove once model_meta.json ships its own label_weights.
+    reject: 1.0
 
 thresholds:                # placeholder values until Intern 1's model is calibrated
   allow_below: 0.30        # score <  allow_below              -> allow

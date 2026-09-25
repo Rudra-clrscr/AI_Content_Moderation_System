@@ -17,12 +17,12 @@ python -m venv .venv && .venv/Scripts/activate      # Windows; on Linux/macOS: s
 pip install -r requirements-dev.txt
 pytest -q
 
-# Run it with no real model (dev only):
-MODEL_BACKEND=stub python wsgi.py
-
-# Or with a fake ONNX bundle, to exercise the real ONNX code path:
-pip install onnx && python scripts/make_dummy_model.py models/current
+# Download Intern 1's model (github.com/Gupta35251/BONC, ~180 MB) into models/current, then run:
+python scripts/fetch_model.py
 python wsgi.py
+
+# Or without a real model (dev only):
+MODEL_BACKEND=stub python wsgi.py
 
 curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
   -d '{"content":"Bulk cotton yarn supplier","content_type":"product_listing","content_id":"LST-1"}'
@@ -51,7 +51,7 @@ app/
   api.py        Flask endpoints
   config.py     settings.yaml + env overrides
 config/         settings.yaml, gate_patterns.yaml (private term lists go in config/private/, gitignored)
-scripts/        bench_latency.py, make_dummy_model.py
+scripts/        fetch_model.py, bench_latency.py, make_dummy_model.py
 tests/
 ```
 

@@ -48,6 +48,8 @@ class ModelMeta:
     activation: str = "softmax"       # softmax (multi-class) | sigmoid (multi-label / single logit)
     pad_to_max_length: bool = False   # true only if the export has a fixed sequence axis
     output_name: str | None = None    # default: first model output
+    model_file: str | None = None     # default: model.onnx, else the bundle's only *.onnx
+    label_weights: dict[str, float] | None = None  # per-label risk weight; see _risk_from
     extra: dict = field(default_factory=dict)
 
     @classmethod
@@ -59,25 +61,33 @@ class ModelMeta:
             raise ValueError(f"safe_label {meta.safe_label!r} not in labels {meta.labels}")
         if meta.activation not in ("softmax", "sigmoid"):
             raise ValueError(f"activation must be softmax or sigmoid, got {meta.activation!r}")
+        if meta.label_weights is not None:
+            _validate_weights(meta.label_weights, meta.labels)
         return meta
 
 
 class OnnxScorer:
     """Wraps one loaded model bundle. Construct once; `score` is thread-safe."""
 
-    def __init__(self, model_dir: str | Path, *, intra_op_threads: int = 1, inter_op_threads: int = 1):
+    def __init__(self, model_dir: str | Path, *, intra_op_threads: int = 4, inter_op_threads: int = 1,
+                 label_weights: dict[str, float] | None = None):
         import numpy as np
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
         self._np = np
         model_dir = Path(model_dir)
-        for name in ("model.onnx", "tokenizer.json", "model_meta.json"):
+        for name in ("tokenizer.json", "model_meta.json"):
             if not (model_dir / name).exists():
                 raise FileNotFoundError(f"model bundle incomplete: {model_dir / name} missing")
 
         self.meta = ModelMeta.from_file(model_dir / "model_meta.json")
         self.version = self.meta.version
+        model_path = _find_model_file(model_dir, self.meta.model_file)
+        # Operator override (settings.yaml) wins over the bundle's own weights.
+        self.label_weights = label_weights or self.meta.label_weights
+        if self.label_weights is not None:
+            _validate_weights(self.label_weights, self.meta.labels)
 
         self.tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
         self.tokenizer.enable_truncation(max_length=self.meta.max_length)
@@ -91,7 +101,7 @@ class OnnxScorer:
         opts.inter_op_num_threads = inter_op_threads
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self.session = ort.InferenceSession(
-            str(model_dir / "model.onnx"), sess_options=opts, providers=["CPUExecutionProvider"]
+            str(model_path), sess_options=opts, providers=["CPUExecutionProvider"]
         )
 
         self.input_names = [i.name for i in self.session.get_inputs()]
@@ -126,7 +136,7 @@ class OnnxScorer:
             probs = 1.0 / (1.0 + np.exp(-logits))
         label_scores = {lbl: float(p) for lbl, p in zip(self.meta.labels, probs)}
         return ScoreResult(
-            risk_score=_risk_from(label_scores, self.meta.safe_label, self.meta.activation),
+            risk_score=_risk_from(label_scores, self.meta.safe_label, self.meta.activation, self.label_weights),
             label=max(label_scores, key=label_scores.get),
             label_scores=label_scores,
             model_version=self.version,
@@ -134,7 +144,38 @@ class OnnxScorer:
         )
 
 
-def _risk_from(label_scores: dict[str, float], safe_label: str, activation: str) -> float:
+def _find_model_file(model_dir: Path, declared: str | None) -> Path:
+    if declared:
+        path = model_dir / declared
+        if not path.exists():
+            raise FileNotFoundError(f"model bundle incomplete: {path} (model_file in meta) missing")
+        return path
+    if (model_dir / "model.onnx").exists():
+        return model_dir / "model.onnx"
+    candidates = sorted(model_dir.glob("*.onnx"))
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        raise FileNotFoundError(f"model bundle incomplete: no .onnx file in {model_dir}")
+    raise FileNotFoundError(
+        f"multiple .onnx files in {model_dir} ({', '.join(c.name for c in candidates)}); "
+        "set model_file in model_meta.json")
+
+
+def _validate_weights(weights: dict[str, float], labels: list[str]) -> None:
+    if set(weights) != set(labels):
+        raise ValueError(f"label_weights keys {sorted(weights)} must match labels {sorted(labels)}")
+    if not all(0.0 <= float(w) <= 1.0 for w in weights.values()):
+        raise ValueError(f"label_weights must be in [0, 1], got {weights}")
+
+
+def _risk_from(label_scores: dict[str, float], safe_label: str, activation: str,
+               weights: dict[str, float] | None = None) -> float:
+    if weights:
+        # Ordinal / decision-style labels (e.g. safe < review < reject): expected severity.
+        if activation == "softmax":
+            return min(1.0, sum(p * weights[lbl] for lbl, p in label_scores.items()))
+        return max(p * weights[lbl] for lbl, p in label_scores.items())
     if len(label_scores) == 1:                      # single-logit binary model: score is P(violation)
         return next(iter(label_scores.values()))
     if activation == "softmax":

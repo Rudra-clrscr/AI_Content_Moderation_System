@@ -8,7 +8,8 @@ Each model release is one directory. The Flask service loads it from `MODEL_DIR`
 
 ```
 <model_dir>/
-  model.onnx         # INT8-quantized ONNX export
+  model.onnx         # INT8-quantized ONNX export (any *.onnx name works if it's the only one,
+                     # or name it with model_file in the meta)
   tokenizer.json     # HF *fast* tokenizer file (tokenizer.save_pretrained() writes it)
   model_meta.json    # see below
 ```
@@ -44,14 +45,24 @@ Each model release is one directory. The Flask service loads it from `MODEL_DIR`
 | `activation` | no (`softmax`) | `softmax` for a single-label classifier, `sigmoid` for a multi-label one. |
 | `pad_to_max_length` | no (false) | Set to true only if the export has a fixed sequence length. |
 | `output_name` | no | The output tensor to read, if it isn't the first one. |
+| `model_file` | no | The ONNX file name, if it isn't `model.onnx` and there's more than one `.onnx` file. |
+| `label_weights` | no | The risk weight of each label, from 0 to 1, with every label listed. Required when the labels are ordered decisions (see below). |
 
 Any extra keys (training date, eval metrics, and so on) are kept but ignored.
 
 ## How the risk score is computed
 
 - Single logit: `risk = sigmoid(logit)`
+- `label_weights` set: `risk = Σ P(label) × weight` for softmax, or `max P(label) × weight` for sigmoid
 - `softmax`: `risk = 1 − P(safe_label)`
 - `sigmoid`, several labels: `risk = max P(label)` over the non-safe labels
+
+**Decision-style labels.** If the labels are themselves decisions, for example
+`["safe", "review", "reject"]` in bonc-v1, then `1 − P(safe)` gives a confident
+`review` a score of about 1.0, which rejects it. Ship
+`"label_weights": {"safe": 0, "review": 0.5, "reject": 1}` in the meta for such
+models. Flask can also override the weights in `settings.yaml` under `model.label_weights`,
+which is what it does for bonc-v1 today.
 
 The Flask thresholds (`allow_below`, `reject_at`) apply to this `risk` value. When the
 model is retrained, please send recommended thresholds along with it, for example the
