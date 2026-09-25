@@ -1,0 +1,58 @@
+# Layer 1 deterministic gate.
+#
+# Text is normalised before matching (Unicode NFKC, casefolded, zero-width
+# characters stripped, whitespace collapsed), so write patterns in lowercase.
+#
+# action:
+#   block -> reject immediately, model is skipped
+#   flag  -> model still runs, but the decision is raised to at least "review"
+#
+# rules[].patterns   : Python regexes
+# rules[].terms      : literal words/phrases; escaped and word-bounded automatically
+# rules[].terms_file : path to a newline-separated term list (for lists that
+#                      shouldn't live in git, e.g. the slur list from policy)
+
+version: 1
+
+rules:
+  - id: slur.blocklist
+    category: hate
+    action: block
+    description: Slurs / hate terms supplied by the policy team.
+    terms_file: config/private/slurs.txt      # optional; skipped if missing
+
+  - id: spam.url_shortener
+    category: spam
+    action: flag
+    description: Shortened links hide the destination.
+    patterns:
+      - '\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|cutt\.ly|rb\.gy)/\S+'
+
+  - id: spam.blacklisted_domain
+    category: spam
+    action: block
+    description: Domains known to host scams or malware.
+    terms: []                                   # e.g. "example-scam.biz"
+
+  - id: scam.advance_fee
+    category: fraud
+    action: block
+    description: Classic advance-fee / guaranteed-return wording.
+    patterns:
+      - '\bguaranteed\s+(?:returns?|profits?)\s+of\s+\d+\s*%'
+      - '\b(?:double|triple)\s+your\s+(?:money|investment)\b'
+      - '\bpay\s+(?:a\s+)?(?:small\s+)?(?:processing|release|clearance)\s+fee\b'
+
+  - id: payment.off_platform
+    category: fraud
+    action: flag
+    description: Requests to pay via untraceable channels.
+    patterns:
+      - '\b(?:pay|payment|send)\b.{0,40}\b(?:gift\s*cards?|crypto|bitcoin|usdt|western\s+union|moneygram)\b'
+
+  - id: contact.messenger_redirect
+    category: spam
+    action: flag
+    description: Pushing users off-platform to messaging apps.
+    patterns:
+      - '\b(?:whatsapp|telegram|signal)\b.{0,20}\+?\d[\d\s-]{7,}'
