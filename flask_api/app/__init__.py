@@ -11,7 +11,7 @@ from app.config import Settings, load_settings
 from app.gate import Gate
 from app.model import ModelRegistry, Scorer
 from app.pipeline import ModerationRequest, Pipeline
-from app.sinks import LoggingSink, ResultSink
+from app.sinks import LoggingSink, ResultSink, SqlServerSink
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ def create_app(
         pipeline=Pipeline(Gate.from_yaml(settings.gate_patterns_file), models,
                           settings.thresholds, settings.latency_budget_ms),
         models=models,
-        sink=sink or LoggingSink(),
+        sink=sink or SqlServerSink(),
         enqueue=enqueue,
         fetch_result=fetch_result,
     )

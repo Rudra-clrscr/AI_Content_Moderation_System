@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from dotenv import load_dotenv
 
 import yaml
 
@@ -22,7 +23,7 @@ from app.routing import Thresholds
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SETTINGS = PROJECT_ROOT / "config" / "settings.yaml"
-
+load_dotenv(PROJECT_ROOT / ".env")
 
 @dataclass
 class Settings:
@@ -39,6 +40,10 @@ class Settings:
     celery_result_backend: str = "redis://localhost:6379/1"
     celery_queue: str = "moderation"
     admin_token: str | None = None
+    db_server: str | None = None
+    db_name: str | None = None
+    db_user: str | None = None
+    db_password: str | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in ("sync", "async"):
@@ -77,4 +82,8 @@ def load_settings(path: str | Path | None = None) -> Settings:
         celery_result_backend=env("CELERY_RESULT_BACKEND", celery.get("result_backend", "redis://localhost:6379/1")),
         celery_queue=celery.get("queue", "moderation"),
         admin_token=env("ADMIN_TOKEN") or None,
+        db_server=env("DB_SERVER"),
+        db_name=env("DB_NAME"),
+        db_user=env("DB_USER"),
+        db_password=env("DB_PASSWORD"),
     )
