@@ -53,7 +53,7 @@ def gate_file(tmp_path):
 @pytest.fixture
 def make_settings(gate_file):
     def _make(**overrides):
-        base = dict(gate_patterns_file=gate_file, thresholds=Thresholds(0.3, 0.85),
+        base = dict(gate_patterns_file=gate_file, thresholds=Thresholds(0.3, 0.7),
                     model_backend="stub", max_chars=500, admin_token="secret",
                     result_sink="log")
         base.update(overrides)

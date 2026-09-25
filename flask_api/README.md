@@ -61,8 +61,8 @@ tests/
 ## Configuration
 
 Everything lives in `config/settings.yaml`. These env vars override it:
-`MODERATION_MODE`, `MODEL_BACKEND`, `MODEL_DIR`, `THRESHOLD_ALLOW_BELOW`,
-`THRESHOLD_REJECT_AT`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` and `ADMIN_TOKEN`.
+`MODERATION_MODE`, `MODEL_BACKEND`, `MODEL_DIR`, `THRESHOLD_ALLOW_MAX`,
+`THRESHOLD_REJECT_MIN`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` and `ADMIN_TOKEN`.
 
 **Sync vs. async.** Set `mode: async` to have Flask run only the gate inline and queue
 model inference to Celery. The worker is started with:
