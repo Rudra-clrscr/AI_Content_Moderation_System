@@ -31,7 +31,7 @@ curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
   -d '{"content":"Bulk cotton yarn supplier","content_type":"product_listing","content_id":"LST-1"}'
 ```
 
-For a live walkthrough in the browser, see [DEMO.md](DEMO.md).
+For a live demonstration (setup commands, run of show and a tested sentence bank), see [DEMO_GUIDE.md](DEMO_GUIDE.md).
 
 ## Endpoints
 

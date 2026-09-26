@@ -12,5 +12,11 @@ Stack: DeBERTa-v3-small (ONNX INT8) + Flask + SQL Server (Celery/Redis for async
 | Flask API: regex gate, inference, threshold routing | AI Backend & API Lead | [flask_api/](flask_api/) |
 | SQL Server schema & async pipeline | Data Systems & Integration Lead | _TBD_ |
 
+## Live demo
+
+To run the service on your own computer and demonstrate it in a browser, follow
+[flask_api/DEMO_GUIDE.md](flask_api/DEMO_GUIDE.md). It covers setup in Command
+Prompt, a 10-minute run of show, and a bank of tested example sentences.
+
 Interfaces between the tracks are documented in [contracts/](contracts/).
 Please work on feature branches and merge through pull requests.
