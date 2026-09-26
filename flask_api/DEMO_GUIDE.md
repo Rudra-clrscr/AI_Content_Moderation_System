@@ -1,13 +1,22 @@
 # Demo guide: BONC Content Moderation
 
-This guide covers how to set up and run a live demonstration of the moderation
-service on your own computer. It includes the exact sentences to use and what
-each one will show.
+This guide covers how to run a live demonstration of the moderation service:
+what to click, what to say, and a bank of tested sentences to paste.
 
-Every sentence in this guide was checked against the real model
+Every sentence here was checked against the real model
 (`deberta-v3-small-int8-bonc-v1`), so the decision listed next to it is what
 you will see. **Paste the sentences exactly as written.** The v1 model can
 change its answer when a few words are added or removed.
+
+## Start here: set up and start the server
+
+The setup commands depend on your terminal. Pick your guide, follow it until
+the server is running, then come back here to section 2.
+
+| Your prompt looks like | Terminal | Guide |
+|---|---|---|
+| `PS C:\Users\you>` | PowerShell (also Windows Terminal and VS Code) | **[DEMO_GUIDE_POWERSHELL.md](DEMO_GUIDE_POWERSHELL.md)** |
+| `C:\Users\you>` | Command Prompt | **[DEMO_GUIDE_CMD.md](DEMO_GUIDE_CMD.md)** |
 
 ---
 
@@ -29,82 +38,20 @@ Each piece of content passes through four steps:
 
 ---
 
-## 2. One-time setup on a new computer (Command Prompt)
+## 2. Check the page and warm up
 
-You need:
-- **Python 3.12 or newer**, from python.org. Tick "Add Python to PATH" during install.
-- **Git for Windows**, which already includes Git LFS.
-
-Open **Command Prompt** (press `Win + R`, type `cmd`, press Enter) and run:
-
-```cmd
-git lfs install
-git clone https://github.com/Rudra-clrscr/AI_Content_Moderation_System.git
-cd AI_Content_Moderation_System\flask_api
-python -m venv .venv
-.venv\Scripts\activate.bat
-pip install -r requirements.txt
-```
-
-Check that the model downloaded completely. It should be about **172 MB**, not a few hundred bytes:
-
-```cmd
-dir models\current
-```
-
-If `model_int8.onnx` is tiny, run `git lfs pull` and check again.
-
----
-
-## 3. Start the server (every time)
-
-In Command Prompt, starting from the `AI_Content_Moderation_System` folder:
-
-```cmd
-cd flask_api
-.venv\Scripts\activate.bat
-set DEMO_PAGE=1
-set RESULT_SINK=log
-python -m waitress --port=8000 wsgi:app
-```
-
-Wait for `Serving on http://0.0.0.0:8000`. Leave this window open, because
-closing it stops the server.
-
-Open the demo page from a **second** Command Prompt window, or just type the address into your browser:
-
-```cmd
-start http://127.0.0.1:8000/demo
-```
-
-To stop the server, click the first window and press `Ctrl + C`.
-
-> **Why two settings?** `DEMO_PAGE=1` turns on the demo page, which is off by
-> default so it never appears in production. `RESULT_SINK=log` writes decisions
-> to the console instead of SQL Server, so the demo doesn't need a database.
->
-> **PowerShell instead of cmd?** Use `.venv\Scripts\Activate.ps1`,
-> `$env:DEMO_PAGE = "1"` and `$env:RESULT_SINK = "log"`.
-
-### Check it is working
-
-The chips at the top of the page should read:
+Open **http://127.0.0.1:8000/demo**. The chips at the top of the page should read:
 
 `status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v1` · `gate rules 6` · `allow ≤ 0.30 · reject ≥ 0.70 (risk)`
 
-You can also check from Command Prompt:
-
-```cmd
-curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/ready
-```
+If they don't, see section 6.
 
 **Warm up before the audience arrives.** Click each example button once, then
 refresh the page (`F5`) to clear the session table.
 
 ---
 
-## 4. Run of show (about 10 minutes)
+## 3. Run of show (about 10 minutes)
 
 The page has eight example buttons. Click them in this order. Each one also has
 a direct link (`http://127.0.0.1:8000/demo#1` to `#8`), which is handy if you
@@ -120,18 +67,16 @@ prepare browser tabs in advance.
 | 6 | **REJECT**: double your money | reject by the **gate**; the model step is struck out | "Obvious scams never reach the model. The rule check costs about 0.05 ms, so it's a free first filter." |
 | 7 | **REJECT**: scumbag | reject by the gate | "An abusive-language blocklist. In production it also loads the policy team's full list from a private file." |
 | 8 | **REJECT**: phishing domain | reject by the gate | "Known scam domains are blocked outright. Adding one is a one-line config change, with no retraining needed." |
-| 9 | Paste sentences from section 5 | — | Take requests from the audience, using the sentence bank below. |
+| 9 | Paste sentences from section 4 | — | Take requests from the audience, using the sentence bank below. |
 | 10 | Expand **Full result payload** | — | "This is exactly what goes into the audit table: score, decision, model and rule versions, and thresholds. Every decision can be traced later." |
 
 Finish on the **This session** table, which shows the count of each decision and the mean inference time.
 
----
-
-## 5. Sentence bank
+## 4. Sentence bank
 
 Copy a sentence into the **Content** box, pick the content type, and click **Moderate** (or press `Ctrl + Enter`).
 
-### 5.1 Allowed: normal business listings
+### 4.1 Allowed: normal business listings
 
 | Sentence | Content type | Result |
 |---|---|---|
@@ -145,7 +90,7 @@ Copy a sentence into the **Content** box, pick the content type, and click **Mod
 
 **Talking point:** aggressive but legitimate sales language ("70% off", "hurry") is still allowed.
 
-### 5.2 Review: the model is unsure
+### 4.2 Review: the model is unsure
 
 | Sentence | Content type | Result |
 |---|---|---|
@@ -154,7 +99,7 @@ Copy a sentence into the **Content** box, pick the content type, and click **Mod
 | Our competitor sells fake products, do not trust them | Post | review · 0.505 |
 | Limited stock! Contact us on WhatsApp for wholesale prices, full payment in advance only. | Advertisement | review · 0.452 |
 
-### 5.3 Review: a rule flag overrides a "safe" model score
+### 4.3 Review: a rule flag overrides a "safe" model score
 
 | Sentence | Content type | Model alone | Final |
 |---|---|---|---|
@@ -166,7 +111,7 @@ payment channel that's risky for buyers, and a person checks it."
 
 For contrast, paste the basmati sentence **without** the last sentence ("Payment accepted via bitcoin."). It comes back **allow**.
 
-### 5.4 Rejected by the model
+### 4.4 Rejected by the model
 
 | Sentence | Content type | Result |
 |---|---|---|
@@ -175,7 +120,7 @@ For contrast, paste the basmati sentence **without** the last sentence ("Payment
 | Earn 50000 per week from home!!! No experience needed, limited slots, DM now | Advertisement | reject · 0.998 |
 | Congratulations! You have won a lottery of 10 lakh rupees. Pay the processing charges to receive it. | Post | reject · 0.894 |
 
-### 5.5 Rejected by the gate: model not called
+### 4.5 Rejected by the gate: model not called
 
 | Sentence | Content type | Rule |
 |---|---|---|
@@ -190,7 +135,7 @@ For contrast, paste the basmati sentence **without** the last sentence ("Payment
 
 **Talking point:** "Inference shows *skipped*, and the whole decision took well under a millisecond."
 
-### 5.6 Tricks the gate sees through
+### 4.6 Tricks the gate sees through
 
 Before matching, the gate normalises text: it ignores case, collapses extra spaces, converts look-alike Unicode characters, and strips invisible characters.
 
@@ -200,7 +145,7 @@ Before matching, the gate normalises text: it ignores case, collapses extra spac
 | Our supplier is a ｓｃｕｍｂａｇ, never order from them | Full-width look-alike letters | reject by gate |
 | Invest now and DOUBLE     YOUR     MONEY in 7 days | Capitals and extra spaces | reject by gate |
 
-### 5.7 The gate doesn't over-block
+### 4.7 The gate doesn't over-block
 
 These sentences contain parts of blocked words or phrases, but not the phrases themselves. They pass the gate, and the model allows them.
 
@@ -212,9 +157,7 @@ These sentences contain parts of blocked words or phrases, but not the phrases t
 
 **Talking point:** "Rules match whole words and phrases, so honest listings aren't caught by accident."
 
----
-
-## 6. Gate rule reference
+## 5. Gate rule reference
 
 The rules live in `flask_api/config/gate_patterns.yaml`.
 
@@ -231,52 +174,23 @@ The demo domains use reserved endings (`.example`, `.test`) on purpose, so no re
 
 ---
 
-## 7. Optional: calling the API from Command Prompt
+## 6. Troubleshooting on the page
 
-This shows that the page is only a front end: the same API serves any client. Run these while the server is running.
+For terminal and setup problems, see the troubleshooting section of your terminal guide
+([PowerShell](DEMO_GUIDE_POWERSHELL.md#6-troubleshooting-powershell) or
+[Command Prompt](DEMO_GUIDE_CMD.md#6-troubleshooting-command-prompt)).
 
-Allowed listing:
-```cmd
-curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/json" -d "{\"content\": \"LED panel lights, 12W to 48W, BIS certified. Test certificates provided with every order.\", \"content_type\": \"product_listing\", \"content_id\": \"LST-1001\"}"
-```
-
-Blocked by the gate:
-```cmd
-curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/json" -d "{\"content\": \"Invest now and double your money in 7 days\", \"content_type\": \"advertisement\"}"
-```
-
-Bad input is rejected cleanly instead of crashing the service:
-```cmd
-curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/json" -d "{\"content\": \"   \", \"content_type\": \"post\"}"
-curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/json" -d "{\"content\": \"Hello\", \"content_type\": \"tweet\"}"
-```
-
-The first returns `invalid_content`. The second returns `invalid_content_type` and lists the allowed types.
-
-Latency benchmark, in a second Command Prompt window with the virtual environment activated:
-```cmd
-python scripts\bench_latency.py
-```
-
-It prints p50 and p95 inference times against the 30 ms budget. On the development laptop, p95 is about 28 ms.
-Slower machines may report `OVER`. The budget assumes a 4-core server.
-
----
-
-## 8. Troubleshooting
-
-| Problem | Fix |
+| What you see | Cause and fix |
 |---|---|
-| `'python' is not recognized` | Reinstall Python with "Add Python to PATH" ticked, or use `py` instead of `python`. |
-| The page says `service unreachable` | The server window was closed or crashed. Start it again (section 3). |
-| `status not_ready` in the header | The model didn't load. Run `dir models\current`. If `model_int8.onnx` is tiny, run `git lfs pull`, then restart the server. |
-| The page shows **404 demo page disabled** | `set DEMO_PAGE=1` wasn't run in the same window before starting the server. |
-| Port 8000 already in use | Run `netstat -ano \| findstr :8000` to find the process, or start on another port: `python -m waitress --port=8080 wsgi:app`. |
+| **demo page disabled** | `DEMO_PAGE` wasn't set in the server's window. PowerShell and Command Prompt set it differently, so check your terminal guide's section 3. |
+| `service unreachable` in the header | The server window was closed or crashed. Start it again. |
+| `status not_ready` in the header | The model didn't load. Usually the model file wasn't downloaded: run `git lfs pull`, then restart the server. |
+| `gate rules` isn't 6 | You're running an older copy of the code. Run `git pull`, then restart the server. |
 | A sentence gives a different result | Check that it's pasted exactly. The v1 model is sensitive to small wording changes. |
 
 ---
 
-## 9. If you're asked about limitations
+## 7. If you're asked about limitations
 
 - **Model v1 is conservative.** Some legitimate text (for example "Family-run textile mill in Surat…") lands in review, and it misses some counterfeit listings ("replica watches"). The ML team is recalibrating it. Until then, the review queue catches its mistakes instead of wrongly rejecting content.
 - **The thresholds (0.30 / 0.70) are placeholders.** They'll be tuned once the model is recalibrated. They're configuration values, so changing them needs no code change.

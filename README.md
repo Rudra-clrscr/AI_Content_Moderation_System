@@ -14,9 +14,13 @@ Stack: DeBERTa-v3-small (ONNX INT8) + Flask + SQL Server (Celery/Redis for async
 
 ## Live demo
 
-To run the service on your own computer and demonstrate it in a browser, follow
-[flask_api/DEMO_GUIDE.md](flask_api/DEMO_GUIDE.md). It covers setup in Command
-Prompt, a 10-minute run of show, and a bank of tested example sentences.
+To run the service on your own computer and demonstrate it in a browser:
+
+1. Set up and start the server with the guide for your terminal:
+   [PowerShell](flask_api/DEMO_GUIDE_POWERSHELL.md) (prompt starts with `PS`) or
+   [Command Prompt](flask_api/DEMO_GUIDE_CMD.md).
+2. Run the demo with [flask_api/DEMO_GUIDE.md](flask_api/DEMO_GUIDE.md): a 10-minute
+   run of show and a bank of tested example sentences.
 
 Interfaces between the tracks are documented in [contracts/](contracts/).
 Please work on feature branches and merge through pull requests.
