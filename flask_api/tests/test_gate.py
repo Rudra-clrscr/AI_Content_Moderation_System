@@ -85,6 +85,26 @@ def test_terms_file_loaded(tmp_path):
     assert not g.check("comment").blocked
 
 
-def test_shipped_config_compiles():
+def test_shipped_config_loads_every_rule():
     from app.config import PROJECT_ROOT
-    Gate.from_yaml(PROJECT_ROOT / "config" / "gate_patterns.yaml")
+    g = Gate.from_yaml(PROJECT_ROOT / "config" / "gate_patterns.yaml")
+    assert len(g.rules) == 6  # no rule may be silently inactive
+
+
+@pytest.mark.parametrize("text,rule", [
+    ("Our supplier is a scumbag, never order from them", "abuse.blocklist"),
+    ("Verify your seller account at paypa1-verify.example today", "spam.blacklisted_domain"),
+])
+def test_shipped_demo_terms_block(text, rule):
+    from app.config import PROJECT_ROOT
+    r = Gate.from_yaml(PROJECT_ROOT / "config" / "gate_patterns.yaml").check(text)
+    assert r.blocked and r.matches[0].rule_id == rule
+
+
+@pytest.mark.parametrize("text", [
+    "Visit fast-cash-bonanza.examples.com",
+    "Ask about our go-to hellfire chilli sauce",
+])
+def test_shipped_demo_terms_are_word_bounded(text):
+    from app.config import PROJECT_ROOT
+    assert not Gate.from_yaml(PROJECT_ROOT / "config" / "gate_patterns.yaml").check(text).matches

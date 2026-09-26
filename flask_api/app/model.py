@@ -1,6 +1,6 @@
 """Model layer: ONNX Runtime session + tokenizer, loaded once and hot-swappable.
 
-The on-disk bundle format is the contract with Intern 1 — see
+The on-disk bundle format is the contract with the ML team — see
 contracts/model_bundle.md. onnxruntime / tokenizers / numpy are imported
 lazily so the gate, routing and API can be tested without them.
 """
@@ -189,7 +189,7 @@ def _risk_from(label_scores: dict[str, float], safe_label: str, activation: str,
 
 
 class StubScorer:
-    """Dev-only stand-in until Intern 1 ships a model. Never use in production."""
+    """Dev-only stand-in for when no model is available. Never use in production."""
 
     version = "stub-0"
 

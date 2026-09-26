@@ -9,7 +9,7 @@ Start a worker (from flask_api/):
     (on Windows dev boxes use --pool=solo)
 
 NOTE: queue names, broker and who writes to SQL Server are to be confirmed with
-Intern 3 — if their pipeline owns the worker, they can import `run_moderation`
+the data team — if their pipeline owns the worker, they can import `run_moderation`
 directly and ignore this module.
 """
 from __future__ import annotations
@@ -55,7 +55,7 @@ def _load_model(**_):
 
 
 def run_moderation(payload: dict) -> dict:
-    """Pure function the task wraps — callable from Intern 3's own worker if preferred."""
+    """Pure function the task wraps — callable from the data team's own worker if preferred."""
     if _pipeline is None:
         _load_model()
     result = _pipeline.moderate(ModerationRequest.from_dict(payload))

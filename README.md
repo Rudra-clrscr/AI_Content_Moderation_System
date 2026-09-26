@@ -8,9 +8,9 @@ Stack: DeBERTa-v3-small (ONNX INT8) + Flask + SQL Server (Celery/Redis for async
 
 | Track | Owner | Folder |
 |---|---|---|
-| NLP training & ONNX export | Intern 1 | _TBD_ |
-| Flask API: regex gate, inference, threshold routing | Intern 2 | [flask_api/](flask_api/) |
-| SQL Server schema & async pipeline | Intern 3 | _TBD_ |
+| NLP training & ONNX export | NLP Training & Optimization Lead | _TBD_ |
+| Flask API: regex gate, inference, threshold routing | AI Backend & API Lead | [flask_api/](flask_api/) |
+| SQL Server schema & async pipeline | Data Systems & Integration Lead | _TBD_ |
 
 Interfaces between the tracks are documented in [contracts/](contracts/).
 Please work on feature branches and merge through pull requests.

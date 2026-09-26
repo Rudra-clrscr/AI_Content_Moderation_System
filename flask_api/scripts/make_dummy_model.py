@@ -1,5 +1,5 @@
 """Generate a tiny fake model bundle (model.onnx + tokenizer.json + model_meta.json)
-for exercising the ONNX code path before Intern 1 ships a real model. Scores are meaningless.
+for exercising the ONNX code path before a real model is available. Scores are meaningless.
 
     pip install onnx
     python scripts/make_dummy_model.py models/current

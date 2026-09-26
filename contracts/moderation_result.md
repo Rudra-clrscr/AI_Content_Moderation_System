@@ -1,6 +1,6 @@
-# Contract: Moderation API and result payload (Intern 2 → Intern 3)
+# Contract: Moderation API and result payload (API team → Data team)
 
-**Status:** DRAFT. Proposed by Intern 2 and needs Intern 3's sign-off.
+**Status:** DRAFT. Proposed by the API team and needs the Data team's sign-off.
 **Producer:** `flask_api/app/pipeline.py` (`Pipeline._build`)
 **Hand-off point:** `flask_api/app/sinks.py` (`ResultSink.emit(result)`)
 
@@ -101,7 +101,7 @@ Connection settings come from the environment or `flask_api/.env`: `DB_SERVER`,
 `DB_NAME`, `DB_USER`/`DB_PASSWORD` (if these are unset, Windows authentication is
 used), `DB_DRIVER`, `DB_TRUST_SERVER_CERTIFICATE` and `DB_TIMEOUT_SECONDS`.
 
-## Open questions for Intern 3
+## Open questions for the Data team
 
 1. In sync mode the insert still happens inside the request. Should it move to a background writer or queue so API latency doesn't include the DB round-trip?
 2. ~~Should raw `content` be stored?~~ Settled: hash only.

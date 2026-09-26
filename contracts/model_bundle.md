@@ -1,6 +1,6 @@
-# Contract: Model bundle (Intern 1 → Intern 2)
+# Contract: Model bundle (ML team → API team)
 
-**Status:** DRAFT. Proposed by Intern 2 and needs Intern 1's sign-off.
+**Status:** DRAFT. Proposed by the API team and needs the ML team's sign-off.
 **Consumer:** `flask_api/app/model.py` (`OnnxScorer`)
 
 Each model release is one directory. The Flask service loads it from `MODEL_DIR`
@@ -38,7 +38,7 @@ Each model release is one directory. The Flask service loads it from `MODEL_DIR`
 
 | Field | Required | Meaning |
 |---|---|---|
-| `version` | yes | Unique ID. It's echoed as `model_version` in every result and logged by Intern 3. |
+| `version` | yes | Unique ID. It's echoed as `model_version` in every result and logged by the data layer. |
 | `labels` | yes | Label names in logit order. |
 | `safe_label` | yes | The "no violation" label. It must appear in `labels`. |
 | `max_length` | no (256) | The truncation length used in training. |
@@ -73,7 +73,7 @@ values that hit the target precision and recall on the validation set.
 The Flask layer applies **no** text preprocessing before tokenization. It passes the
 raw text to `tokenizer.json`, truncates to `max_length`, and adds the special tokens
 the tokenizer defines. If training did anything else (lowercasing, stripping URLs,
-joining a title and a body, and so on), tell Intern 2 so the two stay identical.
+joining a title and a body, and so on), tell the API team so the two stay identical.
 
 ## Verifying a bundle before handing it over
 

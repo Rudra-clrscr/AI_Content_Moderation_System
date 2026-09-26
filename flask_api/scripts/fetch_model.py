@@ -1,4 +1,4 @@
-"""Download Intern 1's model bundle into models/current (gitignored).
+"""Download the ML team's model bundle into models/current (gitignored).
 
     python scripts/fetch_model.py                       # latest from main
     python scripts/fetch_model.py --ref <commit-or-tag> # pin a specific release

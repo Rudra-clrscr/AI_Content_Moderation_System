@@ -1,4 +1,4 @@
-"""SQL Server connection helper (Intern 3 data layer).
+"""SQL Server connection helper (data layer).
 
 pyodbc is imported lazily so the API still starts on machines without an
 ODBC driver when the SQL sink isn't used. pyodbc enables ODBC connection

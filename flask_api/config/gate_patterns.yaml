@@ -15,11 +15,16 @@
 version: 1
 
 rules:
-  - id: slur.blocklist
-    category: hate
+  - id: abuse.blocklist
+    category: abuse
     action: block
-    description: Slurs / hate terms supplied by the policy team.
-    terms_file: config/private/slurs.txt      # optional; skipped if missing
+    description: Abusive language. The inline terms are demo entries; the full
+      slur list from the policy team is added from terms_file when present.
+    terms:
+      - moron
+      - scumbag
+      - go to hell
+    terms_file: config/private/slurs.txt      # optional, gitignored; skipped if missing
 
   - id: spam.url_shortener
     category: spam
@@ -32,7 +37,10 @@ rules:
     category: spam
     action: block
     description: Domains known to host scams or malware.
-    terms: []                                   # e.g. "example-scam.biz"
+    terms:                                      # demo entries on reserved TLDs (.example/.test)
+      - fast-cash-bonanza.example
+      - claim-free-gift.test
+      - paypa1-verify.example
 
   - id: scam.advance_fee
     category: fraud

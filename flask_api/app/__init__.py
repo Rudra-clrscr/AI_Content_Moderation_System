@@ -40,7 +40,7 @@ def create_app(
     fetch_result: FetchResult | None = None,
 ) -> Flask:
     """`scorer`, `sink`, `enqueue`, `fetch_result` are injection points for tests
-    and for Intern 3's integration; production uses the defaults."""
+    and for the data layer's integration; production uses the defaults."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = settings or load_settings()
     app = Flask(__name__, static_folder=None)  # only /demo serves a file, and only when enabled

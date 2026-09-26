@@ -15,7 +15,7 @@ model:
     review: 0.5            # Remove once model_meta.json ships its own label_weights.
     reject: 1.0
 
-thresholds:                # placeholder values until Intern 1's model is calibrated
+thresholds:                # placeholder values until the model is calibrated
   allow_max: 0.30          # risk <= 0.30         -> allow   (safety >= 0.70)
   reject_min: 0.70         # risk >= 0.70         -> reject  (safety <= 0.30)
                            # 0.30 < risk < 0.70   -> review

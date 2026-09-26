@@ -14,12 +14,12 @@ python -m waitress --port=8000 wsgi:app
 ```
 
 Open **http://127.0.0.1:8000/demo**. The header chips should read `status ready`,
-`model deberta-v3-small-int8-bonc-v1` and `allow ≤ 0.30 · reject ≥ 0.70`.
+`model deberta-v3-small-int8-bonc-v1`, `gate rules 6` and `allow ≤ 0.30 · reject ≥ 0.70`.
 
 **Warm up.** Click every example once before the audience arrives, then refresh
 the page. The first request after startup is slower.
 
-Each example also has a direct link, `/demo#1` to `/demo#6`, if you'd rather
+Each example also has a direct link, `/demo#1` to `/demo#8`, if you'd rather
 switch tabs than click.
 
 ## Run of show
@@ -32,8 +32,10 @@ switch tabs than click.
 | 4 | **REJECT**: bank details and OTP | reject, risk ≈ 1.00 | Phishing is caught by the model. |
 | 5 | **REJECT**: threat | reject | Abuse is caught too. |
 | 6 | **REJECT**: double your money | reject by the gate, and the pipeline shows the model as skipped | Obvious scams never reach the model. The gate costs about 0.05 ms, so it's a free short-circuit. |
-| 7 | Type your own text | — | Invite the audience to suggest something. |
-| 8 | Expand **Full result payload** | — | This is exactly what Intern 3's SQL Server table stores: score, decision, model and gate versions, and the thresholds used. So every decision can be audited later. |
+| 7 | **REJECT**: "scumbag" | reject by the gate | The abusive-language blocklist. In production it also loads the policy team's full slur list from a private file. |
+| 8 | **REJECT**: paypa1-verify domain | reject by the gate | Known phishing and scam domains are blocked outright. Adding one is a one-line config change, with no retraining. |
+| 9 | Type your own text | — | Invite the audience to suggest something. |
+| 10 | Expand **Full result payload** | — | This is exactly what the SQL Server audit table stores: score, decision, model and gate versions, and the thresholds used. So every decision can be audited later. |
 
 Finish on the **This session** table: the count of each decision and the mean inference time.
 
@@ -46,6 +48,6 @@ Finish on the **This session** table: the count of each decision and the mean in
 
 ## Honest caveats, if asked
 
-- The model is v1. Some legitimate business text lands in review (for example "family-run textile mill"), and it misses counterfeit listings ("replica watches"). Intern 1 is recalibrating it.
+- The model is v1. Some legitimate business text lands in review (for example "family-run textile mill"), and it misses counterfeit listings ("replica watches"). The ML team is recalibrating it.
 - The thresholds (0.3 / 0.7) are placeholders until then.
-- The slur word list (`config/private/slurs.txt`) comes from the policy team and isn't in the repo.
+- The abuse and blocked-domain lists hold a few demo entries. The production slur list is loaded from `config/private/slurs.txt`, which the policy team supplies and which isn't committed to git.
