@@ -134,7 +134,7 @@ def ready():
 
 @bp.post("/v1/admin/model/reload")
 def reload_model():
-    """Hot-swap to the bundle in MODEL_DIR (e.g. after Intern 1 ships a new version).
+    """Hot-swap to the bundle in MODEL_DIR (e.g. after the ML team ships a new version).
     Only swaps if the new model loads and warms up; otherwise the old one stays live."""
     svc = _svc()
     token = svc.settings.admin_token

@@ -1,4 +1,4 @@
-# flask_api: moderation service (Intern 2 track)
+# flask_api: moderation service
 
 This service wraps the DeBERTa-v3-small ONNX model in a Flask API. A request goes
 through three steps:
@@ -21,7 +21,7 @@ pytest -q
 # then `git lfs install` once). If you cloned before installing LFS, run `git lfs pull`.
 python wsgi.py
 
-# To update to Intern 1's latest model (github.com/Gupta35251/BONC), then commit it:
+# To update to the ML team's latest model (github.com/Gupta35251/BONC), then commit it:
 python scripts/fetch_model.py
 
 # Or without a real model (dev only):
@@ -31,7 +31,7 @@ curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
   -d '{"content":"Bulk cotton yarn supplier","content_type":"product_listing","content_id":"LST-1"}'
 ```
 
-For a live walkthrough in the browser, see [DEMO.md](DEMO.md).
+For a live demonstration (setup commands, run of show and a tested sentence bank), see [DEMO_GUIDE.md](DEMO_GUIDE.md).
 
 ## Endpoints
 
@@ -52,7 +52,7 @@ app/
   model.py      ONNX session + tokenizer, ModelRegistry (atomic hot-swap), StubScorer
   routing.py    Thresholds + route()
   pipeline.py   gate -> model -> routing; builds the result payload
-  sinks.py      ResultSink: where Intern 3's DB writer plugs in
+  sinks.py      ResultSink: where the database writer plugs in
   tasks.py      Celery task for async mode
   api.py        Flask endpoints
   config.py     settings.yaml + env overrides
@@ -82,4 +82,4 @@ python scripts/bench_latency.py --n 500
 
 This measures the gate and the model separately, in-process. It exits non-zero when
 p95 inference is over `latency_budget_ms` (30 ms). With the dummy model, the gate
-p95 is about 0.1 ms. Real numbers need Intern 1's INT8 DeBERTa export.
+p95 is about 0.1 ms. Real numbers need the INT8 DeBERTa export.

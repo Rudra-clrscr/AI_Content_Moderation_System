@@ -152,6 +152,10 @@ const EXAMPLES = [
     text: "You people are idiots and I will destroy your business" },
   { tag: "reject", note: "gate block, model skipped", type: "advertisement",
     text: "Invest now and double your money in 7 days" },
+  { tag: "reject", note: "gate: abusive language blocklist", type: "post",
+    text: "Our supplier is a scumbag, never order from them" },
+  { tag: "reject", note: "gate: blocked phishing domain", type: "post",
+    text: "Verify your seller account at paypa1-verify.example today" },
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -261,7 +265,7 @@ function showResult(b, roundTrip) {
         <dl class="kv">
           <dt>gate</dt><dd>${fmt(b.latency_ms.gate, 2)} ms</dd>
           <dt>inference</dt><dd>${b.latency_ms.inference === null ? "skipped" : fmt(b.latency_ms.inference, 1) + " ms"}</dd>
-          <dt>total (server)</dt><dd>${fmt(b.latency_ms.total, 1)} ms</dd>
+          <dt>total (server)</dt><dd>${fmt(b.latency_ms.total, b.latency_ms.total < 1 ? 2 : 1)} ms</dd>
           <dt>round trip</dt><dd>${fmt(roundTrip, 1)} ms</dd>
         </dl>
         <h2 style="margin-top:14px">Logged as</h2>
@@ -272,7 +276,7 @@ function showResult(b, roundTrip) {
         </dl>
       </div>
     </div>
-    <details><summary>Full result payload (what Intern 3's pipeline stores)</summary><pre>${esc(JSON.stringify(b, null, 2))}</pre></details>`;
+    <details><summary>Full result payload (what the audit log stores)</summary><pre>${esc(JSON.stringify(b, null, 2))}</pre></details>`;
 }
 
 function renderHistory() {

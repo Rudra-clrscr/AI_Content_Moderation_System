@@ -1,6 +1,6 @@
 """Result sinks: where finished moderation results go.
 
-This is the single hand-off point to Intern 3's data layer. Whichever process
+This is the single hand-off point to the data layer. Whichever process
 produces the final result (Flask in sync mode, the Celery worker in async mode)
 calls `sink.emit(result)`.
 

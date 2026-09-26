@@ -94,7 +94,7 @@ def _compile_rule(spec: dict, base: Path) -> Rule | None:
             terms += [t.strip() for t in tf.read_text(encoding="utf-8").splitlines()
                       if t.strip() and not t.startswith("#")]
         else:
-            log.warning("gate rule %s: terms_file %s not found, skipping those terms", rule_id, tf)
+            log.info("gate rule %s: optional terms_file %s not present", rule_id, tf)
     if terms:
         escaped = sorted((re.escape(normalize(t)) for t in terms), key=len, reverse=True)
         alternatives.append(r"(?<!\w)(?:" + "|".join(escaped) + r")(?!\w)")
