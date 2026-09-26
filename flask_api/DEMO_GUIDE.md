@@ -29,62 +29,77 @@ Each piece of content passes through four steps:
 
 ---
 
-## 2. One-time setup on a new computer (Command Prompt)
+## 2. One-time setup on a new computer
 
 You need:
 - **Python 3.12 or newer**, from python.org. Tick "Add Python to PATH" during install.
 - **Git for Windows**, which already includes Git LFS.
 
-Open **Command Prompt** (press `Win + R`, type `cmd`, press Enter) and run:
+> **Which terminal am I in?** If the prompt starts with **`PS`** (for example
+> `PS F:\BONC>`), it's **PowerShell**. Windows Terminal and VS Code open this
+> by default. If it's just a path (for example `F:\BONC>`), it's **Command
+> Prompt**. The two use different commands for settings, so use the matching
+> block below. Commands that aren't split by terminal work in both.
 
-```cmd
+The steps below run Python as `.venv\Scripts\python.exe`, so you never need to
+"activate" the virtual environment. Activation works differently in each
+terminal, and it's the most common reason a setup fails.
+
+```
 git lfs install
 git clone https://github.com/Rudra-clrscr/AI_Content_Moderation_System.git
 cd AI_Content_Moderation_System\flask_api
 python -m venv .venv
-.venv\Scripts\activate.bat
-pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Check that the model downloaded completely. It should be about **172 MB**, not a few hundred bytes:
+Check that the model downloaded completely. `model_int8.onnx` should be about
+**172 MB**, not a few hundred bytes:
 
-```cmd
+```
 dir models\current
 ```
 
-If `model_int8.onnx` is tiny, run `git lfs pull` and check again.
+If it's tiny, run `git lfs pull` and check again.
 
 ---
 
 ## 3. Start the server (every time)
 
-In Command Prompt, starting from the `AI_Content_Moderation_System` folder:
+Start in the `AI_Content_Moderation_System\flask_api` folder.
+
+**PowerShell** (prompt starts with `PS`):
+
+```powershell
+$env:DEMO_PAGE = "1"
+$env:RESULT_SINK = "log"
+.venv\Scripts\python.exe -m waitress --port=8000 wsgi:app
+```
+
+**Command Prompt:**
 
 ```cmd
-cd flask_api
-.venv\Scripts\activate.bat
 set DEMO_PAGE=1
 set RESULT_SINK=log
-python -m waitress --port=8000 wsgi:app
+.venv\Scripts\python.exe -m waitress --port=8000 wsgi:app
 ```
+
+> Don't mix them up. In PowerShell, `set DEMO_PAGE=1` runs without an error but
+> sets nothing, so the page says *demo page disabled*.
 
 Wait for `Serving on http://0.0.0.0:8000`. Leave this window open, because
-closing it stops the server.
+closing it stops the server. The settings only last while this window is open,
+so run all three lines again each time you start.
 
-Open the demo page from a **second** Command Prompt window, or just type the address into your browser:
-
-```cmd
-start http://127.0.0.1:8000/demo
-```
+Open **http://127.0.0.1:8000/demo** in your browser, or run `start http://127.0.0.1:8000/demo`
+from a second terminal window.
 
 To stop the server, click the first window and press `Ctrl + C`.
 
 > **Why two settings?** `DEMO_PAGE=1` turns on the demo page, which is off by
 > default so it never appears in production. `RESULT_SINK=log` writes decisions
 > to the console instead of SQL Server, so the demo doesn't need a database.
->
-> **PowerShell instead of cmd?** Use `.venv\Scripts\Activate.ps1`,
-> `$env:DEMO_PAGE = "1"` and `$env:RESULT_SINK = "log"`.
+> Without it, every request logs a `db_write_failed` error in the server window.
 
 ### Check it is working
 
@@ -92,11 +107,11 @@ The chips at the top of the page should read:
 
 `status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v1` · `gate rules 6` · `allow ≤ 0.30 · reject ≥ 0.70 (risk)`
 
-You can also check from Command Prompt:
+You can also check from a second terminal window. `curl.exe` works in both PowerShell and Command Prompt:
 
-```cmd
-curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/ready
+```
+curl.exe http://127.0.0.1:8000/health
+curl.exe http://127.0.0.1:8000/ready
 ```
 
 **Warm up before the audience arrives.** Click each example button once, then
@@ -231,31 +246,43 @@ The demo domains use reserved endings (`.example`, `.test`) on purpose, so no re
 
 ---
 
-## 7. Optional: calling the API from Command Prompt
+## 7. Optional: calling the API from the terminal
 
-This shows that the page is only a front end: the same API serves any client. Run these while the server is running.
+This shows that the page is only a front end: the same API serves any client. Run these from a second terminal window while the server is running.
 
-Allowed listing:
+**PowerShell:**
+
+```powershell
+# Allowed listing
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/moderate -ContentType "application/json" -Body '{"content": "LED panel lights, 12W to 48W, BIS certified. Test certificates provided with every order.", "content_type": "product_listing", "content_id": "LST-1001"}'
+
+# Blocked by the gate
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/moderate -ContentType "application/json" -Body '{"content": "Invest now and double your money in 7 days", "content_type": "advertisement"}'
+
+# Bad input is rejected cleanly (the error text is printed from the catch block)
+try { Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/moderate -ContentType "application/json" -Body '{"content": "   ", "content_type": "post"}' } catch { $_.ErrorDetails.Message }
+try { Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/moderate -ContentType "application/json" -Body '{"content": "Hello", "content_type": "tweet"}' } catch { $_.ErrorDetails.Message }
+```
+
+**Command Prompt:**
+
 ```cmd
+:: Allowed listing
 curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/json" -d "{\"content\": \"LED panel lights, 12W to 48W, BIS certified. Test certificates provided with every order.\", \"content_type\": \"product_listing\", \"content_id\": \"LST-1001\"}"
-```
 
-Blocked by the gate:
-```cmd
+:: Blocked by the gate
 curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/json" -d "{\"content\": \"Invest now and double your money in 7 days\", \"content_type\": \"advertisement\"}"
-```
 
-Bad input is rejected cleanly instead of crashing the service:
-```cmd
+:: Bad input is rejected cleanly
 curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/json" -d "{\"content\": \"   \", \"content_type\": \"post\"}"
 curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/json" -d "{\"content\": \"Hello\", \"content_type\": \"tweet\"}"
 ```
 
-The first returns `invalid_content`. The second returns `invalid_content_type` and lists the allowed types.
+The first bad-input request returns `invalid_content`. The second returns `invalid_content_type` and lists the allowed types.
 
-Latency benchmark, in a second Command Prompt window with the virtual environment activated:
-```cmd
-python scripts\bench_latency.py
+Latency benchmark, in a second terminal window inside `flask_api`:
+```
+.venv\Scripts\python.exe scripts\bench_latency.py
 ```
 
 It prints p50 and p95 inference times against the 30 ms budget. On the development laptop, p95 is about 28 ms.
@@ -270,7 +297,9 @@ Slower machines may report `OVER`. The budget assumes a 4-core server.
 | `'python' is not recognized` | Reinstall Python with "Add Python to PATH" ticked, or use `py` instead of `python`. |
 | The page says `service unreachable` | The server window was closed or crashed. Start it again (section 3). |
 | `status not_ready` in the header | The model didn't load. Run `dir models\current`. If `model_int8.onnx` is tiny, run `git lfs pull`, then restart the server. |
-| The page shows **404 demo page disabled** | `set DEMO_PAGE=1` wasn't run in the same window before starting the server. |
+| The page shows **demo page disabled** | The setting wasn't applied. In PowerShell use `$env:DEMO_PAGE = "1"`, not `set DEMO_PAGE=1`. Run it in the same window, then restart the server. |
+| `No module named waitress` | Python ran outside the virtual environment. Start the server with `.venv\Scripts\python.exe -m waitress …` as shown in section 3. |
+| `db_write_failed` errors in the server window | `RESULT_SINK` isn't set to `log`. Set it the way section 3 shows for your terminal, then restart. |
 | Port 8000 already in use | Run `netstat -ano \| findstr :8000` to find the process, or start on another port: `python -m waitress --port=8080 wsgi:app`. |
 | A sentence gives a different result | Check that it's pasted exactly. The v1 model is sensitive to small wording changes. |
 
