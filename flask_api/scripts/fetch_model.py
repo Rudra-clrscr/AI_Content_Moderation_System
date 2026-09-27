@@ -1,4 +1,4 @@
-"""Download the ML team's model bundle into models/current (gitignored).
+"""Download the ML team's original v1 bundle (github.com/Gupta35251/BONC) into models/v1.
 
     python scripts/fetch_model.py                       # latest from main
     python scripts/fetch_model.py --ref <commit-or-tag> # pin a specific release
@@ -43,7 +43,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=DEFAULT_REPO)
     ap.add_argument("--ref", default="main")
-    ap.add_argument("--dest", default="models/current")
+    ap.add_argument("--dest", default="models/v1")
     args = ap.parse_args()
 
     dest = Path(args.dest) if Path(args.dest).is_absolute() else ROOT / args.dest

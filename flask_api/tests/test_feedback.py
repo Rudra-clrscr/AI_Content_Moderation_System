@@ -178,3 +178,12 @@ def test_targeted_disabled_still_gives_model_feedback(make_settings):
     s = make_settings(targeted=TargetedAbuse(enabled=False))
     body = post(create_app(s, scorer=KeywordScorer(default=0.5)).test_client(), "He is odd")
     assert body["decision"] == "revise" and body["feedback"]["issues"]
+
+
+def test_sentence_highlighted_once_when_targeted_check_already_marked_it(make_settings):
+    text = "Our team packs every order. They use odd cartons for shipments."
+    scorer = KeywordScorer({"odd": 0.5})   # whole text and the 'They…' sentence are both borderline
+    issues = post(app_with(make_settings, scorer), text)["feedback"]["issues"]
+    spans = [(i["start"], i["end"]) for i in issues]
+    assert len(spans) == len(set(spans))
+    assert marked(text, issues) == ["They use odd cartons for shipments"]

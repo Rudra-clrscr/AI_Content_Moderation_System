@@ -49,7 +49,7 @@ to "activate" the virtual environment. That also avoids PowerShell's
 Check that the model downloaded completely:
 
 ```powershell
-dir models\current
+dir models\v3
 ```
 
 `model_int8.onnx` should be about **172266637** bytes (the `Length` column). If
@@ -127,7 +127,7 @@ Run these in the second window while the server is running.
 
 ```powershell
 # Allowed listing
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/moderate -ContentType "application/json" -Body '{"content": "LED panel lights, 12W to 48W, BIS certified. Test certificates provided with every order.", "content_type": "product_listing", "content_id": "LST-1001"}'
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/moderate -ContentType "application/json" -Body '{"content": "Cotton bedsheets in king and queen sizes, 300 thread count. Bulk orders welcome.", "content_type": "product_listing", "content_id": "LST-1001"}'
 
 # Blocked by the gate
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/moderate -ContentType "application/json" -Body '{"content": "Invest now and double your money in 7 days", "content_type": "advertisement"}'
@@ -173,6 +173,6 @@ because the budget assumes a 4-core server.
 | `db_write_failed` errors in the server window | `RESULT_SINK` isn't set. Stop the server, run `$env:RESULT_SINK = "log"`, then start it again. |
 | `No module named waitress` | You ran plain `python`, or tried `activate.bat`. Use `.venv\Scripts\python.exe -m waitress --port=8000 wsgi:app`. |
 | `running scripts is disabled on this system` | You ran `Activate.ps1`. You don't need it: use `.venv\Scripts\python.exe` as shown. |
-| `status not_ready`, or the model fails to load | Run `dir models\current`. If `model_int8.onnx` is tiny, run `git lfs pull`, then restart the server. |
+| `status not_ready`, or the model fails to load | Run `dir models\v3`. If `model_int8.onnx` is tiny, run `git lfs pull`, then restart the server. |
 | Port 8000 already in use | Run `Get-NetTCPConnection -LocalPort 8000 \| Select-Object OwningProcess` to see the process ID, then `Stop-Process -Id <that number>`. Or use another port: `.venv\Scripts\python.exe -m waitress --port=8080 wsgi:app`, and open `http://127.0.0.1:8080/demo`. |
 | To check what's set | `$env:DEMO_PAGE` and `$env:RESULT_SINK` print the current values. `Remove-Item Env:DEMO_PAGE` clears one. |

@@ -130,7 +130,9 @@ class Pipeline:
         # Show the author which sentences the model objects to.
         if stage is Stage.MODEL and (decision is Decision.REVISE
                                      or (decision is Decision.REJECT and self.feedback.highlight_on_reject)):
-            model_issues += self._sentence_issues(req.content, scored, score)
+            # Skip sentences the targeted check already highlighted (same text, more specific message).
+            model_issues += [i for i in self._sentence_issues(req.content, scored, score)
+                             if not any(i.start < t.end and t.start < i.end for t in model_issues)]
 
         fb = self.feedback.build(decision, gate, model_issues)
         total = gate_ms + (time.perf_counter() - t0) * 1000

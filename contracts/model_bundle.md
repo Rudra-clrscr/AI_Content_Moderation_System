@@ -4,7 +4,7 @@
 **Consumer:** `flask_api/app/model.py` (`OnnxScorer`)
 
 Each model release is one directory. The Flask service loads it from `MODEL_DIR`
-(default `flask_api/models/current`) at startup, or on `POST /v1/admin/model/reload`.
+(default `flask_api/models/v3`; the previous model is kept in `flask_api/models/v1`) at startup, or on `POST /v1/admin/model/reload`.
 
 ```
 <model_dir>/
@@ -58,11 +58,11 @@ Any extra keys (training date, eval metrics, and so on) are kept but ignored.
 - `sigmoid`, several labels: `risk = max P(label)` over the non-safe labels
 
 **Decision-style labels.** If the labels are themselves decisions, for example
-`["safe", "review", "reject"]` in bonc-v1, then `1 − P(safe)` gives a confident
+`["safe", "review", "reject"]` in bonc-v1 and v3, then `1 − P(safe)` gives a confident
 `review` a score of about 1.0, which rejects it. Ship
 `"label_weights": {"safe": 0, "review": 0.5, "reject": 1}` in the meta for such
 models. Flask can also override the weights in `settings.yaml` under `model.label_weights`,
-which is what it does for bonc-v1 today.
+which is what it does for bonc-v1 and v3 today.
 
 The Flask thresholds (`allow_max`, `reject_min`) apply to this `risk` value. When the
 model is retrained, please send recommended thresholds along with it, for example the

@@ -2,7 +2,7 @@
 for exercising the ONNX code path before a real model is available. Scores are meaningless.
 
     pip install onnx
-    python scripts/make_dummy_model.py models/current
+    python scripts/make_dummy_model.py models/dummy   # then MODEL_DIR=models/dummy
 """
 import json, sys, numpy as np, onnx
 from onnx import helper, TensorProto, numpy_helper
