@@ -180,6 +180,8 @@ const EXAMPLES = [
     text: "Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop." },
   { tag: "revise", note: "model: rude tone, the author is asked to rephrase", type: "product_listing",
     text: "Ceramic floor tiles, 600x600 mm, glossy and matt finish. Only serious buyers, time wasters will be blocked." },
+  { tag: "reject", note: "sentence: a scam sentence hidden in a clean listing", type: "product_listing",
+    text: "Handmade leather wallets and belts. Earn 50000 per week from home, no experience needed." },
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -261,6 +263,11 @@ function reason(b) {
       `“<b>${esc(b.content.slice(hit.start, hit.end))}</b>”, scored ${fmt(hit.risk_score)}` +
       (b.decision === "reject" ? ` ≥ ${t.reject_min}.` : `, so the author is asked to rephrase it.`);
   }
+  if (b.decided_by === "sentence") {
+    const w = b.sentence_scores.reduce((a, c) => (c.risk_score > a.risk_score ? c : a));
+    return `The whole post scored only ${fmt(b.risk_score)}, but one sentence on its own, ` +
+      `“<b>${esc(b.content.slice(w.start, w.end))}</b>”, scored ${fmt(w.risk_score)} ≥ ${t.reject_min}.`;
+  }
   if (b.decided_by === "gate")
     return `The model alone would allow this (risk ${fmt(b.risk_score)}), but rule <b>${esc(revises[0]?.rule_id)}</b> asks the author to fix it.`;
   const s = b.risk_score;
@@ -312,6 +319,7 @@ function showResult(b, roundTrip) {
       <span class="step on">1 · Regex gate</span><span class="arrow">→</span>
       <span class="step ${gate ? "skip" : "on"}">2 · DeBERTa model</span><span class="arrow">→</span>
       <span class="step ${b.targeted_segments.length ? "on" : "skip"}">2b · Sentence check</span><span class="arrow">→</span>
+      <span class="step ${b.sentence_scores.length ? "on" : "skip"}">2c · Sentence scan</span><span class="arrow">→</span>
       <span class="step ${gate ? "skip" : "on"}">3 · Threshold routing</span><span class="arrow">→</span>
       <span class="step ${b.feedback ? "on" : "skip"}">4 · Author feedback</span><span class="arrow">→</span>
       <span class="step on">5 · SQL log</span>

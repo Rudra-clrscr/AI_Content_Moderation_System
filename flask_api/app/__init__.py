@@ -66,7 +66,7 @@ def create_app(
         settings=settings,
         pipeline=Pipeline(Gate.from_yaml(settings.gate_patterns_file), models,
                           settings.thresholds, settings.latency_budget_ms, settings.targeted,
-                          Feedback.from_yaml(settings.feedback_messages_file)),
+                          Feedback.from_yaml(settings.feedback_messages_file), settings.sentence_scan),
         models=models,
         sink=sink or build_sink(settings),
         enqueue=enqueue,

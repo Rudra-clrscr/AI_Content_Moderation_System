@@ -3,7 +3,7 @@ import pytest
 from app import create_app
 from app.gate import Gate
 from app.model import ScoreResult
-from app.targeted import TargetedAbuse
+from app.targeted import SentenceScan, TargetedAbuse
 from tests.conftest import FixedScorer
 
 
@@ -184,7 +184,8 @@ def test_targeted_segment_escalates_to_reject(make_settings):
 
 
 def test_targeted_check_can_be_disabled(make_settings):
-    s = make_settings(targeted=TargetedAbuse(enabled=False))
+    # The sentence scan would also catch this sentence, so turn both off.
+    s = make_settings(targeted=TargetedAbuse(enabled=False), sentence_scan=SentenceScan(enabled=False))
     body = post(create_app(s, scorer=SegmentScorer()).test_client(), TEXT)
     assert body["decision"] == "allow" and body["targeted_segments"] == []
 

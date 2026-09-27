@@ -5,7 +5,7 @@ from tests.conftest import FixedScorer
 REQUIRED_KEYS = {
     "schema_version", "request_id", "status", "content_id", "content_type", "content",
     "content_sha256", "decision", "decided_by", "risk_score", "predicted_label",
-    "label_scores", "gate_matches", "targeted_segments", "feedback", "gate_version", "model_version", "thresholds",
+    "label_scores", "gate_matches", "targeted_segments", "sentence_scores", "feedback", "gate_version", "model_version", "thresholds",
     "latency_ms", "decided_at",
 }
 

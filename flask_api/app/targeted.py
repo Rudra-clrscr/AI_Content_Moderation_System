@@ -67,3 +67,23 @@ class TargetedAbuse:
             if len(found) == self.max_segments:
                 break
         return found
+
+
+@dataclass(frozen=True)
+class SentenceScan:
+    """Score every sentence on its own, so a harmful sentence can't hide inside a clean post.
+
+    A scam sentence tacked onto a normal listing ("Handmade leather wallets and belts.
+    Earn 50000 per week from home") can score ~0 as a whole. If ANY sentence scores at
+    reject level on its own, the whole post is rejected. Sentences in the middle band
+    don't escalate: ordinary short sentences often land there, so it would be too noisy.
+    Each scanned sentence costs one model inference (INT8 models can't be batched
+    without changing scores, so they're scored one at a time).
+    """
+
+    enabled: bool = True
+    max_sentences: int = 8
+
+    def __post_init__(self) -> None:
+        if self.max_sentences < 1:
+            raise ValueError("sentence_scan.max_sentences must be at least 1")

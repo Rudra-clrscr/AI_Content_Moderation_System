@@ -49,6 +49,7 @@ def guide_cases() -> list[dict]:
             "type": next((TYPES[c.lower()] for c in cells if c.lower() in TYPES), "post"),
             "decision": decision.group(1) if decision else ("reject" if rule else None),
             "decided_by": ("targeted" if re.search(r"\btargeted\b", words) else
+                           "sentence" if re.search(r"· sentence\b", words) else
                            "gate" if (re.search(r"\bby gate\b", words) or (rule and not decision)) else None),
             "rule": rule.group(1) if rule else None,
             # highlights "Earn guaranteed income…" -> an issue's text must start with this
@@ -67,6 +68,7 @@ def page_cases() -> list[dict]:
     return [{"source": f"page #{i}", "text": json.loads(f'"{text}"'), "type": typ, "decision": tag,
              # "gate: …" / "gate block" = decided by the gate; "gate flag …" only raises the floor
              "decided_by": ("targeted" if note.startswith("targeted")
+                            else "sentence" if note.startswith("sentence")
                             else "gate" if note.startswith(("gate:", "gate block")) else None),
              "rule": None, "highlight": None}
             for i, (tag, note, typ, text) in enumerate(found, 1)]

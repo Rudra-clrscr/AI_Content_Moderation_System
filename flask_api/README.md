@@ -53,6 +53,24 @@ curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
 
 For a live demonstration, set up with [DEMO_GUIDE_POWERSHELL.md](DEMO_GUIDE_POWERSHELL.md) or [DEMO_GUIDE_CMD.md](DEMO_GUIDE_CMD.md), then follow [DEMO_GUIDE.md](DEMO_GUIDE.md) for the run of show and tested sentences.
 
+## Sentence scan
+
+A scammer can hide one harmful sentence inside a normal listing, and the whole
+text then scores as clean. For example, "Handmade leather wallets and belts.
+Earn 50000 per week from home, no experience needed." scores 0.007 as a whole.
+So every sentence of a multi-sentence post is also scored on its own (up to
+`sentence_scan.max_sentences`, default 8), and **any one sentence at reject
+level rejects the post** (`decided_by: "sentence"`). Sentences in the middle band
+don't escalate, because ordinary short sentences often land there.
+
+On our 50-text test set with v3, this raised harmful posts caught from 13 to 15
+of 18 (rejects from 5 to 9), with no change to legitimate posts. The cost is one
+inference per sentence: a 3–4 sentence post takes about 30–45 ms of model time
+instead of about 11 ms. Sentences are scored one at a time, because batching
+them changes the INT8 model's scores (dynamic quantization scales across the
+whole batch; we measured differences up to 0.63). Turn the scan off with
+`SENTENCE_SCAN=0`.
+
 ## Abuse aimed at someone
 
 Two checks stop comments that attack another person or business:

@@ -37,6 +37,10 @@ targeted_abuse:            # per-sentence model check for abuse aimed at a perso
   subjects: [he, she, his, her, him, they, them, their]
   max_segments: 3          # at most this many extra inferences per request
 
+sentence_scan:             # score every sentence on its own: one reject-level sentence rejects the post
+  enabled: true            # catches a scam tacked onto a clean listing (whole text can score ~0)
+  max_sentences: 8         # at most this many extra inferences (~10 ms each) per multi-sentence post
+
 demo_page: false           # true (or DEMO_PAGE=1) serves the browser demo at /demo
 
 result_sink: sql           # sql -> write to SQL Server (failures are logged, never fail the request)

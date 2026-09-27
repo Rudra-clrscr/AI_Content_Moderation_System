@@ -15,11 +15,11 @@ from app.feedback import Feedback, Issue
 from app.gate import Gate, GateResult
 from app.model import ModelRegistry, ScoreResult
 from app.routing import Decision, Thresholds, most_severe, route
-from app.targeted import TargetedAbuse, sentence_spans
+from app.targeted import SentenceScan, TargetedAbuse, sentence_spans
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "1.2"  # 1.1: targeted_segments, decided_by "targeted"; 1.2: "revise" + feedback
+SCHEMA_VERSION = "1.3"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3: sentence_scores, decided_by "sentence"
 
 
 class ContentType(str, Enum):
@@ -33,6 +33,7 @@ class Stage(str, Enum):
     GATE = "gate"          # decided by a Layer 1 rule (block, or a "revise" rule the model would have allowed)
     MODEL = "model"        # decided by the whole-text model score
     TARGETED = "targeted"  # decided by a sentence aimed at someone, scored separately
+    SENTENCE = "sentence"  # one sentence scored at reject level on its own (e.g. a scam tacked onto a listing)
 
 
 @dataclass(frozen=True)
@@ -73,13 +74,15 @@ class _Scorer:
 
 class Pipeline:
     def __init__(self, gate: Gate, models: ModelRegistry, thresholds: Thresholds, latency_budget_ms: float = 30.0,
-                 targeted: TargetedAbuse | None = None, feedback: Feedback | None = None):
+                 targeted: TargetedAbuse | None = None, feedback: Feedback | None = None,
+                 sentence_scan: SentenceScan | None = None):
         self.gate = gate
         self.models = models
         self.thresholds = thresholds
         self.latency_budget_ms = latency_budget_ms
         self.targeted = targeted or TargetedAbuse(enabled=False)
         self.feedback = feedback or Feedback()
+        self.sentence_scan = sentence_scan or SentenceScan(enabled=False)
 
     def run_gate(self, req: ModerationRequest) -> tuple[GateResult, float]:
         t0 = time.perf_counter()
@@ -89,7 +92,7 @@ class Pipeline:
     def gate_only_result(self, req: ModerationRequest, gate: GateResult, gate_ms: float) -> dict:
         """Final result for content blocked by Layer 1 (no model call)."""
         fb = self.feedback.build(Decision.REJECT, gate, [])
-        return self._build(req, Decision.REJECT, Stage.GATE, gate, None, gate_ms, None, [], None, fb)
+        return self._build(req, Decision.REJECT, Stage.GATE, gate, None, gate_ms, None, [], [], None, fb)
 
     def moderate(self, req: ModerationRequest, gate: GateResult | None = None, gate_ms: float = 0.0) -> dict:
         t0 = time.perf_counter()
@@ -127,6 +130,19 @@ class Pipeline:
                 if decision is Decision.ALLOW:
                     decision, stage = Decision.REVISE, Stage.TARGETED
 
+        # Sentence scan: any single sentence at reject level rejects the post.
+        sentence_scores: list[dict] = []
+        spans = sentence_spans(req.content)
+        if self.sentence_scan.enabled and decision is not Decision.REJECT and len(spans) >= 2:
+            for start, end in spans[: self.sentence_scan.max_sentences]:
+                risk = score(req.content[start:end]).risk_score
+                sentence_scores.append({"start": start, "end": end, "risk_score": round(risk, 6)})
+            worst = max(sentence_scores, key=lambda x: x["risk_score"])
+            if worst["risk_score"] >= self.thresholds.reject_min:
+                decision, stage = Decision.REJECT, Stage.SENTENCE
+                model_issues = [Issue(worst["start"], worst["end"], "model", self.feedback.model_sentence,
+                                      risk_score=worst["risk_score"])]
+
         # Show the author which sentences the model objects to.
         if stage is Stage.MODEL and (decision is Decision.REVISE
                                      or (decision is Decision.REJECT and self.feedback.highlight_on_reject)):
@@ -136,7 +152,8 @@ class Pipeline:
 
         fb = self.feedback.build(decision, gate, model_issues)
         total = gate_ms + (time.perf_counter() - t0) * 1000
-        return self._build(req, decision, stage, gate, scored, gate_ms, total, segments, score.inference_ms, fb)
+        return self._build(req, decision, stage, gate, scored, gate_ms, total, segments, sentence_scores,
+                           score.inference_ms, fb)
 
     def _sentence_issues(self, content: str, whole: ScoreResult, score: _Scorer) -> list[Issue]:
         spans = sentence_spans(content)
@@ -149,7 +166,8 @@ class Pipeline:
         chosen = flagged or [max(scored, key=lambda x: x[2])]
         return [Issue(s, e, "model", self.feedback.model_sentence, risk_score=r) for s, e, r in chosen]
 
-    def _build(self, req, decision, stage, gate, scored, gate_ms, total_ms, segments, inference_ms, feedback) -> dict:
+    def _build(self, req, decision, stage, gate, scored, gate_ms, total_ms, segments, sentence_scores,
+               inference_ms, feedback) -> dict:
         return {
             "schema_version": SCHEMA_VERSION,
             "request_id": req.request_id,
@@ -166,6 +184,8 @@ class Pipeline:
             "gate_matches": [m.as_dict() for m in gate.matches],
             # Offsets into `content` (text itself isn't repeated, so logs stay content-free).
             "targeted_segments": segments,
+            # Every sentence scored on its own (offsets + risk), when the post has 2+ sentences.
+            "sentence_scores": sentence_scores,
             # Author-facing: what to fix and where (null when allowed). Offsets into `content`.
             "feedback": feedback,
             "gate_version": self.gate.version,
