@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Articles · BONC Business Dashboard</title>
+<link rel="stylesheet" href="/articles/articles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="logo" href="#" aria-label="BONC Network">
+      <span class="logo-word"><span class="b">B</span><span class="o">O</span><span class="n">N</span><span class="c">C</span></span>
+      <span class="logo-sub">Network</span>
+    </a>
+    <button class="icon-btn" aria-label="Menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="shell">
+  <div class="search">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input type="search" placeholder="Search products, services or businesses" aria-label="Search">
+    <button class="ai-pill" type="button">✨ AI</button>
+  </div>
+
+  <nav class="tabs" aria-label="Dashboard sections">
+    <button class="tab">Dashboard</button>
+    <button class="tab">Add Business</button>
+    <button class="tab">Videos</button>
+    <button class="tab active" aria-current="page">Articles</button>
+    <button class="tab">Requests</button>
+    <button class="tab">Proposals</button>
+    <button class="tab">Business Proposals</button>
+    <button class="tab">Credits</button>
+  </nav>
+
+  <h1>Articles</h1>
+  <p class="subtitle">Share case studies and updates with the BONC Network community.</p>
+
+  <section class="card" aria-labelledby="articles-heading">
+    <div class="card-head">
+      <div>
+        <h2 id="articles-heading">Your articles</h2>
+        <p class="quota" id="quota"></p>
+      </div>
+      <button class="btn btn-primary" id="write-btn">+ Write Article</button>
+    </div>
+    <div class="pills" role="tablist" id="pills"></div>
+    <div id="list"></div>
+  </section>
+</main>
+
+<!-- Write article modal -->
+<div class="backdrop" id="modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-head">
+      <h2 id="modal-title">Write article</h2>
+      <button class="icon-btn" id="close-btn" aria-label="Close">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="banner" aria-live="polite"></div>
+
+      <div class="field">
+        <label for="title">Title<span class="req">*</span></label>
+        <input class="input" id="title" maxlength="150" placeholder="Enter article title" autocomplete="off">
+        <div id="title-msg"></div>
+      </div>
+
+      <div class="field">
+        <label id="body-label">Body <span class="req">*</span></label>
+        <div class="editor">
+          <div class="toolbar" role="toolbar" aria-label="Formatting">
+            <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
+            <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
+            <button type="button" data-cmd="underline" title="Underline"><u>U</u></button>
+            <button type="button" data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
+            <span class="sep"></span>
+            <button type="button" data-block="h2" title="Heading 2">H₂</button>
+            <button type="button" data-block="h3" title="Heading 3">H₃</button>
+            <span class="sep"></span>
+            <button type="button" data-cmd="insertUnorderedList" title="Bulleted list">•≡</button>
+            <button type="button" data-cmd="insertOrderedList" title="Numbered list">1≡</button>
+            <button type="button" data-link title="Link">🔗</button>
+            <span class="sep"></span>
+            <button type="button" data-cmd="undo" title="Undo">↶</button>
+            <button type="button" data-cmd="redo" title="Redo">↷</button>
+          </div>
+          <div class="editor-area" id="body" contenteditable="true" role="textbox" aria-multiline="true"
+               aria-labelledby="body-label" data-placeholder="Write your article…"></div>
+        </div>
+        <div class="counter" id="counter">0 / 20000</div>
+        <div id="body-msg"></div>
+      </div>
+
+      <div class="field">
+        <label for="type">Article Type</label>
+        <select class="select" id="type">
+          <option>Case Study</option><option>Industry Insight</option><option>Company Update</option>
+          <option>How-To Guide</option><option>Product Launch</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="visibility">Visibility</label>
+        <select class="select" id="visibility">
+          <option>Short Description</option><option>Full Article</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" id="cancel-btn">Cancel</button>
+      <button class="btn btn-outline" id="draft-btn">Save as Draft</button>
+      <button class="btn btn-primary" id="publish-btn">Publish</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="/articles/moderation-client.js"></script>
+<script src="/articles/articles.js"></script>
+</body>
+</html>

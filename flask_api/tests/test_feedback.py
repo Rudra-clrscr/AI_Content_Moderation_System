@@ -188,3 +188,12 @@ def test_sentence_highlighted_once_when_targeted_check_already_marked_it(make_se
     spans = [(i["start"], i["end"]) for i in issues]
     assert len(spans) == len(set(spans))
     assert marked(text, issues) == ["They use odd cartons for shipments"]
+
+
+def test_wording_uses_the_content_types_noun(make_settings):
+    c = app_with(make_settings, KeywordScorer())
+    art = c.post("/v1/moderate", json={"content": "You can pay in crypto here", "content_type": "article"}).get_json()
+    lst = c.post("/v1/moderate", json={"content": "double your money now", "content_type": "product_listing"}).get_json()
+    assert art["feedback"]["title"] == "Your article needs a few changes"
+    assert "your article" in art["feedback"]["message"]
+    assert lst["feedback"]["title"] == "Your listing can't be published"

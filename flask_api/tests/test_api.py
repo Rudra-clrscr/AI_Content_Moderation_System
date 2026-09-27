@@ -156,3 +156,20 @@ def test_demo_page_when_enabled(make_settings, scorer):
     c = create_app(make_settings(demo_page=True), scorer=scorer).test_client()
     r = c.get("/demo")
     assert r.status_code == 200 and b"BONC Moderation Demo" in r.data
+
+
+def test_articles_page_disabled_by_default(client):
+    assert client.get("/articles").status_code == 404
+
+
+def test_articles_page_and_assets_when_enabled(make_settings, scorer):
+    c = create_app(make_settings(demo_page=True), scorer=scorer).test_client()
+    assert b"Write article" in c.get("/articles").data
+    for asset in ("articles.js", "articles.css", "moderation-client.js"):
+        assert c.get(f"/articles/{asset}").status_code == 200
+    assert c.get("/articles/../api.py").status_code == 404        # no path traversal
+
+
+def test_article_content_type_accepted(client):
+    r = client.post("/v1/moderate", json={"content": "Case study\n\nOur mill grew.", "content_type": "article"})
+    assert r.status_code == 200

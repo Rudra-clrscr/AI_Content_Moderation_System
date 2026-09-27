@@ -35,8 +35,16 @@ def test_reject_level_sentence_rejects_whole_post(make_settings):
     assert body["feedback"]["issues"] == []                # rejects don't highlight by default
 
 
-def test_middle_band_sentence_does_not_escalate(make_settings):
+def test_middle_band_sentence_asks_for_revision(make_settings):
     body = post(create_app(make_settings(), scorer=ShortSentenceScorer(risk=0.5)).test_client(), TEXT)
+    assert body["decision"] == "revise" and body["decided_by"] == "sentence"
+    issues = body["feedback"]["issues"]
+    assert [TEXT[i["start"]:i["end"]] for i in issues] == ["Earn 50000 per week from home"]
+
+
+def test_middle_band_revise_can_be_turned_off(make_settings):
+    s = make_settings(sentence_scan=SentenceScan(revise_on_middle=False))
+    body = post(create_app(s, scorer=ShortSentenceScorer(risk=0.5)).test_client(), TEXT)
     assert body["decision"] == "allow" and len(body["sentence_scores"]) == 2
 
 
@@ -81,3 +89,14 @@ def test_sentences_are_scored_once(make_settings):
 def test_invalid_max_sentences():
     with pytest.raises(ValueError):
         SentenceScan(max_sentences=0)
+
+
+
+
+def test_harmful_sentence_deep_in_long_article_is_caught(make_settings):
+    filler = " ".join(f"Paragraph {i} describes our cotton mill and its quality checks." for i in range(40))
+    text = filler + " Earn 50000 per week from home. " + filler
+    s = make_settings(max_chars=50_000)
+    body = post(create_app(s, scorer=ShortSentenceScorer()).test_client(), text)
+    assert body["decision"] == "reject" and body["decided_by"] == "sentence"
+    assert len(body["sentence_scores"]) == 81          # every sentence, not just the first few

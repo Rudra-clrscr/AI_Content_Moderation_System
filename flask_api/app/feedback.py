@@ -52,6 +52,7 @@ class Feedback:
     rule_messages: dict[str, str] = field(default_factory=dict)
     model_sentence: str = "This sentence may go against our community policies. Rephrase it."
     model_targeted: str = "This sentence about another person or business may come across as hostile. Rephrase it."
+    nouns: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Feedback":
@@ -70,6 +71,7 @@ class Feedback:
             rule_messages=raw.get("rules") or {},
             model_sentence=model.get("sentence", d.model_sentence),
             model_targeted=model.get("targeted", d.model_targeted),
+            nouns=raw.get("nouns") or {},
         )
 
     def rule_issues(self, gate: GateResult, actions: tuple[str, ...]) -> list[Issue]:
@@ -77,21 +79,24 @@ class Feedback:
                       m.category, m.rule_id)
                 for m in gate.matches if m.action in actions for s, e in m.spans]
 
-    def build(self, decision: Decision, gate: GateResult, model_issues: list[Issue]) -> dict | None:
+    def build(self, decision: Decision, gate: GateResult, model_issues: list[Issue],
+              content_type: str = "post") -> dict | None:
         if decision is Decision.ALLOW:
             return None
+        noun = self.nouns.get(content_type, "post")
+        fmt = lambda text, **kw: text.format(noun=noun, **kw)  # noqa: E731
 
         if decision is Decision.REVISE:
             issues = self.rule_issues(gate, ("revise",)) + model_issues
-            return {"title": self.revise_title, "message": self.revise_message,
+            return {"title": fmt(self.revise_title), "message": fmt(self.revise_message),
                     "issues": [i.as_dict() for i in sorted(issues, key=lambda i: (i.start, i.end))]}
 
         # REJECT: name the policy areas; highlight only if configured to.
         blocking = [m for m in gate.matches if m.action == "block"]
         names = list(dict.fromkeys(self.categories.get(m.category, m.category) for m in blocking))
-        message = (self.reject_message.format(categories=_join(names)) if names else self.reject_message_generic)
+        message = fmt(self.reject_message, categories=_join(names)) if names else fmt(self.reject_message_generic)
         issues = (self.rule_issues(gate, ("block", "revise")) + model_issues) if self.highlight_on_reject else []
-        return {"title": self.reject_title, "message": message,
+        return {"title": fmt(self.reject_title), "message": message,
                 "categories": list(dict.fromkeys(m.category for m in blocking)),
                 "issues": [i.as_dict() for i in sorted(issues, key=lambda i: (i.start, i.end))]}
 

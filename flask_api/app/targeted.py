@@ -78,11 +78,17 @@ class SentenceScan:
     reject level on its own, the whole post is rejected. Sentences in the middle band
     don't escalate: ordinary short sentences often land there, so it would be too noisy.
     Each scanned sentence costs one model inference (INT8 models can't be batched
-    without changing scores, so they're scored one at a time).
+    without changing scores, so they're scored one at a time). Grouping sentences into
+    larger windows was tried for long articles and rejected: a buried scam sentence gets
+    diluted inside the window just as it does in the whole text.
     """
 
     enabled: bool = True
-    max_sentences: int = 8
+    max_sentences: int = 400   # covers a full 25,000-character article; each is ~10 ms
+    # A middle-band sentence in an otherwise allowed post asks for a revision (that sentence
+    # highlighted). Only meaningful when the model's "unsure" output isn't the default for
+    # ordinary text, i.e. with calibrated label_weights (see settings.yaml).
+    revise_on_middle: bool = True
 
     def __post_init__(self) -> None:
         if self.max_sentences < 1:

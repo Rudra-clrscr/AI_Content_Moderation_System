@@ -27,6 +27,7 @@ class ContentType(str, Enum):
     PRODUCT_LISTING = "product_listing"
     POST = "post"
     ADVERTISEMENT = "advertisement"
+    ARTICLE = "article"
 
 
 class Stage(str, Enum):
@@ -91,7 +92,7 @@ class Pipeline:
 
     def gate_only_result(self, req: ModerationRequest, gate: GateResult, gate_ms: float) -> dict:
         """Final result for content blocked by Layer 1 (no model call)."""
-        fb = self.feedback.build(Decision.REJECT, gate, [])
+        fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value)
         return self._build(req, Decision.REJECT, Stage.GATE, gate, None, gate_ms, None, [], [], None, fb)
 
     def moderate(self, req: ModerationRequest, gate: GateResult | None = None, gate_ms: float = 0.0) -> dict:
@@ -142,6 +143,12 @@ class Pipeline:
                 decision, stage = Decision.REJECT, Stage.SENTENCE
                 model_issues = [Issue(worst["start"], worst["end"], "model", self.feedback.model_sentence,
                                       risk_score=worst["risk_score"])]
+            elif self.sentence_scan.revise_on_middle and decision is Decision.ALLOW:
+                risky = [x for x in sentence_scores if x["risk_score"] > self.thresholds.allow_max]
+                if risky:
+                    decision, stage = Decision.REVISE, Stage.SENTENCE
+                    model_issues += [Issue(x["start"], x["end"], "model", self.feedback.model_sentence,
+                                           risk_score=x["risk_score"]) for x in risky]
 
         # Show the author which sentences the model objects to.
         if stage is Stage.MODEL and (decision is Decision.REVISE
@@ -150,7 +157,7 @@ class Pipeline:
             model_issues += [i for i in self._sentence_issues(req.content, scored, score)
                              if not any(i.start < t.end and t.start < i.end for t in model_issues)]
 
-        fb = self.feedback.build(decision, gate, model_issues)
+        fb = self.feedback.build(decision, gate, model_issues, req.content_type.value)
         total = gate_ms + (time.perf_counter() - t0) * 1000
         return self._build(req, decision, stage, gate, scored, gate_ms, total, segments, sentence_scores,
                            score.inference_ms, fb)

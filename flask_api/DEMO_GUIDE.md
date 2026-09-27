@@ -61,7 +61,7 @@ prepare browser tabs in advance.
 | # | Click | Result | What to say |
 |---|---|---|---|
 | 1 | **ALLOW**: steel valves | allow, risk 0.001 | "Normal business content is published immediately. Inference takes about 10 to 15 milliseconds." |
-| 2 | **REVISE**: cotton yarn + "everyone else will cheat you" | revise; only the "We are the only honest supplier…" sentence is highlighted | "Nothing waits in a moderator queue. Like LinkedIn's check before posting, the author sees exactly which sentence is the problem and why. They edit it and post again. Click **Edit post** and the text box selects that sentence." |
+| 2 | **REVISE**: PVC pipes + "Earn 50000 per week" | revise; only the "Earn 50000 per week from home…" sentence is highlighted | "Nothing waits in a moderator queue. Like LinkedIn's check before posting, the author sees exactly which sentence is the problem and why. They edit it and post again. Click **Edit post** and the text box selects that sentence." |
 | 3 | **REVISE**: crypto payment | revise by the **gate**; "payment in crypto" is highlighted, although the model alone says safe (0.000) | "This is why there are two layers. The model missed the off-platform payment. A rule catches it and tells the seller exactly what to remove." |
 | 4 | **REJECT**: bank details and OTP | reject, risk 0.999 | "Phishing is caught by the model." |
 | 5 | **REJECT**: threat | reject, risk 1.000 | "Abuse and threats are caught too." |
@@ -69,9 +69,9 @@ prepare browser tabs in advance.
 | 7 | **REJECT**: scumbag | reject by the gate | "An abusive-language blocklist. In production it also loads the policy team's full list from a private file." |
 | 8 | **REJECT**: phishing domain | reject by the gate | "Known scam domains are blocked outright. Adding one is a one-line config change, with no retraining needed." |
 | 9 | **REJECT**: insult aimed at a business | reject by the gate (`abuse.targeted`) | "Comments about other businesses can't be used for abuse. When a sentence mentions someone (he, she, they, their…) and then insults them, it's rejected instantly." |
-| 10 | **REJECT**: threat hidden in a good review | reject by the **sentence check**; the whole text scores only 0.39 | "The whole comment looks mostly positive, so the model alone would only ask for a rephrase. We also score each sentence that talks about someone. This one is a threat, so the whole comment is rejected." |
-| 11 | **REVISE**: "time wasters will be blocked" | revise; the rude sentence is highlighted | "Rude but not hateful: the seller keeps the listing and only rephrases one line." |
-| 12 | **REJECT**: wallets + "Earn 50000 per week" | reject by the **sentence scan**; the whole listing scores only 0.007 | "A scammer can hide one bad sentence inside a normal listing, and the whole text looks clean. We score every sentence on its own, and one reject-level sentence rejects the post." |
+| 10 | **REJECT**: threat hidden in a good review | reject by the **sentence check**; the whole text scores only 0.20 | "The whole comment looks positive, so the model alone would publish it. We also score each sentence that talks about someone. This one is a threat, so the whole comment is rejected." |
+| 11 | **REVISE**: LED lights + "Work from home and earn big" | revise; the work-from-home pitch is highlighted | "A normal listing with one off-topic money pitch: the seller keeps the listing and removes one line." |
+| 12 | **REJECT**: solar panels + "register now with a small fee" | reject by the **sentence scan**; the whole listing scores 0.000 | "A scammer can hide one bad sentence inside a normal listing, and the whole text looks clean. We score every sentence on its own, and one reject-level sentence rejects the post." |
 | 13 | Paste sentences from section 4 | — | Take requests from the audience, using the sentence bank below. |
 | 14 | Expand **Full result payload** | — | "This is exactly what goes into the audit table: score, decision, model and rule versions, and thresholds. Every decision can be traced later." |
 
@@ -96,18 +96,18 @@ Copy a sentence into the **Content** box, pick the content type, and click **Mod
 
 **Talking point:** aggressive but legitimate sales language ("70% off", "hurry") is still allowed.
 
-### 4.2 Revise: the model is unsure about a sentence
+### 4.2 Revise: the model sees some risk in a sentence
 
 The author gets the post back with the sentence highlighted and an instruction
-to rephrase it. When a post has several sentences, only the doubtful one is
+to rephrase it. When a post has several sentences, only the risky one is
 highlighted.
 
 | Sentence | Content type | Result |
 |---|---|---|
-| Cotton yarn exporters since 1998. We are the only honest supplier, everyone else will cheat you. | Product listing | revise · highlights "We are the only honest supplier…" |
-| Ceramic floor tiles, 600x600 mm, glossy and matt finish. Other sellers are liars, only we sell genuine tiles. | Product listing | revise · highlights "Other sellers are liars…" |
-| Ceramic floor tiles, 600x600 mm, glossy and matt finish. Only serious buyers, time wasters will be blocked. | Product listing | revise · highlights "Only serious buyers…" |
-| Work from home and earn big, message us for details | Advertisement | revise · 0.695 |
+| High quality PVC pipes, ISI marked, available in all sizes. Earn 50000 per week from home, no experience needed. | Product listing | revise · highlights "Earn 50000 per week from home…" |
+| LED panel lights, 12W to 48W, BIS certified. Test certificates provided with every order. Work from home and earn big, message us for details. | Product listing | revise · highlights "Work from home and earn big…" |
+| Cotton bedsheets in king and queen sizes, 300 thread count. Urgent requirement: pay registration charges to get guaranteed government tender approval. | Product listing | revise · highlights "Urgent requirement: pay registration charges…" |
+| Work from home and earn big, message us for details | Advertisement | revise · 0.544 |
 
 ### 4.3 Revise: a rule asks the author to remove something
 
@@ -162,7 +162,7 @@ These sentences contain parts of blocked words or phrases, but not the phrases t
 
 | Sentence | Looks like | Result |
 |---|---|---|
-| Hellfire hot sauce, 250 ml bottles, made with ghost peppers. Bulk orders welcome. | "go to hell" | allow · 0.003 |
+| Hellfire hot sauce, 250 ml bottles, made with ghost peppers. Bulk orders welcome. | "go to hell" | allow · 0.001 |
 | Premium basmati rice exporter, 20 years in business. Our go-to rice for biryani. Bulk orders welcome. | "go to hell" | allow · 0.000 |
 | Industrial stainless steel valves, sizes 15mm to 300mm. Double-walled models available. Test certificates provided with every order. | "double your money" | allow · 0.000 |
 
@@ -184,13 +184,13 @@ part scores at reject level.
 | He sucks at customer service | Post | reject by gate (`abuse.targeted`) |
 | his thinking and mindset shameless | Post | reject by gate (`abuse.targeted`) |
 | he is a liar and a fraudster | Post | reject by gate (`abuse.targeted`) |
-| Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop. | Post | reject · targeted (whole text 0.388, sentence 0.996) |
+| Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop. | Post | reject · targeted (whole text 0.196, sentence 0.993) |
 | Solar panels 330W mono PERC, 25 year warranty. Beware of other sellers, they are all frauds. | Post | reject · targeted |
-| Fast shipping and good quality cotton, highly recommended for bulk buyers. He is a thief who steals from customers and belongs in jail. | Post | reject · targeted (whole text 0.399, sentence 0.995) |
+| Fast shipping and good quality cotton, highly recommended for bulk buyers. He is a thief who steals from customers and belongs in jail. | Post | reject · targeted (whole text 0.260, sentence 0.992) |
 
-**Talking point:** "Scoring the whole comment only gives 0.39, so the author would
-merely be asked to rephrase a death threat: the friendly first sentence dilutes
-it. Scoring the sentence that mentions someone gives 0.996, so it's rejected."
+**Talking point:** "Scoring the whole comment only gives 0.20, so the model alone
+would publish a death threat: the friendly first sentence dilutes it. Scoring
+the sentence that mentions someone gives 0.993, so it's rejected."
 
 ### 4.9a A harmful sentence hidden in a clean listing (sentence scan)
 
@@ -199,15 +199,15 @@ level, the whole post is rejected, even when the full text looks clean.
 
 | Sentence | Content type | Result |
 |---|---|---|
-| Handmade leather wallets and belts. Earn 50000 per week from home, no experience needed. | Product listing | reject · sentence (whole text 0.007) |
 | Solar panels 330W mono PERC, 25 year warranty. Limited slots for dealers, register now with a small fee. | Product listing | reject · sentence (whole text 0.000) |
-| Your account will be suspended. Share your password and card number to verify immediately. | Post | reject · sentence (whole text 0.511) |
-| Congratulations! You have won a lottery of 10 lakh rupees. Pay the processing charges to receive it. | Post | reject · sentence (whole text 0.539) |
+| Your account will be suspended. Share your password and card number to verify immediately. | Post | reject · sentence (whole text 0.267) |
+| Congratulations! You have won a lottery of 10 lakh rupees. Pay the processing charges to receive it. | Post | reject · sentence (whole text 0.308) |
 
-**Talking point:** "The whole listing scores 0.007, so on its own the model
-would publish it. The 'Earn 50000 per week' sentence alone scores 0.76, so the
-post is rejected. In our test set this caught 4 more harmful posts, with no new
-false rejections of legitimate ones."
+**Talking point:** "The whole solar listing scores 0.000, so on its own the model
+would publish it. The 'register now with a small fee' sentence alone scores
+0.98, so the post is rejected. A sentence that's only somewhat risky, like
+'Earn 50000 per week from home' (0.64), gets a revise prompt with that sentence
+highlighted instead."
 
 ### 4.9 Mentioning people is fine
 
@@ -267,13 +267,35 @@ For terminal and setup problems, see the troubleshooting section of your termina
 
 ---
 
+## 6b. Articles page: moderation inside the real publishing flow
+
+Open **http://127.0.0.1:8000/articles** (same server, same `DEMO_PAGE=1`). It
+reproduces the Business Dashboard's Articles tab and "Write article" modal,
+with moderation wired into **Publish**. Click **+ Write Article** and try these
+(each flow is covered by an automated browser test):
+
+| Title | Body | What happens |
+|---|---|---|
+| Cotton bedsheets for wholesale buyers | Cotton bedsheets in king and queen sizes, 300 thread count. Bulk orders welcome. | **Published**; "1 of 2 free article publishes left" |
+| PVC pipes for contractors | High quality PVC pipes, ISI marked, available in all sizes. Earn 50000 per week from home, no experience needed. | **Needs changes**: "Your article needs a few changes", with the "Earn 50000…" sentence highlighted in the editor. Click **Show** to select it. |
+| Investment opportunity | Invest now and double your money in 7 days. | **Rejected**: "…community policies on fraud and scams" |
+| Our supplier portal | Log in to our supplier portal to see prices. Select "our supplier portal" and use the 🔗 button to link it to `https://paypa1-verify.example/login`. | **Rejected**: the hidden link URL is checked too |
+
+Then show the **Needs changes** and **Rejected** tabs, which keep those articles
+with their reasons. Also show that **Save as Draft** publishes nothing and
+isn't checked.
+
+**Talking point:** "Nothing waits in a moderator queue. Honest authors fix one
+highlighted sentence and publish in seconds; scams are stopped at the Publish
+button."
+
 ## 7. If you're asked about limitations
 
 - **There's no human-review queue.** Middle-band content goes back to its author with the problem highlighted. Rejections name the policy area, such as "fraud and scams", but deliberately don't highlight the trigger words, so people posting scams can't learn how to reword around the filters. That's one setting (`highlight_on_reject`) in `config/feedback_messages.yaml`.
-- **The live model is v3** (`models/v3`; the previous v1 model is in `models/v1` and can be restored with `dir: models/v1` in `settings.yaml`). v3 still asks the authors of many legitimate posts to revise (it scores ordinary text at about 0.35–0.50). On its own, v3 misses scam sentences tacked onto clean listings. The **sentence scan** now catches most of these, but not all: "Cotton bedsheets… Work from home and earn big, message us for details." is still allowed, because its worst sentence scores 0.695, just under the 0.70 threshold. The ML team has been sent these examples.
+- **The live model is v3** (`models/v3`; v1 is in `models/v1`, restored with `dir: models/v1`). v3's "review" class fires on almost any prose that isn't a product listing, so its weight in the risk score is calibrated down to 0.25 (`label_weights` in `settings.yaml`). With that, all 36 legitimate test posts are allowed, and 12 of 18 harmful ones are caught. The model gives some harmful posts exactly the same output as ordinary text, so nothing can catch them without also flagging legitimate posts. Examples: "Looking for distributors… just register with a small fee", "She will regret the day she crossed me", "his thinking and mindset disturbing", and counterfeit "replica watches". These are with the ML team for retraining.
 - **Multi-sentence posts cost more.** The sentence scan scores every sentence on its own (up to 8), so a 3–4 sentence post takes about 30–45 ms of model time instead of about 11 ms. The INT8 model can't batch sentences without changing their scores, so they're scored one at a time.
 - **The thresholds (0.30 / 0.70) are placeholders.** They'll be tuned once the model is recalibrated. They're configuration values, so changing them needs no code change.
 - **The word and domain lists hold demo entries.** The production slur list comes from the policy team through a private file that isn't stored in git.
-- **Some negative words are deliberately not in the insult list**, because they have innocent business uses: *disturbing* ("He found the test results disturbing"), *toxic* ("toxic chemicals"), *cheat* ("cheat sheet"), *corrupt* ("a corrupt file"). "his thinking and mindset disturbing" therefore gets a revise prompt, not a reject. Full sentences such as "he is disturbing and toxic" are still rejected by the model.
+- **Some negative words are deliberately not in the insult list**, because they have innocent business uses: *disturbing* ("He found the test results disturbing"), *toxic* ("toxic chemicals"), *cheat* ("cheat sheet"), *corrupt* ("a corrupt file"). "his thinking and mindset disturbing" is therefore not caught by the rules, and the v3 model scores it like ordinary text, so it's allowed. Full sentences such as "he is disturbing and toxic" are still rejected by the model.
 - **The sentence check only looks at he, she, his, her, him, they, them and their.** "You are an idiot" isn't covered by it (the whole-text model score still applies). "You" was left out because it appears in almost every legitimate ad ("we deliver to you"). Some threats get only a revise with the v1 model ("I hope she dies…"). This is being passed to the ML team for the retrained model.
 - **The demo runs in sync mode**, with one request and one answer. An async mode (Celery with Redis) is built in for heavy load. It returns `pending` and processes the content in the background.

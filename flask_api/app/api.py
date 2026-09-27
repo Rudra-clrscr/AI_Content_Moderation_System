@@ -110,6 +110,19 @@ def demo_page():
     return send_from_directory(Path(__file__).parent / "static", "demo.html")
 
 
+_ARTICLES_DIR = Path(__file__).parent / "static" / "articles"
+
+
+@bp.get("/articles")
+@bp.get("/articles/<path:name>")
+def articles_page(name: str = "index.html"):
+    """Articles tab + Write-article modal with publish-time moderation (front-end reference).
+    Enabled with DEMO_PAGE=1, like /demo."""
+    if not _svc().settings.demo_page:
+        return _error(404, "not_found", "demo pages disabled (set DEMO_PAGE=1)")
+    return send_from_directory(_ARTICLES_DIR, name)
+
+
 @bp.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200

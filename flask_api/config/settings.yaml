@@ -10,10 +10,16 @@ model:
   intra_op_threads: 4      # measured on bonc-v1 (v3 is the same size): 70-token text p95 58 ms @1 thread, 28 ms @4.
                            # Keep workers x threads <= CPU cores.
   inter_op_threads: 1
-  label_weights:           # risk = sum(P(label) * weight). the model's labels are decisions,
+  label_weights:           # risk = sum(P(label) * weight). The model's labels are decisions,
     safe: 0.0              # so 1 - P(safe) would score a confident "review" as ~1.0 (reject).
-    review: 0.5            # Remove once model_meta.json ships its own label_weights.
-    reject: 1.0
+    review: 0.25           # Calibrated for v3: its "review" class fires on almost any prose that isn't
+    reject: 1.0            # a product listing (P(review) ~0.999 for ordinary articles, titles, reviews),
+                           # while P(reject) stays <= 0.015 on legitimate text. At 0.25 an "unsure"
+                           # text scores ~0.25 (allowed) and real risk comes from P(reject).
+                           # Measured on 36 legit / 18 harmful texts (full pipeline):
+                           #   review 0.50 -> legit allowed 8/36,  harmful caught 15/18
+                           #   review 0.25 -> legit allowed 36/36, harmful caught 12/18
+                           # Re-measure with scripts/compare_models.py for every new model.
 
 thresholds:                # placeholder values until the model is calibrated
   allow_max: 0.30          # risk <= 0.30         -> allow   (safety >= 0.70)
@@ -28,7 +34,7 @@ feedback:                  # what authors see when asked to revise or when rejec
   messages_file: config/feedback_messages.yaml
 
 limits:
-  max_chars: 10000
+  max_chars: 25000          # articles: 20,000-char body + title + link URLs
 
 latency_budget_ms: 30      # inference-only budget; overruns are logged, not failed
 
@@ -39,7 +45,8 @@ targeted_abuse:            # per-sentence model check for abuse aimed at a perso
 
 sentence_scan:             # score every sentence on its own: one reject-level sentence rejects the post
   enabled: true            # catches a scam tacked onto a clean listing (whole text can score ~0)
-  max_sentences: 8         # at most this many extra inferences (~10 ms each) per multi-sentence post
+  max_sentences: 400       # every sentence is scored on its own (~10 ms each): a 40-sentence article
+                           # takes ~0.5 s, 200 sentences ~2 s. 400 covers a full 25,000-character article.
 
 demo_page: false           # true (or DEMO_PAGE=1) serves the browser demo at /demo
 
