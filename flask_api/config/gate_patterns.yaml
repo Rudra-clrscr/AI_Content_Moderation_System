@@ -4,15 +4,19 @@
 # characters stripped, whitespace collapsed), so write patterns in lowercase.
 #
 # action:
-#   block -> reject immediately, model is skipped
-#   flag  -> model still runs, but the decision is raised to at least "review"
+#   block  -> reject immediately, model is skipped
+#   revise -> fixable: the author is shown the highlighted text and asked to edit it;
+#             the model still runs and can still reject
+#   flag   -> recorded in the result for the audit log only; doesn't change the decision
+#
+# Author-facing wording for each rule lives in config/feedback_messages.yaml.
 #
 # rules[].patterns   : Python regexes
 # rules[].terms      : literal words/phrases; escaped and word-bounded automatically
 # rules[].terms_file : path to a newline-separated term list (for lists that
 #                      shouldn't live in git, e.g. the slur list from policy)
 
-version: 1
+version: 2                   # 2: 'revise' action; no human review
 
 rules:
   - id: abuse.blocklist
@@ -80,9 +84,9 @@ rules:
 
   - id: profanity.wordlist
     category: profanity
-    action: flag
+    action: revise
     kind: words
-    description: Profanity not aimed at anyone - sent to human review, not rejected.
+    description: Profanity not aimed at anyone - the author is asked to remove it.
     terms_file:
       - config/private/wordlists/ldnoobw_en.txt
       - config/private/wordlists/google_profanity_en.txt
@@ -101,7 +105,7 @@ rules:
   - id: spam.url_shortener
     category: spam
     action: flag
-    description: Shortened links hide the destination.
+    description: Shortened links hide the destination. Recorded only; common in legitimate ads.
     patterns:
       - '\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|cutt\.ly|rb\.gy)/\S+'
 
@@ -125,14 +129,14 @@ rules:
 
   - id: payment.off_platform
     category: fraud
-    action: flag
-    description: Requests to pay via untraceable channels.
+    action: revise
+    description: Requests to pay via untraceable channels - the author is asked to remove them.
     patterns:
       - '\b(?:pay|payment|send)\b.{0,40}\b(?:gift\s*cards?|crypto|bitcoin|usdt|western\s+union|moneygram)\b'
 
   - id: contact.messenger_redirect
     category: spam
     action: flag
-    description: Pushing users off-platform to messaging apps.
+    description: WhatsApp/Telegram contact numbers. Recorded only; common in legitimate Indian B2B listings.
     patterns:
       - '\b(?:whatsapp|telegram|signal)\b.{0,20}\+?\d[\d\s-]{7,}'

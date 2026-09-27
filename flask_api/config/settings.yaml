@@ -18,10 +18,14 @@ model:
 thresholds:                # placeholder values until the model is calibrated
   allow_max: 0.30          # risk <= 0.30         -> allow   (safety >= 0.70)
   reject_min: 0.70         # risk >= 0.70         -> reject  (safety <= 0.30)
-                           # 0.30 < risk < 0.70   -> review
+                           # 0.30 < risk < 0.70   -> revise: the author is shown what to fix
+                           # (there is no human-review step)
 
 gate:
   patterns_file: config/gate_patterns.yaml
+
+feedback:                  # what authors see when asked to revise or when rejected
+  messages_file: config/feedback_messages.yaml
 
 limits:
   max_chars: 10000

@@ -1,0 +1,56 @@
+# What authors see when their post isn't published straight away.
+# Edit the wording here; no code change is needed.
+
+revise:
+  title: Your post needs a few changes
+  message: >-
+    Some parts of your post may go against BONC's community policies.
+    Edit the highlighted parts and post again.
+
+reject:
+  title: Your post can't be published
+  # {categories} is replaced with the policy areas, e.g. "fraud and scams".
+  message: >-
+    It appears to break BONC's community policies on {categories}.
+    If you think this is a mistake, contact support.
+  message_generic: >-
+    It appears to break BONC's community policies.
+    If you think this is a mistake, contact support.
+
+# Rejections name the policy area but don't highlight the exact words, so people
+# posting scams can't learn how to reword around the filters. Set to true to
+# highlight them anyway.
+highlight_on_reject: false
+
+# At most this many sentences are scored individually to find what to highlight
+# when the model asks for a revision (each is one extra model inference).
+max_highlight_sentences: 5
+
+# Human-readable names for rule categories, used in reject messages.
+categories:
+  abuse: abusive language
+  profanity: profanity
+  fraud: fraud and scams
+  spam: spam
+
+# Instruction shown next to each highlighted match, by rule id.
+rules:
+  payment.off_platform: >-
+    Payments must go through BONC. Remove requests to pay by crypto, gift cards
+    or money-transfer services.
+  profanity.wordlist: Remove the profanity. Keep posts professional.
+  abuse.targeted: Remove insults aimed at a person or business.
+  abuse.blocklist: Remove abusive language.
+  scam.advance_fee: Remove guaranteed-return or advance-fee claims.
+  spam.blacklisted_domain: Remove the link to a blocked website.
+  spam.url_shortener: Use the full web address instead of a shortened link.
+  contact.messenger_redirect: Buyers can contact you through BONC; you don't need to share a phone number.
+
+# Instructions for text highlighted by the model.
+model:
+  sentence: >-
+    This sentence may go against our community policies. Rephrase it so it's
+    factual, specific and respectful.
+  targeted: >-
+    This sentence about another person or business may come across as hostile.
+    Rephrase it respectfully, or remove it.

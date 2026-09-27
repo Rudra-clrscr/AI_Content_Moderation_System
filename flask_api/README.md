@@ -3,9 +3,29 @@
 This service wraps the DeBERTa-v3-small ONNX model in a Flask API. A request goes
 through three steps:
 
-1. **Layer 1 gate.** Regex and term-list rules in [config/gate_patterns.yaml](config/gate_patterns.yaml) can reject content on the spot (`block`) or force a human review (`flag`).
+1. **Layer 1 gate.** Regex and term-list rules in [config/gate_patterns.yaml](config/gate_patterns.yaml) can reject content on the spot (`block`), send it back to the author with the problem highlighted (`revise`), or just note it for the audit log (`flag`).
 2. **Model.** An ONNX Runtime session is loaded once at startup. It can be hot-swapped through `POST /v1/admin/model/reload`.
-3. **Threshold routing.** The risk score becomes `allow`, `review` or `reject`, using the thresholds in [config/settings.yaml](config/settings.yaml).
+3. **Threshold routing.** The risk score becomes `allow`, `revise` or `reject`, using the thresholds in [config/settings.yaml](config/settings.yaml).
+
+## Revise instead of human review
+
+There's no moderator queue. Content in the middle band, or content that matches
+a `revise` rule, goes back to its author, the way LinkedIn checks a post before
+publishing it:
+
+- **Rule matches** are highlighted exactly, using character offsets into the
+  author's original text, even through tricks like full-width letters or extra
+  spaces. Each one comes with the rule's instruction.
+- **Model concerns:** each sentence is scored on its own (up to
+  `max_highlight_sentences`, default 5), and the doubtful ones are highlighted,
+  so the author knows which sentence to rephrase.
+- **Rejects** name the policy area ("fraud and scams") but don't highlight the
+  trigger words, so bad actors can't learn to evade the filters. Set
+  `highlight_on_reject: true` to change this.
+
+All wording lives in [config/feedback_messages.yaml](config/feedback_messages.yaml).
+Allowed posts cost one inference (about 12 ms). A revise decision also scores
+each sentence to find what to highlight (about 45 ms for a 3-sentence post).
 
 The interfaces with the other two tracks are documented in [../contracts/](../contracts/).
 

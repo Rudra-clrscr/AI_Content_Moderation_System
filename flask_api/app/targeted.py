@@ -18,6 +18,22 @@ _WORD = re.compile(r"\w+")
 DEFAULT_SUBJECTS = ("he", "she", "his", "her", "him", "they", "them", "their")
 
 
+def sentence_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) of each non-empty sentence in `text`, trimmed of surrounding whitespace."""
+    spans, start = [], 0
+    for m in list(_SENTENCE_BREAK.finditer(text)) + [None]:
+        end = m.start() if m else len(text)
+        s, e = start, end
+        while s < e and text[s].isspace():
+            s += 1
+        while e > s and text[e - 1].isspace():
+            e -= 1
+        if e > s and _WORD.search(text, s, e):
+            spans.append((s, e))
+        start = m.end() if m else len(text)
+    return spans
+
+
 @dataclass(frozen=True)
 class TargetedAbuse:
     enabled: bool = True

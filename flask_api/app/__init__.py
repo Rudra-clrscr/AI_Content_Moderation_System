@@ -8,6 +8,7 @@ from typing import Callable
 from flask import Flask
 
 from app.config import Settings, load_settings
+from app.feedback import Feedback
 from app.gate import Gate
 from app.model import ModelRegistry, Scorer
 from app.pipeline import ModerationRequest, Pipeline
@@ -64,7 +65,8 @@ def create_app(
     app.extensions["moderation"] = Services(
         settings=settings,
         pipeline=Pipeline(Gate.from_yaml(settings.gate_patterns_file), models,
-                          settings.thresholds, settings.latency_budget_ms, settings.targeted),
+                          settings.thresholds, settings.latency_budget_ms, settings.targeted,
+                          Feedback.from_yaml(settings.feedback_messages_file)),
         models=models,
         sink=sink or build_sink(settings),
         enqueue=enqueue,

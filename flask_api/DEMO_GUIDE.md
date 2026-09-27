@@ -26,14 +26,14 @@ Each piece of content passes through four steps:
 
 ```
  content ──► 1. Regex gate ──► 2. DeBERTa model ──► 3. Threshold routing ──► 4. Audit log
-             (instant rules)    (AI risk score)       (allow / review / reject)
+             (instant rules)    (AI risk score)       (allow / revise / reject)
 ```
 
 | Step | What it does | Typical time |
 |---|---|---|
-| 1. Regex gate | Checks fixed rules: scam wording, abusive words, blocked domains. A **block** rejects immediately and skips the model. A **flag** forces at least a human review. | ~0.05 ms |
+| 1. Regex gate | Checks fixed rules: scam wording, abusive words, blocked domains. A **block** rejects immediately and skips the model. A **revise** rule highlights the problem so the author can fix it. A **flag** is only recorded. | ~0.1–0.5 ms |
 | 2. Model | A fine-tuned DeBERTa-v3-small, INT8-quantized, gives a risk score from 0 to 1. | ~10–25 ms |
-| 3. Routing | Risk ≤ 0.30 is **allowed**. Risk ≥ 0.70 is **rejected**. Anything in between goes to **human review**. | — |
+| 3. Routing | Risk ≤ 0.30 is **allowed**. Risk ≥ 0.70 is **rejected**. Anything in between is sent back to the author to **revise**, with the problem parts highlighted and an instruction for each. There's no human-review queue. | — |
 | 4. Audit log | Every decision is stored with its score, the model and rule versions, and the thresholds used. | — |
 
 ---
@@ -42,7 +42,7 @@ Each piece of content passes through four steps:
 
 Open **http://127.0.0.1:8000/demo**. The chips at the top of the page should read:
 
-`status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v1` · `gate rules 8` · `allow ≤ 0.30 · reject ≥ 0.70 (risk)`
+`status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v1` · `gate rules 8` · `allow ≤ 0.30 · revise · reject ≥ 0.70 (risk)`
 
 If they don't, see section 6.
 
@@ -53,15 +53,15 @@ refresh the page (`F5`) to clear the session table.
 
 ## 3. Run of show (about 10 minutes)
 
-The page has ten example buttons. Click them in this order. Each one also has
-a direct link (`http://127.0.0.1:8000/demo#1` to `#10`), which is handy if you
+The page has eleven example buttons. Click them in this order. Each one also has
+a direct link (`http://127.0.0.1:8000/demo#1` to `#11`), which is handy if you
 prepare browser tabs in advance.
 
 | # | Click | Result | What to say |
 |---|---|---|---|
 | 1 | **ALLOW**: steel valves | allow, risk 0.000 | "Normal business content is published immediately. Inference takes about 10 to 15 milliseconds." |
-| 2 | **REVIEW**: distributors | review, risk 0.50 | "Borderline content isn't auto-rejected. It goes to a human moderator." |
-| 3 | **REVIEW**: crypto payment | review, but the model says safe (0.005) | "This is why there are two layers. The model missed the off-platform payment. A rule flagged it, and a flag always forces human review." |
+| 2 | **REVISE**: basmati + "guaranteed income" | revise; only the "Earn guaranteed income…" sentence is highlighted | "Nothing waits in a moderator queue. Like LinkedIn's check before posting, the author sees exactly which sentence is the problem and why. They edit it and post again. Click **Edit post** and the text box selects that sentence." |
+| 3 | **REVISE**: crypto payment | revise by the **gate**; "payment in crypto" is highlighted, although the model alone says safe (0.005) | "This is why there are two layers. The model missed the off-platform payment. A rule catches it and tells the seller exactly what to remove." |
 | 4 | **REJECT**: bank details and OTP | reject, risk 0.999 | "Phishing is caught by the model." |
 | 5 | **REJECT**: threat | reject, risk 1.000 | "Abuse and threats are caught too." |
 | 6 | **REJECT**: double your money | reject by the **gate**; the model step is struck out | "Obvious scams never reach the model. The rule check costs about 0.05 ms, so it's a free first filter." |
@@ -69,8 +69,9 @@ prepare browser tabs in advance.
 | 8 | **REJECT**: phishing domain | reject by the gate | "Known scam domains are blocked outright. Adding one is a one-line config change, with no retraining needed." |
 | 9 | **REJECT**: insult aimed at a business | reject by the gate (`abuse.targeted`) | "Comments about other businesses can't be used for abuse. When a sentence mentions someone (he, she, they, their…) and then insults them, it's rejected instantly." |
 | 10 | **REJECT**: threat hidden in a good review | reject by the **sentence check**; the whole text scores almost 0 | "The whole comment looks positive, so the model alone would publish it. We also score each sentence that talks about someone. This one is a threat, so the whole comment is rejected." |
-| 11 | Paste sentences from section 4 | — | Take requests from the audience, using the sentence bank below. |
-| 12 | Expand **Full result payload** | — | "This is exactly what goes into the audit table: score, decision, model and rule versions, and thresholds. Every decision can be traced later." |
+| 11 | **REVISE**: "time wasters will be blocked" | revise; the rude sentence is highlighted | "Rude but not hateful: the seller keeps the listing and only rephrases one line." |
+| 12 | Paste sentences from section 4 | — | Take requests from the audience, using the sentence bank below. |
+| 13 | Expand **Full result payload** | — | "This is exactly what goes into the audit table: score, decision, model and rule versions, and thresholds. Every decision can be traced later." |
 
 Finish on the **This session** table, which shows the count of each decision and the mean inference time.
 
@@ -92,24 +93,29 @@ Copy a sentence into the **Content** box, pick the content type, and click **Mod
 
 **Talking point:** aggressive but legitimate sales language ("70% off", "hurry") is still allowed.
 
-### 4.2 Review: the model is unsure
+### 4.2 Revise: the model is unsure about a sentence
+
+The author gets the post back with the sentence highlighted and an instruction
+to rephrase it. When a post has several sentences, only the doubtful one is
+highlighted.
 
 | Sentence | Content type | Result |
 |---|---|---|
-| Looking for distributors in Gujarat. Very high margins, no investment needed, just register with a small fee. | Post | review · 0.501 |
-| Work from home and earn big, message us for details | Advertisement | review · 0.562 |
-| Our competitor sells fake products, do not trust them | Post | review · 0.505 |
-| Limited stock! Contact us on WhatsApp for wholesale prices, full payment in advance only. | Advertisement | review · 0.452 |
+| Premium basmati rice exporter, FSSAI certified. Bulk orders welcome. Earn guaranteed income by becoming our agent, contact us today. | Product listing | revise · highlights "Earn guaranteed income…" |
+| Cotton bedsheets in king and queen sizes, 300 thread count. Our competitor sells fake products, do not trust them. | Product listing | revise · highlights "Our competitor sells fake products…" |
+| Ceramic floor tiles, 600x600 mm, glossy and matt finish. Only serious buyers, time wasters will be blocked. | Product listing | revise · highlights "Only serious buyers…" |
+| Work from home and earn big, message us for details | Advertisement | revise · 0.562 |
 
-### 4.3 Review: a rule flag overrides a "safe" model score
+### 4.3 Revise: a rule asks the author to remove something
 
 | Sentence | Content type | Model alone | Final |
 |---|---|---|---|
-| Premium basmati rice exporter, 20 years in business, FSSAI certified. Bulk orders welcome. Payment accepted via bitcoin. | Product listing | safe · 0.000 | **review** (flag `payment.off_platform`) |
-| Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order. We also accept payment in crypto. | Product listing | safe · 0.005 | **review** (flag `payment.off_platform`) |
+| Premium basmati rice exporter, 20 years in business, FSSAI certified. Bulk orders welcome. Payment accepted via bitcoin. | Product listing | safe · 0.000 | **revise** by gate (`payment.off_platform`); highlights "Payment accepted via bitcoin" |
+| Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order. We also accept payment in crypto. | Product listing | safe · 0.005 | **revise** by gate (`payment.off_platform`); highlights "payment in crypto" |
 
 **Talking point:** "The model on its own would publish this. The rule catches a
-payment channel that's risky for buyers, and a person checks it."
+payment channel that's risky for buyers and tells the seller exactly what to
+remove, so they can fix it in seconds."
 
 For contrast, paste the basmati sentence **without** the last sentence ("Payment accepted via bitcoin."). It comes back **allow**.
 
@@ -203,12 +209,12 @@ The rules live in `flask_api/config/gate_patterns.yaml`.
 |---|---|---|
 | `abuse.blocklist` | block | `moron`, `scumbag`, `go to hell`, plus the private policy list when present |
 | `abuse.targeted` | block | A subject word (he, she, his, her, him, they, them, their) followed **later in the same sentence** by a curated insult (idiot, pathetic, clown, loser…) or a word from the downloaded profanity lists |
-| `profanity.wordlist` | flag | Profanity from the downloaded lists that isn't aimed at anyone: sent to review, not rejected |
+| `profanity.wordlist` | revise | Profanity from the downloaded lists that isn't aimed at anyone. The word is highlighted and the author is asked to remove it |
 | `spam.blacklisted_domain` | block | `fast-cash-bonanza.example`, `claim-free-gift.test`, `paypa1-verify.example` |
 | `scam.advance_fee` | block | "guaranteed returns/profits of N%", "double/triple your money/investment", "pay a (small) processing/release/clearance fee" |
-| `spam.url_shortener` | flag | Short links: `bit.ly/…`, `tinyurl.com/…`, `t.co/…`, `goo.gl/…` and similar |
-| `payment.off_platform` | flag | "pay/payment/send" within about 40 characters of "gift card", "crypto", "bitcoin", "USDT", "Western Union", "MoneyGram" |
-| `contact.messenger_redirect` | flag | "WhatsApp/Telegram/Signal" followed by a phone number |
+| `spam.url_shortener` | flag | Short links: `bit.ly/…`, `tinyurl.com/…`, `t.co/…`, `goo.gl/…` and similar. Recorded only, because they're common in legitimate ads |
+| `payment.off_platform` | revise | "pay/payment/send" within about 40 characters of "gift card", "crypto", "bitcoin", "USDT", "Western Union", "MoneyGram". The phrase is highlighted and the author is asked to remove it |
+| `contact.messenger_redirect` | flag | "WhatsApp/Telegram/Signal" followed by a phone number. Recorded only, because it's common in legitimate Indian B2B listings |
 
 The demo domains use reserved endings (`.example`, `.test`) on purpose, so no real website is named.
 
@@ -239,8 +245,9 @@ For terminal and setup problems, see the troubleshooting section of your termina
 
 ## 7. If you're asked about limitations
 
-- **Model v1 is conservative.** Some legitimate text (for example "Family-run textile mill in Surat…") lands in review, and it misses some counterfeit listings ("replica watches"). The ML team is recalibrating it. Until then, the review queue catches its mistakes instead of wrongly rejecting content.
+- **There's no human-review queue.** Middle-band content goes back to its author with the problem highlighted. Rejections name the policy area, such as "fraud and scams", but deliberately don't highlight the trigger words, so people posting scams can't learn how to reword around the filters. That's one setting (`highlight_on_reject`) in `config/feedback_messages.yaml`.
+- **Model v1 is often unsure.** It asks the authors of some legitimate text (for example "Family-run textile mill in Surat…") to revise, and on short sentences it sometimes highlights the wrong one. It also misses some harmful content: counterfeit listings ("replica watches"), and a scam sentence tacked onto a clean listing ("High quality PVC pipes… Earn 50000 per week from home" is allowed). The ML team is retraining the model.
 - **The thresholds (0.30 / 0.70) are placeholders.** They'll be tuned once the model is recalibrated. They're configuration values, so changing them needs no code change.
 - **The word and domain lists hold demo entries.** The production slur list comes from the policy team through a private file that isn't stored in git.
-- **The sentence check only looks at he, she, his, her, him, they, them and their.** "You are an idiot" isn't covered by it (the whole-text model score still applies). "You" was left out because it appears in almost every legitimate ad ("we deliver to you"). Some threats also slip through to review with the v1 model ("I hope she dies…"), which is being passed to the ML team for the retrained model.
+- **The sentence check only looks at he, she, his, her, him, they, them and their.** "You are an idiot" isn't covered by it (the whole-text model score still applies). "You" was left out because it appears in almost every legitimate ad ("we deliver to you"). Some threats get only a revise with the v1 model ("I hope she dies…"). This is being passed to the ML team for the retrained model.
 - **The demo runs in sync mode**, with one request and one answer. An async mode (Celery with Redis) is built in for heavy load. It returns `pending` and processes the content in the background.
