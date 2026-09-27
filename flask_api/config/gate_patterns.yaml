@@ -26,6 +26,78 @@ rules:
       - go to hell
     terms_file: config/private/slurs.txt      # optional, gitignored; skipped if missing
 
+  - id: abuse.targeted
+    category: abuse
+    action: block
+    kind: targeted
+    description: Insults or profanity aimed at a person or business - a subject
+      word (he, she, they...) followed later in the same sentence by a listed term.
+      "They are idiots" is blocked; "the idiot-proof design" is not.
+    subjects: [he, she, his, her, him, they, them, their]
+    terms:                                    # curated personal insults (committed)
+      - idiot
+      - moron
+      - imbecile
+      - stupid
+      - fool
+      - loser
+      - scum
+      - scumbag
+      - jerk
+      - clown
+      - pathetic
+      - worthless
+      - lowlife
+      - degenerate
+      - nitwit
+      - halfwit
+      - dimwit
+      - cretin
+      - hypocrite
+      - coward
+      - psycho
+      - dumbass
+      - bastard
+      - sucks
+      - go to hell
+    terms_file:                               # downloaded by scripts/fetch_wordlists.py (gitignored)
+      - config/private/wordlists/ldnoobw_en.txt
+      - config/private/wordlists/google_profanity_en.txt
+    exclude_file: config/wordlist_exclusions.txt
+    exclude:                                  # not insults when aimed at a business
+      - viagra
+      - cialis
+      - cyalis
+      - v1gra
+      - v14gra
+      - sexual
+      - sexually
+      - sexuality
+      - intercourse
+      - lovemaking
+      - nudity
+      - topless
+
+  - id: profanity.wordlist
+    category: profanity
+    action: flag
+    kind: words
+    description: Profanity not aimed at anyone - sent to human review, not rejected.
+    terms_file:
+      - config/private/wordlists/ldnoobw_en.txt
+      - config/private/wordlists/google_profanity_en.txt
+    exclude_file: config/wordlist_exclusions.txt
+    exclude:                                  # innocent when not aimed at someone
+      - suck
+      - sucks
+      - retard
+      - retards
+      - spastic
+      - tranny
+      - swastika
+      - sexual
+      - sexuality
+
   - id: spam.url_shortener
     category: spam
     action: flag

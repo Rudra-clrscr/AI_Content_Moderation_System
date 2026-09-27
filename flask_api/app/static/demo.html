@@ -156,6 +156,10 @@ const EXAMPLES = [
     text: "Our supplier is a scumbag, never order from them" },
   { tag: "reject", note: "gate: blocked phishing domain", type: "post",
     text: "Verify your seller account at paypa1-verify.example today" },
+  { tag: "reject", note: "gate: insult aimed at a business (he/she/they + insult)", type: "post",
+    text: "Their owner is a pathetic clown, avoid this shop" },
+  { tag: "reject", note: "targeted: post looks fine overall, one sentence threatens them", type: "post",
+    text: "Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop." },
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -227,6 +231,11 @@ function reason(b) {
   const blocks = b.gate_matches.filter((m) => m.action === "block");
   const flags = b.gate_matches.filter((m) => m.action === "flag");
   if (b.decided_by === "gate") return `Blocked by Layer 1 rule <b>${esc(blocks[0]?.rule_id)}</b>. The model was not called.`;
+  if (b.decided_by === "targeted") {
+    const hit = b.targeted_segments.find((x) => x.risk_score >= thresholds.reject_min) || b.targeted_segments[0];
+    return `The whole text scored only ${fmt(b.risk_score)}, but the sentence aimed at someone, ` +
+      `“<b>${esc(b.content.slice(hit.start, hit.end))}</b>”, scored ${fmt(hit.risk_score)} ≥ ${thresholds.reject_min}.`;
+  }
   const s = b.risk_score, t = thresholds;
   let why = s >= t.reject_min ? `risk ${fmt(s)} ≥ ${t.reject_min}` : s <= t.allow_max ? `risk ${fmt(s)} ≤ ${t.allow_max}` : `${t.allow_max} < risk ${fmt(s)} < ${t.reject_min}`;
   if (flags.length && b.decision === "review" && s <= t.allow_max)
@@ -244,6 +253,7 @@ function showResult(b, roundTrip) {
     <div class="pipeline">
       <span class="step on">1 · Regex gate</span><span class="arrow">→</span>
       <span class="step ${gate ? "skip" : "on"}">2 · DeBERTa model</span><span class="arrow">→</span>
+      <span class="step ${b.targeted_segments.length ? "on" : "skip"}">2b · Sentence check</span><span class="arrow">→</span>
       <span class="step ${gate ? "skip" : "on"}">3 · Threshold routing</span><span class="arrow">→</span>
       <span class="step on">4 · SQL log</span>
     </div>
@@ -257,6 +267,8 @@ function showResult(b, roundTrip) {
         ${labels.length ? labels.map(([k, v]) => `
           <div class="bar"><span>${esc(k)}</span><span class="track"><span class="fill" style="display:block;width:${v * 100}%;background:${colour[k] || "var(--accent)"}"></span></span><span class="num">${fmt(v, 3)}</span></div>`).join("")
           : `<div class="why">Skipped: the gate already decided.</div>`}
+        ${b.targeted_segments.length ? `<h2 style="margin-top:14px">Sentences aimed at someone</h2>` +
+          b.targeted_segments.map((x) => `<div class="bar"><span>risk</span><span class="why" style="font-size:13px">${esc(b.content.slice(x.start, x.end))}</span><span class="num">${fmt(x.risk_score, 3)}</span></div>`).join("") : ""}
         <h2 style="margin-top:14px">Layer 1 matches</h2>
         ${b.gate_matches.length ? b.gate_matches.map((m) => `<span class="match ${m.action}">${esc(m.action)} · ${esc(m.rule_id)}</span>`).join("") : `<span class="why">none</span>`}
       </div>

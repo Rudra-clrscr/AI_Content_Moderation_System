@@ -13,10 +13,11 @@ from enum import Enum
 from app.gate import Gate, GateResult
 from app.model import ModelRegistry
 from app.routing import Decision, Thresholds, route
+from app.targeted import TargetedAbuse
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"  # 1.1: targeted_segments, decided_by "targeted"
 
 
 class ContentType(str, Enum):
@@ -29,6 +30,7 @@ class ContentType(str, Enum):
 class Stage(str, Enum):
     GATE = "gate"     # decided by Layer 1, model skipped
     MODEL = "model"   # decided by model score (possibly floored by a gate flag)
+    TARGETED = "targeted"  # whole text passed, but a sentence aimed at someone scored reject
 
 
 @dataclass(frozen=True)
@@ -52,11 +54,13 @@ class ModerationRequest:
 
 
 class Pipeline:
-    def __init__(self, gate: Gate, models: ModelRegistry, thresholds: Thresholds, latency_budget_ms: float = 30.0):
+    def __init__(self, gate: Gate, models: ModelRegistry, thresholds: Thresholds, latency_budget_ms: float = 30.0,
+                 targeted: TargetedAbuse | None = None):
         self.gate = gate
         self.models = models
         self.thresholds = thresholds
         self.latency_budget_ms = latency_budget_ms
+        self.targeted = targeted or TargetedAbuse(enabled=False)
 
     def run_gate(self, req: ModerationRequest) -> tuple[GateResult, float]:
         t0 = time.perf_counter()
@@ -65,7 +69,7 @@ class Pipeline:
 
     def gate_only_result(self, req: ModerationRequest, gate: GateResult, gate_ms: float) -> dict:
         """Final result for content blocked by Layer 1 (no model call)."""
-        return self._build(req, Decision.REJECT, Stage.GATE, gate, None, gate_ms, None)
+        return self._build(req, Decision.REJECT, Stage.GATE, gate, None, gate_ms, None, [], None)
 
     def moderate(self, req: ModerationRequest, gate: GateResult | None = None, gate_ms: float = 0.0) -> dict:
         t0 = time.perf_counter()
@@ -80,10 +84,25 @@ class Pipeline:
                         scored.inference_ms, self.latency_budget_ms, req.request_id)
         floor = Decision.REVIEW if gate.flagged else Decision.ALLOW
         decision = route(scored.risk_score, self.thresholds, floor=floor)
-        total = gate_ms + (time.perf_counter() - t0) * 1000
-        return self._build(req, decision, Stage.MODEL, gate, scored, gate_ms, total)
+        stage = Stage.MODEL
+        inference_ms = scored.inference_ms
 
-    def _build(self, req, decision, stage, gate, scored, gate_ms, total_ms) -> dict:
+        # Targeted check: only escalates, so skip it when already rejecting.
+        segments: list[dict] = []
+        if self.targeted.enabled and decision is not Decision.REJECT:
+            for start, end in self.targeted.segments(req.content):
+                seg = self.models.score(req.content[start:end])
+                inference_ms += seg.inference_ms
+                segments.append({"start": start, "end": end,
+                                 "risk_score": round(seg.risk_score, 6), "predicted_label": seg.label})
+                if seg.risk_score >= self.thresholds.reject_min:
+                    decision, stage = Decision.REJECT, Stage.TARGETED
+                    break
+
+        total = gate_ms + (time.perf_counter() - t0) * 1000
+        return self._build(req, decision, stage, gate, scored, gate_ms, total, segments, inference_ms)
+
+    def _build(self, req, decision, stage, gate, scored, gate_ms, total_ms, segments, inference_ms) -> dict:
         return {
             "schema_version": SCHEMA_VERSION,
             "request_id": req.request_id,
@@ -98,12 +117,14 @@ class Pipeline:
             "predicted_label": None if scored is None else scored.label,
             "label_scores": None if scored is None else {k: round(v, 6) for k, v in scored.label_scores.items()},
             "gate_matches": [m.as_dict() for m in gate.matches],
+            # Offsets into `content` (text itself isn't repeated, so logs stay content-free).
+            "targeted_segments": segments,
             "gate_version": self.gate.version,
             "model_version": None if scored is None else scored.model_version,
             "thresholds": self.thresholds.as_dict(),
             "latency_ms": {
                 "gate": round(gate_ms, 3),
-                "inference": None if scored is None else round(scored.inference_ms, 3),
+                "inference": None if inference_ms is None else round(inference_ms, 3),
                 "total": round(total_ms if total_ms is not None else gate_ms, 3),
             },
             "decided_at": datetime.now(timezone.utc).isoformat(),

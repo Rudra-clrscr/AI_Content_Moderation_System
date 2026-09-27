@@ -42,7 +42,7 @@ Each piece of content passes through four steps:
 
 Open **http://127.0.0.1:8000/demo**. The chips at the top of the page should read:
 
-`status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v1` · `gate rules 6` · `allow ≤ 0.30 · reject ≥ 0.70 (risk)`
+`status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v1` · `gate rules 8` · `allow ≤ 0.30 · reject ≥ 0.70 (risk)`
 
 If they don't, see section 6.
 
@@ -53,8 +53,8 @@ refresh the page (`F5`) to clear the session table.
 
 ## 3. Run of show (about 10 minutes)
 
-The page has eight example buttons. Click them in this order. Each one also has
-a direct link (`http://127.0.0.1:8000/demo#1` to `#8`), which is handy if you
+The page has ten example buttons. Click them in this order. Each one also has
+a direct link (`http://127.0.0.1:8000/demo#1` to `#10`), which is handy if you
 prepare browser tabs in advance.
 
 | # | Click | Result | What to say |
@@ -67,8 +67,10 @@ prepare browser tabs in advance.
 | 6 | **REJECT**: double your money | reject by the **gate**; the model step is struck out | "Obvious scams never reach the model. The rule check costs about 0.05 ms, so it's a free first filter." |
 | 7 | **REJECT**: scumbag | reject by the gate | "An abusive-language blocklist. In production it also loads the policy team's full list from a private file." |
 | 8 | **REJECT**: phishing domain | reject by the gate | "Known scam domains are blocked outright. Adding one is a one-line config change, with no retraining needed." |
-| 9 | Paste sentences from section 4 | — | Take requests from the audience, using the sentence bank below. |
-| 10 | Expand **Full result payload** | — | "This is exactly what goes into the audit table: score, decision, model and rule versions, and thresholds. Every decision can be traced later." |
+| 9 | **REJECT**: insult aimed at a business | reject by the gate (`abuse.targeted`) | "Comments about other businesses can't be used for abuse. When a sentence mentions someone (he, she, they, their…) and then insults them, it's rejected instantly." |
+| 10 | **REJECT**: threat hidden in a good review | reject by the **sentence check**; the whole text scores almost 0 | "The whole comment looks positive, so the model alone would publish it. We also score each sentence that talks about someone. This one is a threat, so the whole comment is rejected." |
+| 11 | Paste sentences from section 4 | — | Take requests from the audience, using the sentence bank below. |
+| 12 | Expand **Full result payload** | — | "This is exactly what goes into the audit table: score, decision, model and rule versions, and thresholds. Every decision can be traced later." |
 
 Finish on the **This session** table, which shows the count of each decision and the mean inference time.
 
@@ -157,6 +159,42 @@ These sentences contain parts of blocked words or phrases, but not the phrases t
 
 **Talking point:** "Rules match whole words and phrases, so honest listings aren't caught by accident."
 
+### 4.8 Abuse aimed at a person or business
+
+Two checks work together here. The **gate rule** `abuse.targeted` rejects a
+sentence where a subject word (he, she, his, her, him, they, them, their) is
+followed later in the same sentence by an insult or profanity. The **sentence
+check** has the model score each sentence that mentions someone, from the
+subject word to the end of the sentence, and rejects the whole post if that
+part scores at reject level.
+
+| Sentence | Content type | Result |
+|---|---|---|
+| Their owner is a pathetic clown, avoid this shop | Post | reject by gate (`abuse.targeted`) |
+| They are idiots, never buy from them | Post | reject by gate (`abuse.targeted`) |
+| He sucks at customer service | Post | reject by gate (`abuse.targeted`) |
+| Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop. | Post | reject · targeted (whole text 0.001, sentence 0.984) |
+| Fast shipping and good quality cotton, highly recommended for bulk buyers. He is a thief who steals from customers and belongs in jail. | Post | reject · targeted (whole text 0.027, sentence 0.992) |
+
+**Talking point:** "Scoring the whole comment would have allowed the threat,
+because the friendly first sentence dilutes it. Scoring the sentence that
+mentions someone catches it."
+
+### 4.9 Mentioning people is fine
+
+Subject words on their own don't trigger anything. Only insults or reject-level
+sentences aimed at someone do.
+
+| Sentence | Content type | Result |
+|---|---|---|
+| Great supplier. They delivered 500 units on time and the quality was excellent. | Post | allow · 0.000 |
+| Industrial vacuum cleaner, 2000W motor sucks up dust and water. Warranty provided with every order. | Product listing | allow · 0.000 |
+| LED panel lights with an idiot-proof click-fit design. BIS certified. Test certificates provided with every order. | Product listing | allow · 0.000 |
+
+**Talking point:** "'They delivered on time' is allowed. 'Sucks' in a vacuum
+cleaner ad isn't aimed at anyone, and 'idiot-proof' is one word, so neither
+triggers the rules."
+
 ## 5. Gate rule reference
 
 The rules live in `flask_api/config/gate_patterns.yaml`.
@@ -164,6 +202,8 @@ The rules live in `flask_api/config/gate_patterns.yaml`.
 | Rule | Action | Triggers on |
 |---|---|---|
 | `abuse.blocklist` | block | `moron`, `scumbag`, `go to hell`, plus the private policy list when present |
+| `abuse.targeted` | block | A subject word (he, she, his, her, him, they, them, their) followed **later in the same sentence** by a curated insult (idiot, pathetic, clown, loser…) or a word from the downloaded profanity lists |
+| `profanity.wordlist` | flag | Profanity from the downloaded lists that isn't aimed at anyone: sent to review, not rejected |
 | `spam.blacklisted_domain` | block | `fast-cash-bonanza.example`, `claim-free-gift.test`, `paypa1-verify.example` |
 | `scam.advance_fee` | block | "guaranteed returns/profits of N%", "double/triple your money/investment", "pay a (small) processing/release/clearance fee" |
 | `spam.url_shortener` | flag | Short links: `bit.ly/…`, `tinyurl.com/…`, `t.co/…`, `goo.gl/…` and similar |
@@ -171,6 +211,12 @@ The rules live in `flask_api/config/gate_patterns.yaml`.
 | `contact.messenger_redirect` | flag | "WhatsApp/Telegram/Signal" followed by a phone number |
 
 The demo domains use reserved endings (`.example`, `.test`) on purpose, so no real website is named.
+
+The downloaded profanity lists (about 900 words after exclusions) come from
+[LDNOOBW](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words) (CC BY 4.0)
+and [google-profanity-words](https://github.com/coffee-and-fun/google-profanity-words) (MIT).
+`config/wordlist_exclusions.txt` removes entries with innocent B2B meanings, such as *flange*,
+*nipple* (pipe fittings), *hoe* (garden tools) and *cum* ("office-cum-warehouse").
 
 ---
 
@@ -185,7 +231,8 @@ For terminal and setup problems, see the troubleshooting section of your termina
 | **demo page disabled** | `DEMO_PAGE` wasn't set in the server's window. PowerShell and Command Prompt set it differently, so check your terminal guide's section 3. |
 | `service unreachable` in the header | The server window was closed or crashed. Start it again. |
 | `status not_ready` in the header | The model didn't load. Usually the model file wasn't downloaded: run `git lfs pull`, then restart the server. |
-| `gate rules` isn't 6 | You're running an older copy of the code. Run `git pull`, then restart the server. |
+| `gate rules 7` instead of 8 | The profanity word lists haven't been downloaded. Run `.venv\Scripts\python.exe scripts\fetch_wordlists.py`, then restart the server. |
+| `gate rules` is 6 or lower | You're running an older copy of the code. Run `git pull`, then restart the server. |
 | A sentence gives a different result | Check that it's pasted exactly. The v1 model is sensitive to small wording changes. |
 
 ---
@@ -195,4 +242,5 @@ For terminal and setup problems, see the troubleshooting section of your termina
 - **Model v1 is conservative.** Some legitimate text (for example "Family-run textile mill in Surat…") lands in review, and it misses some counterfeit listings ("replica watches"). The ML team is recalibrating it. Until then, the review queue catches its mistakes instead of wrongly rejecting content.
 - **The thresholds (0.30 / 0.70) are placeholders.** They'll be tuned once the model is recalibrated. They're configuration values, so changing them needs no code change.
 - **The word and domain lists hold demo entries.** The production slur list comes from the policy team through a private file that isn't stored in git.
+- **The sentence check only looks at he, she, his, her, him, they, them and their.** "You are an idiot" isn't covered by it (the whole-text model score still applies). "You" was left out because it appears in almost every legitimate ad ("we deliver to you"). Some threats also slip through to review with the v1 model ("I hope she dies…"), which is being passed to the ML team for the retrained model.
 - **The demo runs in sync mode**, with one request and one answer. An async mode (Celery with Redis) is built in for heavy load. It returns `pending` and processes the content in the background.

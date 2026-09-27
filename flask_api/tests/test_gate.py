@@ -88,7 +88,13 @@ def test_terms_file_loaded(tmp_path):
 def test_shipped_config_loads_every_rule():
     from app.config import PROJECT_ROOT
     g = Gate.from_yaml(PROJECT_ROOT / "config" / "gate_patterns.yaml")
-    assert len(g.rules) == 6  # no rule may be silently inactive
+    ids = {r.id for r in g.rules}
+    # Every rule with committed patterns/terms must be active; only profanity.wordlist
+    # depends solely on the downloaded (gitignored) word lists.
+    assert ids >= {"abuse.blocklist", "abuse.targeted", "spam.blacklisted_domain", "scam.advance_fee",
+                   "spam.url_shortener", "payment.off_platform", "contact.messenger_redirect"}
+    lists = PROJECT_ROOT / "config" / "private" / "wordlists"
+    assert ("profanity.wordlist" in ids) == any(lists.glob("*.txt"))
 
 
 @pytest.mark.parametrize("text,rule", [
@@ -108,3 +114,8 @@ def test_shipped_demo_terms_block(text, rule):
 def test_shipped_demo_terms_are_word_bounded(text):
     from app.config import PROJECT_ROOT
     assert not Gate.from_yaml(PROJECT_ROOT / "config" / "gate_patterns.yaml").check(text).matches
+
+
+def test_sentence_split_handles_numbers():
+    from app.gate import sentences
+    assert sentences("price 2.5 kg. he said 50. ok") == ["price 2.5 kg", " he said 50", " ok"]
