@@ -13,6 +13,7 @@ Env overrides (all optional):
     RESULT_SINK           sql | log
     DEMO_PAGE             1 to serve the demo UI at /demo (off by default)
     TARGETED_ABUSE        0 to turn off per-sentence scoring of text aimed at someone
+    SENTENCE_SCAN         0 to turn off scoring every sentence on its own
     DB_SERVER, DB_NAME    SQL Server host and database
     DB_USER, DB_PASSWORD  SQL auth; if DB_USER is unset, Windows auth (Trusted_Connection) is used
     DB_DRIVER             ODBC driver name (default "ODBC Driver 18 for SQL Server")
@@ -31,7 +32,7 @@ import yaml
 from dotenv import load_dotenv
 
 from app.routing import Thresholds
-from app.targeted import DEFAULT_SUBJECTS, TargetedAbuse
+from app.targeted import DEFAULT_SUBJECTS, SentenceScan, TargetedAbuse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SETTINGS = PROJECT_ROOT / "config" / "settings.yaml"
@@ -64,6 +65,7 @@ class Settings:
     result_sink: str = "sql"
     demo_page: bool = False
     targeted: TargetedAbuse = field(default_factory=TargetedAbuse)
+    sentence_scan: SentenceScan = field(default_factory=SentenceScan)
 
     def model_kwargs(self) -> dict:
         """Keyword args for ModelRegistry.load / OnnxScorer."""
@@ -92,6 +94,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
     celery = raw.get("celery", {})
     db = raw.get("database", {})
     ta = raw.get("targeted_abuse", {})
+    sc = raw.get("sentence_scan", {})
     env = os.environ.get
 
     return Settings(
@@ -127,6 +130,10 @@ def load_settings(path: str | Path | None = None) -> Settings:
             enabled=_as_bool(env("TARGETED_ABUSE", ta.get("enabled", True))),
             subjects=tuple(ta.get("subjects") or DEFAULT_SUBJECTS),
             max_segments=int(ta.get("max_segments", 3)),
+        ),
+        sentence_scan=SentenceScan(
+            enabled=_as_bool(env("SENTENCE_SCAN", sc.get("enabled", True))),
+            max_sentences=int(sc.get("max_sentences", 8)),
         ),
     )
 

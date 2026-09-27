@@ -53,7 +53,7 @@ def _load_model(**_):
     models = ModelRegistry()
     models.load(s.model_backend, s.model_dir, **s.model_kwargs())
     _pipeline = Pipeline(Gate.from_yaml(s.gate_patterns_file), models, s.thresholds, s.latency_budget_ms, s.targeted,
-                         Feedback.from_yaml(s.feedback_messages_file))
+                         Feedback.from_yaml(s.feedback_messages_file), s.sentence_scan)
 
 
 def run_moderation(payload: dict) -> dict:

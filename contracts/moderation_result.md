@@ -27,7 +27,7 @@ Layer 1 gate blocks the content:
 
 ```json
 {
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "request_id": "5b0c7e0e-…",
   "status": "completed",
   "content_id": "LST-10293",
@@ -41,6 +41,7 @@ Layer 1 gate blocks the content:
   "label_scores": {"safe": 0.959, "spam": 0.03, "fraud": 0.011},
   "gate_matches": [],
   "targeted_segments": [],
+  "sentence_scores": [],
   "feedback": null,
   "gate_version": 1,
   "model_version": "deberta-v3-small-int8-2026.10.01",
@@ -53,8 +54,9 @@ Layer 1 gate blocks the content:
 | Field | Notes |
 |---|---|
 | `decision` | `allow` / `revise` / `reject`. *Changed in 1.2:* `review` was replaced by `revise`. There's no human-review queue; `revise` content isn't published, and its author is shown what to fix (see `feedback`) and can resubmit. |
-| `decided_by` | `gate` means a Layer 1 rule decided: a `block` rule (model skipped), or a `revise` rule on content the model would have allowed. After a block, `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. `targeted` means the whole text passed, but a sentence aimed at someone scored in the revise or reject band (see `targeted_segments`). |
+| `decided_by` | `gate` means a Layer 1 rule decided: a `block` rule (model skipped), or a `revise` rule on content the model would have allowed. After a block, `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. `targeted` means the whole text passed, but a sentence aimed at someone scored in the revise or reject band (see `targeted_segments`). `sentence` (added in 1.3) means one sentence, scored on its own, reached reject level (see `sentence_scores`). |
 | `gate_matches` | A list of `{rule_id, category, action, spans}`. `spans` are `[start, end]` character offsets into `content` (added in 1.2). `block` rejects, `revise` sends the content back to its author, and `flag` is recorded only. |
+| `sentence_scores` | *Added in 1.3.* For posts with 2 or more sentences: every sentence scored on its own, up to `sentence_scan.max_sentences`, as `{start, end, risk_score}` (offsets into `content`). Any sentence at or above `reject_min` rejects the post (`decided_by: "sentence"`). Empty for single-sentence posts, gate blocks, posts already rejected, or when the scan is off. |
 | `feedback` | *Added in 1.2.* Author-facing guidance, and `null` when allowed. `{title, message, issues, categories?}`. Each issue is `{start, end, source, message, rule_id?, category?, risk_score?}`, where `start`/`end` are offsets into `content` for the client to highlight, `source` is `rule` or `model`, and `message` is the instruction to show. For `reject`, `categories` names the policy areas, and `issues` is empty unless `highlight_on_reject` is enabled, so rejected authors aren't shown how to reword around the filters. Wording lives in `flask_api/config/feedback_messages.yaml`. |
 | `targeted_segments` | *Added in 1.1.* Sentences that mention someone (he, she, they, their…), scored separately: a list of `{start, end, risk_score, predicted_label}`, where `start`/`end` are character offsets into `content`. The text itself isn't repeated, so logs stay free of content. Empty when the check didn't run: gate block, whole text already rejected, no such sentence, or the check disabled. Not stored by the current SQL table; the Data team can add an `NVARCHAR(MAX)` JSON column if they want it. |
 | `thresholds`, `model_version`, `gate_version` | These are included so every logged decision can be reproduced and audited after thresholds or models change. |

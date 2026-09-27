@@ -6,7 +6,7 @@ from app.config import PROJECT_ROOT
 from app.feedback import Feedback
 from app.gate import Gate, normalize_with_map
 from app.model import ScoreResult
-from app.targeted import TargetedAbuse, sentence_spans
+from app.targeted import SentenceScan, TargetedAbuse, sentence_spans
 
 
 class KeywordScorer:
@@ -105,7 +105,8 @@ def test_highlight_scoring_is_capped(make_settings, tmp_path):
     msgs.write_text("max_highlight_sentences: 2\n")
     text = ". ".join(f"Sentence number {i}" for i in range(6))
     scorer = KeywordScorer(default=0.5)
-    body = post(app_with(make_settings, scorer, feedback_messages_file=msgs), text)
+    body = post(app_with(make_settings, scorer, feedback_messages_file=msgs,
+                         sentence_scan=SentenceScan(enabled=False)), text)
     assert body["decision"] == "revise"
     assert len(scorer.calls) == 1 + 2    # whole text + 2 sentences
 
