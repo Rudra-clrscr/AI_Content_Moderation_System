@@ -64,6 +64,26 @@ rules:
       - bastard
       - sucks
       - go to hell
+      # character attacks: words that are almost always aimed at a person, not a product.
+      # Deliberately NOT here (innocent B2B uses): disturbing ("found the results disturbing"),
+      # toxic ("toxic chemicals"), cheat ("cheat sheet"), evil ("evil-eye bracelets"), thief,
+      # corrupt ("a corrupt file").
+      - shameless
+      - shameful
+      - disgraceful
+      - despicable
+      - vile
+      - crook
+      - cheats
+      - cheater
+      - cheating
+      - liar
+      - fraudster
+      - scammer
+      - con artist
+      - conman
+      - sick-minded
+      - sick minded
     terms_file:                               # downloaded by scripts/fetch_wordlists.py (gitignored)
       - config/private/wordlists/ldnoobw_en.txt
       - config/private/wordlists/google_profanity_en.txt

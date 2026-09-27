@@ -179,6 +179,8 @@ part scores at reject level.
 | Their owner is a pathetic clown, avoid this shop | Post | reject by gate (`abuse.targeted`) |
 | They are idiots, never buy from them | Post | reject by gate (`abuse.targeted`) |
 | He sucks at customer service | Post | reject by gate (`abuse.targeted`) |
+| his thinking and mindset shameless | Post | reject by gate (`abuse.targeted`) |
+| he is a liar and a fraudster | Post | reject by gate (`abuse.targeted`) |
 | Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop. | Post | reject · targeted (whole text 0.001, sentence 0.984) |
 | Fast shipping and good quality cotton, highly recommended for bulk buyers. He is a thief who steals from customers and belongs in jail. | Post | reject · targeted (whole text 0.027, sentence 0.992) |
 
@@ -208,7 +210,7 @@ The rules live in `flask_api/config/gate_patterns.yaml`.
 | Rule | Action | Triggers on |
 |---|---|---|
 | `abuse.blocklist` | block | `moron`, `scumbag`, `go to hell`, plus the private policy list when present |
-| `abuse.targeted` | block | A subject word (he, she, his, her, him, they, them, their) followed **later in the same sentence** by a curated insult (idiot, pathetic, clown, loser…) or a word from the downloaded profanity lists |
+| `abuse.targeted` | block | A subject word (he, she, his, her, him, they, them, their) followed **later in the same sentence** by a curated insult (idiot, pathetic, clown, loser…) or character attack (shameless, disgraceful, liar, crook, fraudster…) or a word from the downloaded profanity lists |
 | `profanity.wordlist` | revise | Profanity from the downloaded lists that isn't aimed at anyone. The word is highlighted and the author is asked to remove it |
 | `spam.blacklisted_domain` | block | `fast-cash-bonanza.example`, `claim-free-gift.test`, `paypa1-verify.example` |
 | `scam.advance_fee` | block | "guaranteed returns/profits of N%", "double/triple your money/investment", "pay a (small) processing/release/clearance fee" |
@@ -249,5 +251,6 @@ For terminal and setup problems, see the troubleshooting section of your termina
 - **Model v1 is often unsure.** It asks the authors of some legitimate text (for example "Family-run textile mill in Surat…") to revise, and on short sentences it sometimes highlights the wrong one. It also misses some harmful content: counterfeit listings ("replica watches"), and a scam sentence tacked onto a clean listing ("High quality PVC pipes… Earn 50000 per week from home" is allowed). The ML team is retraining the model.
 - **The thresholds (0.30 / 0.70) are placeholders.** They'll be tuned once the model is recalibrated. They're configuration values, so changing them needs no code change.
 - **The word and domain lists hold demo entries.** The production slur list comes from the policy team through a private file that isn't stored in git.
+- **Some negative words are deliberately not in the insult list**, because they have innocent business uses: *disturbing* ("He found the test results disturbing"), *toxic* ("toxic chemicals"), *cheat* ("cheat sheet"), *corrupt* ("a corrupt file"). "his thinking and mindset disturbing" therefore gets a revise prompt, not a reject. Full sentences such as "he is disturbing and toxic" are still rejected by the model.
 - **The sentence check only looks at he, she, his, her, him, they, them and their.** "You are an idiot" isn't covered by it (the whole-text model score still applies). "You" was left out because it appears in almost every legitimate ad ("we deliver to you"). Some threats get only a revise with the v1 model ("I hope she dies…"). This is being passed to the ML team for the retrained model.
 - **The demo runs in sync mode**, with one request and one answer. An async mode (Celery with Redis) is built in for heavy load. It returns `pending` and processes the content in the background.
