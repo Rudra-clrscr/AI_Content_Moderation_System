@@ -37,7 +37,7 @@ python -m venv .venv && .venv/Scripts/activate      # Windows; on Linux/macOS: s
 pip install -r requirements-dev.txt
 pytest -q
 
-# The model is committed under models/current via Git LFS (install from https://git-lfs.com,
+# The live model is committed under models/v3 (previous model: models/v1) via Git LFS (install from https://git-lfs.com,
 # then `git lfs install` once). If you cloned before installing LFS, run `git lfs pull`.
 python wsgi.py
 
@@ -71,6 +71,10 @@ The profanity lists aren't committed. Download them with
 `python scripts/fetch_wordlists.py`, which pins each list to a commit and checks
 its checksum. Entries with innocent B2B meanings are removed by
 `config/wordlist_exclusions.txt`.
+
+Before switching to a new model, compare it with the current one:
+`python scripts/compare_models.py models/v1 models/v3` runs a fixed set of legitimate and harmful
+texts through the full pipeline with each model and lists every decision that changes.
 
 After changing the model, thresholds or rules, run
 `python scripts/verify_demo_sentences.py` against a running server. It checks

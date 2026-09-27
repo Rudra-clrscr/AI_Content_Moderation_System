@@ -41,7 +41,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 class Settings:
     mode: str = "sync"
     model_backend: str = "onnx"
-    model_dir: Path = PROJECT_ROOT / "models" / "current"
+    model_dir: Path = PROJECT_ROOT / "models" / "v3"
     intra_op_threads: int = 4
     inter_op_threads: int = 1
     label_weights: dict[str, float] | None = None
@@ -97,7 +97,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
     return Settings(
         mode=env("MODERATION_MODE", raw.get("mode", "sync")),
         model_backend=env("MODEL_BACKEND", model.get("backend", "onnx")),
-        model_dir=_resolve(env("MODEL_DIR", model.get("dir", "models/current"))),
+        model_dir=_resolve(env("MODEL_DIR", model.get("dir", "models/v3"))),
         intra_op_threads=int(env("MODEL_INTRA_OP_THREADS", model.get("intra_op_threads", 4))),
         inter_op_threads=int(model.get("inter_op_threads", 1)),
         label_weights=model.get("label_weights"),

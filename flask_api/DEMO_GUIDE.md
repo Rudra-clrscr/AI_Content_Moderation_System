@@ -4,7 +4,7 @@ This guide covers how to run a live demonstration of the moderation service:
 what to click, what to say, and a bank of tested sentences to paste.
 
 Every sentence here was checked against the real model
-(`deberta-v3-small-int8-bonc-v1`), so the decision listed next to it is what
+(`deberta-v3-small-int8-bonc-v3`), so the decision listed next to it is what
 you will see. **Paste the sentences exactly as written.** The v1 model can
 change its answer when a few words are added or removed.
 
@@ -42,7 +42,7 @@ Each piece of content passes through four steps:
 
 Open **http://127.0.0.1:8000/demo**. The chips at the top of the page should read:
 
-`status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v1` · `gate rules 8` · `allow ≤ 0.30 · revise · reject ≥ 0.70 (risk)`
+`status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v3` · `gate rules 8` · `allow ≤ 0.30 · revise · reject ≥ 0.70 (risk)`
 
 If they don't, see section 6.
 
@@ -59,16 +59,16 @@ prepare browser tabs in advance.
 
 | # | Click | Result | What to say |
 |---|---|---|---|
-| 1 | **ALLOW**: steel valves | allow, risk 0.000 | "Normal business content is published immediately. Inference takes about 10 to 15 milliseconds." |
-| 2 | **REVISE**: basmati + "guaranteed income" | revise; only the "Earn guaranteed income…" sentence is highlighted | "Nothing waits in a moderator queue. Like LinkedIn's check before posting, the author sees exactly which sentence is the problem and why. They edit it and post again. Click **Edit post** and the text box selects that sentence." |
-| 3 | **REVISE**: crypto payment | revise by the **gate**; "payment in crypto" is highlighted, although the model alone says safe (0.005) | "This is why there are two layers. The model missed the off-platform payment. A rule catches it and tells the seller exactly what to remove." |
+| 1 | **ALLOW**: steel valves | allow, risk 0.001 | "Normal business content is published immediately. Inference takes about 10 to 15 milliseconds." |
+| 2 | **REVISE**: cotton yarn + "everyone else will cheat you" | revise; only the "We are the only honest supplier…" sentence is highlighted | "Nothing waits in a moderator queue. Like LinkedIn's check before posting, the author sees exactly which sentence is the problem and why. They edit it and post again. Click **Edit post** and the text box selects that sentence." |
+| 3 | **REVISE**: crypto payment | revise by the **gate**; "payment in crypto" is highlighted, although the model alone says safe (0.000) | "This is why there are two layers. The model missed the off-platform payment. A rule catches it and tells the seller exactly what to remove." |
 | 4 | **REJECT**: bank details and OTP | reject, risk 0.999 | "Phishing is caught by the model." |
 | 5 | **REJECT**: threat | reject, risk 1.000 | "Abuse and threats are caught too." |
 | 6 | **REJECT**: double your money | reject by the **gate**; the model step is struck out | "Obvious scams never reach the model. The rule check costs about 0.05 ms, so it's a free first filter." |
 | 7 | **REJECT**: scumbag | reject by the gate | "An abusive-language blocklist. In production it also loads the policy team's full list from a private file." |
 | 8 | **REJECT**: phishing domain | reject by the gate | "Known scam domains are blocked outright. Adding one is a one-line config change, with no retraining needed." |
 | 9 | **REJECT**: insult aimed at a business | reject by the gate (`abuse.targeted`) | "Comments about other businesses can't be used for abuse. When a sentence mentions someone (he, she, they, their…) and then insults them, it's rejected instantly." |
-| 10 | **REJECT**: threat hidden in a good review | reject by the **sentence check**; the whole text scores almost 0 | "The whole comment looks positive, so the model alone would publish it. We also score each sentence that talks about someone. This one is a threat, so the whole comment is rejected." |
+| 10 | **REJECT**: threat hidden in a good review | reject by the **sentence check**; the whole text scores only 0.39 | "The whole comment looks mostly positive, so the model alone would only ask for a rephrase. We also score each sentence that talks about someone. This one is a threat, so the whole comment is rejected." |
 | 11 | **REVISE**: "time wasters will be blocked" | revise; the rude sentence is highlighted | "Rude but not hateful: the seller keeps the listing and only rephrases one line." |
 | 12 | Paste sentences from section 4 | — | Take requests from the audience, using the sentence bank below. |
 | 13 | Expand **Full result payload** | — | "This is exactly what goes into the audit table: score, decision, model and rule versions, and thresholds. Every decision can be traced later." |
@@ -85,11 +85,12 @@ Copy a sentence into the **Content** box, pick the content type, and click **Mod
 |---|---|---|
 | Cotton bedsheets in king and queen sizes, 300 thread count. Bulk orders welcome. | Product listing | allow · 0.000 |
 | High quality PVC pipes, ISI marked, available in all sizes. Bulk orders welcome. | Product listing | allow · 0.000 |
-| LED panel lights, 12W to 48W, BIS certified. Test certificates provided with every order. | Product listing | allow · 0.000 |
 | Solar panels 330W mono PERC, 25 year warranty. Installation support available. | Product listing | allow · 0.000 |
 | Ceramic floor tiles, 600x600 mm, glossy and matt finish. Samples available on request. | Product listing | allow · 0.000 |
-| Fresh alphonso mangoes from Ratnagiri, packed in 5 kg boxes. Bulk orders welcome. | Product listing | allow · 0.002 |
-| Get 70% off on all branded goods this week only, hurry before stock runs out! | Advertisement | allow · 0.044 |
+| Office chairs with lumbar support, available in mesh and leather. Free delivery in Bangalore. | Product listing | allow · 0.000 |
+| Handmade leather wallets and belts, available in brown and black. Bulk orders welcome. | Product listing | allow · 0.000 |
+| Stainless steel kitchen sinks, sizes 18 to 36 inches. Warranty provided with every order. | Product listing | allow · 0.000 |
+| Get 70% off on all branded goods this week only, hurry before stock runs out! | Advertisement | allow · 0.015 |
 
 **Talking point:** aggressive but legitimate sales language ("70% off", "hurry") is still allowed.
 
@@ -101,17 +102,18 @@ highlighted.
 
 | Sentence | Content type | Result |
 |---|---|---|
-| Premium basmati rice exporter, FSSAI certified. Bulk orders welcome. Earn guaranteed income by becoming our agent, contact us today. | Product listing | revise · highlights "Earn guaranteed income…" |
-| Cotton bedsheets in king and queen sizes, 300 thread count. Our competitor sells fake products, do not trust them. | Product listing | revise · highlights "Our competitor sells fake products…" |
+| Cotton yarn exporters since 1998. We are the only honest supplier, everyone else will cheat you. | Product listing | revise · highlights "We are the only honest supplier…" |
+| Stainless steel kitchen sinks, sizes 18 to 36 inches. Stupid questions will be ignored, read the listing first. | Product listing | revise · highlights "Stupid questions will be ignored…" |
+| Ceramic floor tiles, 600x600 mm, glossy and matt finish. Other sellers are liars, only we sell genuine tiles. | Product listing | revise · highlights "Other sellers are liars…" |
 | Ceramic floor tiles, 600x600 mm, glossy and matt finish. Only serious buyers, time wasters will be blocked. | Product listing | revise · highlights "Only serious buyers…" |
-| Work from home and earn big, message us for details | Advertisement | revise · 0.562 |
+| Work from home and earn big, message us for details | Advertisement | revise · 0.695 |
 
 ### 4.3 Revise: a rule asks the author to remove something
 
 | Sentence | Content type | Model alone | Final |
 |---|---|---|---|
 | Premium basmati rice exporter, 20 years in business, FSSAI certified. Bulk orders welcome. Payment accepted via bitcoin. | Product listing | safe · 0.000 | **revise** by gate (`payment.off_platform`); highlights "Payment accepted via bitcoin" |
-| Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order. We also accept payment in crypto. | Product listing | safe · 0.005 | **revise** by gate (`payment.off_platform`); highlights "payment in crypto" |
+| Cotton bedsheets in king and queen sizes, 300 thread count. We also accept payment in crypto. | Product listing | safe · 0.000 | **revise** by gate (`payment.off_platform`); highlights "payment in crypto" |
 
 **Talking point:** "The model on its own would publish this. The rule catches a
 payment channel that's risky for buyers and tells the seller exactly what to
@@ -125,8 +127,8 @@ For contrast, paste the basmati sentence **without** the last sentence ("Payment
 |---|---|---|
 | Send your bank details and OTP to claim your prize money today | Post | reject · 0.999 |
 | You people are idiots and I will destroy your business | Post | reject · 1.000 |
-| Earn 50000 per week from home!!! No experience needed, limited slots, DM now | Advertisement | reject · 0.998 |
-| Congratulations! You have won a lottery of 10 lakh rupees. Pay the processing charges to receive it. | Post | reject · 0.894 |
+| Earn 50000 per week from home!!! No experience needed, limited slots, DM now | Advertisement | reject · 0.999 |
+| his mindset is toxic and sick | Post | reject · 0.997 |
 
 ### 4.5 Rejected by the gate: model not called
 
@@ -159,8 +161,8 @@ These sentences contain parts of blocked words or phrases, but not the phrases t
 
 | Sentence | Looks like | Result |
 |---|---|---|
-| Hellfire hot sauce, 250 ml bottles, made with ghost peppers. Bulk orders welcome. | "go to hell" | allow · 0.004 |
-| Premium basmati rice exporter, 20 years in business. Our go-to rice for biryani. Bulk orders welcome. | "go to hell" | allow · 0.001 |
+| Hellfire hot sauce, 250 ml bottles, made with ghost peppers. Bulk orders welcome. | "go to hell" | allow · 0.003 |
+| Premium basmati rice exporter, 20 years in business. Our go-to rice for biryani. Bulk orders welcome. | "go to hell" | allow · 0.000 |
 | Industrial stainless steel valves, sizes 15mm to 300mm. Double-walled models available. Test certificates provided with every order. | "double your money" | allow · 0.000 |
 
 **Talking point:** "Rules match whole words and phrases, so honest listings aren't caught by accident."
@@ -181,12 +183,13 @@ part scores at reject level.
 | He sucks at customer service | Post | reject by gate (`abuse.targeted`) |
 | his thinking and mindset shameless | Post | reject by gate (`abuse.targeted`) |
 | he is a liar and a fraudster | Post | reject by gate (`abuse.targeted`) |
-| Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop. | Post | reject · targeted (whole text 0.001, sentence 0.984) |
-| Fast shipping and good quality cotton, highly recommended for bulk buyers. He is a thief who steals from customers and belongs in jail. | Post | reject · targeted (whole text 0.027, sentence 0.992) |
+| Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop. | Post | reject · targeted (whole text 0.388, sentence 0.996) |
+| Solar panels 330W mono PERC, 25 year warranty. Beware of other sellers, they are all frauds. | Post | reject · targeted |
+| Fast shipping and good quality cotton, highly recommended for bulk buyers. He is a thief who steals from customers and belongs in jail. | Post | reject · targeted (whole text 0.399, sentence 0.995) |
 
-**Talking point:** "Scoring the whole comment would have allowed the threat,
-because the friendly first sentence dilutes it. Scoring the sentence that
-mentions someone catches it."
+**Talking point:** "Scoring the whole comment only gives 0.39, so the author would
+merely be asked to rephrase a death threat: the friendly first sentence dilutes
+it. Scoring the sentence that mentions someone gives 0.996, so it's rejected."
 
 ### 4.9 Mentioning people is fine
 
@@ -195,11 +198,12 @@ sentences aimed at someone do.
 
 | Sentence | Content type | Result |
 |---|---|---|
-| Great supplier. They delivered 500 units on time and the quality was excellent. | Post | allow · 0.000 |
+| Solar panels 330W mono PERC. They come with a 25 year warranty. | Product listing | allow · 0.000 |
+| Office chairs with lumbar support. They are available in mesh and leather. | Product listing | allow · 0.000 |
 | Industrial vacuum cleaner, 2000W motor sucks up dust and water. Warranty provided with every order. | Product listing | allow · 0.000 |
 | LED panel lights with an idiot-proof click-fit design. BIS certified. Test certificates provided with every order. | Product listing | allow · 0.000 |
 
-**Talking point:** "'They delivered on time' is allowed. 'Sucks' in a vacuum
+**Talking point:** "'They come with a 25 year warranty' is allowed. 'Sucks' in a vacuum
 cleaner ad isn't aimed at anyone, and 'idiot-proof' is one word, so neither
 triggers the rules."
 
@@ -248,7 +252,7 @@ For terminal and setup problems, see the troubleshooting section of your termina
 ## 7. If you're asked about limitations
 
 - **There's no human-review queue.** Middle-band content goes back to its author with the problem highlighted. Rejections name the policy area, such as "fraud and scams", but deliberately don't highlight the trigger words, so people posting scams can't learn how to reword around the filters. That's one setting (`highlight_on_reject`) in `config/feedback_messages.yaml`.
-- **Model v1 is often unsure.** It asks the authors of some legitimate text (for example "Family-run textile mill in Surat…") to revise, and on short sentences it sometimes highlights the wrong one. It also misses some harmful content: counterfeit listings ("replica watches"), and a scam sentence tacked onto a clean listing ("High quality PVC pipes… Earn 50000 per week from home" is allowed). The ML team is retraining the model.
+- **The live model is v3** (`models/v3`; the previous v1 model is in `models/v1` and can be restored with `dir: models/v1` in `settings.yaml`). On our test sentences, v3 still sends many legitimate posts to revise (it scores ordinary text at about 0.35–0.50), and it's weaker than v1 when a scam sentence is tacked onto a clean listing: "Handmade leather wallets and belts. Earn 50000 per week from home, no experience needed." is **allowed** (0.007). Some phishing and scams only get a revise prompt, for example "Your account will be suspended. Share your password and card number…" (0.511) and the lottery scam (0.539). The ML team has been sent these examples.
 - **The thresholds (0.30 / 0.70) are placeholders.** They'll be tuned once the model is recalibrated. They're configuration values, so changing them needs no code change.
 - **The word and domain lists hold demo entries.** The production slur list comes from the policy team through a private file that isn't stored in git.
 - **Some negative words are deliberately not in the insult list**, because they have innocent business uses: *disturbing* ("He found the test results disturbing"), *toxic* ("toxic chemicals"), *cheat* ("cheat sheet"), *corrupt* ("a corrupt file"). "his thinking and mindset disturbing" therefore gets a revise prompt, not a reject. Full sentences such as "he is disturbing and toxic" are still rejected by the model.
