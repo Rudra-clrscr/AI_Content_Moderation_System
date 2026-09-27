@@ -7,9 +7,10 @@ Run this after changing the model, thresholds or gate rules, with the server run
 
 It reads the sentence bank in DEMO_GUIDE.md (section 4) and the example buttons in
 app/static/demo.html, sends each sentence to /v1/moderate, and compares:
-  - the decision (allow / review / reject) written in the row's last column
+  - the decision (allow / revise / reject) written in the row's last column
   - the deciding layer, when the row names one ("gate", "targeted")
   - the gate rule, when the row names one (e.g. `scam.advance_fee`)
+  - the highlighted text, when the row says highlights "..."
 
 Exits with status 1 if anything differs, so the guide can be fixed before a demo.
 """
@@ -41,7 +42,7 @@ def guide_cases() -> list[dict]:
         last = cells[-1]
         rule = RULE_ID.search(last)
         words = RULE_ID.sub("", last)  # keywords only outside rule ids ("abuse.targeted" isn't "targeted")
-        decision = re.search(r"\b(allow|review|reject)\b", words)
+        decision = re.search(r"\b(allow|revise|reject)\b", words)
         case = {
             "source": "guide",
             "text": cells[0],
@@ -50,6 +51,9 @@ def guide_cases() -> list[dict]:
             "decided_by": ("targeted" if re.search(r"\btargeted\b", words) else
                            "gate" if (re.search(r"\bby gate\b", words) or (rule and not decision)) else None),
             "rule": rule.group(1) if rule else None,
+            # highlights "Earn guaranteed income…" -> an issue's text must start with this
+            "highlight": (h.group(1).rstrip("…").strip()
+                          if (h := re.search(r'highlights "([^"]+)"', words)) else None),
         }
         if case["decision"]:
             cases.append(case)
@@ -64,7 +68,7 @@ def page_cases() -> list[dict]:
              # "gate: …" / "gate block" = decided by the gate; "gate flag …" only raises the floor
              "decided_by": ("targeted" if note.startswith("targeted")
                             else "gate" if note.startswith(("gate:", "gate block")) else None),
-             "rule": None}
+             "rule": None, "highlight": None}
             for i, (tag, note, typ, text) in enumerate(found, 1)]
 
 
@@ -96,6 +100,10 @@ def main() -> int:
             problems.append(f"decision {r['decision']} (expected {c['decision']})")
         if c["decided_by"] and r["decided_by"] != c["decided_by"]:
             problems.append(f"decided_by {r['decided_by']} (expected {c['decided_by']})")
+        if c["highlight"]:
+            marked = [c["text"][i["start"]:i["end"]] for i in (r.get("feedback") or {}).get("issues", [])]
+            if not any(m.startswith(c["highlight"]) for m in marked):
+                problems.append(f"highlight {marked} (expected one starting {c['highlight']!r})")
         if c["rule"] and c["rule"] not in [m["rule_id"] for m in r["gate_matches"]]:
             problems.append(f"rule {c['rule']} did not match")
         failures += bool(problems)

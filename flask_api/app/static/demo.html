@@ -58,6 +58,24 @@
   .allow { color: var(--allow); background: var(--allow-bg); }
   .review { color: var(--review); background: var(--review-bg); }
   .reject { color: var(--reject); background: var(--reject-bg); }
+  .revise { color: var(--review); background: var(--review-bg); }
+  .nudge { margin-top: 16px; border: 1px solid var(--line); border-left: 4px solid var(--review);
+           border-radius: 10px; padding: 14px 16px; background: var(--bg); }
+  .nudge-reject { border-left-color: var(--reject); }
+  .nudge-revise .nudge-title { color: var(--review); }
+  .nudge-reject .nudge-title { color: var(--reject); }
+  .nudge-title { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+  .nudge p { margin: 0 0 10px; color: var(--muted); }
+  .preview { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+             padding: 10px 12px; line-height: 1.7; }
+  .preview mark { background: var(--review-bg); color: inherit; border-bottom: 2px solid var(--review);
+                  border-radius: 3px; padding: 1px 2px; }
+  .nudge-reject .preview mark { background: var(--reject-bg); border-bottom-color: var(--reject); }
+  .preview sup { font-size: 10px; font-weight: 700; color: var(--review); margin-left: 2px; }
+  .issues { margin: 10px 0 12px; padding-left: 20px; }
+  .issues li { margin: 4px 0; }
+  .issues .quote { font-weight: 600; }
+  .cats { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
   .why { color: var(--muted); }
   .why b { color: var(--ink); }
   .meter { position: relative; height: 14px; border-radius: 7px; margin: 26px 0 8px;
@@ -142,9 +160,9 @@
 const EXAMPLES = [
   { tag: "allow", note: "clean listing", type: "product_listing",
     text: "Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order." },
-  { tag: "review", note: "model: suspicious recruitment", type: "post",
-    text: "Looking for distributors in Gujarat. Very high margins, no investment needed, just register with a small fee." },
-  { tag: "review", note: "gate flag overrides a 'safe' model score", type: "product_listing",
+  { tag: "revise", note: "model: one sentence is unsure; only that sentence is highlighted", type: "product_listing",
+    text: "Premium basmati rice exporter, FSSAI certified. Bulk orders welcome. Earn guaranteed income by becoming our agent, contact us today." },
+  { tag: "revise", note: "gate: off-platform payment highlighted for the author to remove", type: "product_listing",
     text: "Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order. We also accept payment in crypto." },
   { tag: "reject", note: "model: phishing", type: "post",
     text: "Send your bank details and OTP to claim your prize money today" },
@@ -160,12 +178,15 @@ const EXAMPLES = [
     text: "Their owner is a pathetic clown, avoid this shop" },
   { tag: "reject", note: "targeted: post looks fine overall, one sentence threatens them", type: "post",
     text: "Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop." },
+  { tag: "revise", note: "model: rude tone, the author is asked to rephrase", type: "product_listing",
+    text: "Ceramic floor tiles, 600x600 mm, glossy and matt finish. Only serious buyers, time wasters will be blocked." },
 ];
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (x, d = 3) => (x === null || x === undefined ? "—" : Number(x).toFixed(d));
 const history = [];
+let lastResult = null;
 let thresholds = { allow_max: 0.3, reject_min: 0.7 };
 
 $("examples").innerHTML = EXAMPLES.map((e, i) =>
@@ -191,7 +212,7 @@ async function loadStatus() {
       `<span class="chip">mode <b>${esc(s.mode)}</b></span>`,
       s.model_version ? `<span class="chip">model <b>${esc(s.model_version)}</b></span>` : "",
       `<span class="chip">gate rules <b>${esc(s.gate_rules)}</b></span>`,
-      `<span class="chip">allow ≤ <b>${fmt(thresholds.allow_max, 2)}</b> · reject ≥ <b>${fmt(thresholds.reject_min, 2)}</b> (risk)</span>`,
+      `<span class="chip">allow ≤ <b>${fmt(thresholds.allow_max, 2)}</b> · revise · reject ≥ <b>${fmt(thresholds.reject_min, 2)}</b> (risk)</span>`,
     ];
     $("status").innerHTML = chips.join("");
   } catch { $("status").innerHTML = `<span class="chip bad">service unreachable</span>`; }
@@ -209,6 +230,7 @@ async function moderate() {
     const roundTrip = performance.now() - t0;
     if (!r.ok) return showError(r.status, body);
     if (body.status === "pending") return showPending(body);
+    lastResult = body;
     showResult(body, roundTrip);
     history.unshift({ ...body, roundTrip }); renderHistory();
   } catch (e) { showError(0, { error: { message: String(e) } }); }
@@ -222,29 +244,65 @@ function showError(status, body) {
 }
 
 function showPending(body) {
-  $("result").innerHTML = `<h2>Decision</h2><div class="verdict"><span class="badge review">pending</span>
+  $("result").innerHTML = `<h2>Decision</h2><div class="verdict"><span class="badge revise">pending</span>
     <span class="why">Async mode: queued for the Celery worker. Status: <code>${esc(body.status_url)}</code></span></div>
     <details open><summary>Response</summary><pre>${esc(JSON.stringify(body, null, 2))}</pre></details>`;
 }
 
 function reason(b) {
+  const t = thresholds;
   const blocks = b.gate_matches.filter((m) => m.action === "block");
-  const flags = b.gate_matches.filter((m) => m.action === "flag");
-  if (b.decided_by === "gate") return `Blocked by Layer 1 rule <b>${esc(blocks[0]?.rule_id)}</b>. The model was not called.`;
+  const revises = b.gate_matches.filter((m) => m.action === "revise");
+  if (b.risk_score === null) return `Blocked by Layer 1 rule <b>${esc(blocks[0]?.rule_id)}</b>. The model was not called.`;
   if (b.decided_by === "targeted") {
-    const hit = b.targeted_segments.find((x) => x.risk_score >= thresholds.reject_min) || b.targeted_segments[0];
+    const hit = b.targeted_segments.find((x) => x.risk_score >= t.reject_min)
+      || b.targeted_segments.find((x) => x.risk_score > t.allow_max) || b.targeted_segments[0];
     return `The whole text scored only ${fmt(b.risk_score)}, but the sentence aimed at someone, ` +
-      `“<b>${esc(b.content.slice(hit.start, hit.end))}</b>”, scored ${fmt(hit.risk_score)} ≥ ${thresholds.reject_min}.`;
+      `“<b>${esc(b.content.slice(hit.start, hit.end))}</b>”, scored ${fmt(hit.risk_score)}` +
+      (b.decision === "reject" ? ` ≥ ${t.reject_min}.` : `, so the author is asked to rephrase it.`);
   }
-  const s = b.risk_score, t = thresholds;
-  let why = s >= t.reject_min ? `risk ${fmt(s)} ≥ ${t.reject_min}` : s <= t.allow_max ? `risk ${fmt(s)} ≤ ${t.allow_max}` : `${t.allow_max} < risk ${fmt(s)} < ${t.reject_min}`;
-  if (flags.length && b.decision === "review" && s <= t.allow_max)
-    why += `, but Layer 1 flagged <b>${esc(flags[0].rule_id)}</b>, which forces at least review`;
-  return `Model says <b>${esc(b.predicted_label)}</b>: ${why}.`;
+  if (b.decided_by === "gate")
+    return `The model alone would allow this (risk ${fmt(b.risk_score)}), but rule <b>${esc(revises[0]?.rule_id)}</b> asks the author to fix it.`;
+  const s = b.risk_score;
+  const why = s >= t.reject_min ? `risk ${fmt(s)} ≥ ${t.reject_min}`
+    : s <= t.allow_max ? `risk ${fmt(s)} ≤ ${t.allow_max}`
+    : `${t.allow_max} < risk ${fmt(s)} < ${t.reject_min}, so the author is asked to revise`;
+  // The model's middle label is called "review"; it means "unsure", not a human-review step.
+  const said = b.predicted_label === "review" ? "Model is <b>unsure</b>" : `Model says <b>${esc(b.predicted_label)}</b>`;
+  return `${said}: ${why}.`;
+}
+
+// Author-facing prompt, like a "before you post" check: the post with problems highlighted.
+function highlight(text, issues) {
+  let out = "", pos = 0;
+  issues.forEach((i, k) => {
+    if (i.end <= pos) return;                       // fully covered by an earlier highlight
+    const from = Math.max(i.start, pos);
+    out += esc(text.slice(pos, from)) +
+      `<mark title="${esc(i.message)}">${esc(text.slice(from, i.end))}<sup>${k + 1}</sup></mark>`;
+    pos = i.end;
+  });
+  return out + esc(text.slice(pos));
+}
+
+function nudge(b) {
+  const fb = b.feedback;
+  if (!fb) return "";
+  const issues = fb.issues || [];
+  const cats = (fb.categories || []).map((c) => `<span class="chip">${esc(c)}</span>`).join("");
+  const list = issues.map((i) =>
+    `<li><span class="quote">“${esc(b.content.slice(i.start, i.end))}”</span>: ${esc(i.message)}</li>`).join("");
+  return `<div class="nudge nudge-${b.decision}">
+      <div class="nudge-title">${b.decision === "revise" ? "✎" : "⛔"} ${esc(fb.title)}</div>
+      <p>${esc(fb.message)}</p>
+      ${cats ? `<div class="cats">${cats}</div>` : ""}
+      ${issues.length ? `<div class="preview">${highlight(b.content, issues)}</div><ol class="issues">${list}</ol>` : ""}
+      ${b.decision === "revise" ? `<button class="primary" id="editPost">Edit post</button>` : ""}
+    </div>`;
 }
 
 function showResult(b, roundTrip) {
-  const gate = b.decided_by === "gate";
+  const gate = b.risk_score === null;   // model skipped (blocked by a rule)
   const risk = b.risk_score;
   const labels = b.label_scores ? Object.entries(b.label_scores).sort((a, c) => c[1] - a[1]) : [];
   const colour = { safe: "var(--allow)", review: "var(--review)", reject: "var(--reject)" };
@@ -255,9 +313,11 @@ function showResult(b, roundTrip) {
       <span class="step ${gate ? "skip" : "on"}">2 · DeBERTa model</span><span class="arrow">→</span>
       <span class="step ${b.targeted_segments.length ? "on" : "skip"}">2b · Sentence check</span><span class="arrow">→</span>
       <span class="step ${gate ? "skip" : "on"}">3 · Threshold routing</span><span class="arrow">→</span>
-      <span class="step on">4 · SQL log</span>
+      <span class="step ${b.feedback ? "on" : "skip"}">4 · Author feedback</span><span class="arrow">→</span>
+      <span class="step on">5 · SQL log</span>
     </div>
     <div class="verdict"><span class="badge ${b.decision}">${b.decision}</span><span class="why">${reason(b)}</span></div>
+    ${nudge(b)}
     ${gate ? "" : `
       <div class="meter"><div class="pin ${risk < 0.15 ? "lo" : risk > 0.85 ? "hi" : ""}" style="left:${Math.min(100, risk * 100)}%"><span>risk ${fmt(risk)} · safety ${fmt(1 - risk)}</span></div></div>
       <div class="scale"><span style="left:0">0 · allow</span><span style="left:${thresholds.allow_max * 100}%">${thresholds.allow_max}</span><span style="left:${thresholds.reject_min * 100}%">${thresholds.reject_min}</span><span style="left:100%">reject · 1</span></div>`}
@@ -291,11 +351,19 @@ function showResult(b, roundTrip) {
     <details><summary>Full result payload (what the audit log stores)</summary><pre>${esc(JSON.stringify(b, null, 2))}</pre></details>`;
 }
 
+$("result").addEventListener("click", (ev) => {
+  if (ev.target.id !== "editPost" || !lastResult) return;
+  const first = lastResult.feedback.issues[0];
+  const ta = $("content");
+  ta.focus();
+  if (first && ta.value === lastResult.content) ta.setSelectionRange(first.start, first.end);
+});
+
 function renderHistory() {
   const n = history.length;
   const inf = history.map((h) => h.latency_ms.inference).filter((x) => x !== null);
   const by = (d) => history.filter((h) => h.decision === d).length;
-  $("stats").textContent = `${n} request${n === 1 ? "" : "s"} · allow ${by("allow")} · review ${by("review")} · reject ${by("reject")}` +
+  $("stats").textContent = `${n} request${n === 1 ? "" : "s"} · allow ${by("allow")} · revise ${by("revise")} · reject ${by("reject")}` +
     (inf.length ? ` · mean inference ${fmt(inf.reduce((a, c) => a + c, 0) / inf.length, 1)} ms` : "");
   $("rows").innerHTML = history.map((h) => `<tr>
     <td>${new Date(h.decided_at).toLocaleTimeString()}</td>

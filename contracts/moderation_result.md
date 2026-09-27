@@ -27,7 +27,7 @@ Layer 1 gate blocks the content:
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "request_id": "5b0c7e0e-…",
   "status": "completed",
   "content_id": "LST-10293",
@@ -41,6 +41,7 @@ Layer 1 gate blocks the content:
   "label_scores": {"safe": 0.959, "spam": 0.03, "fraud": 0.011},
   "gate_matches": [],
   "targeted_segments": [],
+  "feedback": null,
   "gate_version": 1,
   "model_version": "deberta-v3-small-int8-2026.10.01",
   "thresholds": {"allow_max": 0.3, "reject_min": 0.7},
@@ -51,9 +52,10 @@ Layer 1 gate blocks the content:
 
 | Field | Notes |
 |---|---|
-| `decision` | `allow` / `review` / `reject` |
-| `decided_by` | `gate` means Layer 1 blocked it. `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. `targeted` means the whole text passed, but a sentence aimed at someone scored at reject level (see `targeted_segments`). |
-| `gate_matches` | A list of `{rule_id, category, action}`. A `flag` match raises the decision to at least `review`. |
+| `decision` | `allow` / `revise` / `reject`. *Changed in 1.2:* `review` was replaced by `revise`. There's no human-review queue; `revise` content isn't published, and its author is shown what to fix (see `feedback`) and can resubmit. |
+| `decided_by` | `gate` means a Layer 1 rule decided: a `block` rule (model skipped), or a `revise` rule on content the model would have allowed. After a block, `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. `targeted` means the whole text passed, but a sentence aimed at someone scored in the revise or reject band (see `targeted_segments`). |
+| `gate_matches` | A list of `{rule_id, category, action, spans}`. `spans` are `[start, end]` character offsets into `content` (added in 1.2). `block` rejects, `revise` sends the content back to its author, and `flag` is recorded only. |
+| `feedback` | *Added in 1.2.* Author-facing guidance, and `null` when allowed. `{title, message, issues, categories?}`. Each issue is `{start, end, source, message, rule_id?, category?, risk_score?}`, where `start`/`end` are offsets into `content` for the client to highlight, `source` is `rule` or `model`, and `message` is the instruction to show. For `reject`, `categories` names the policy areas, and `issues` is empty unless `highlight_on_reject` is enabled, so rejected authors aren't shown how to reword around the filters. Wording lives in `flask_api/config/feedback_messages.yaml`. |
 | `targeted_segments` | *Added in 1.1.* Sentences that mention someone (he, she, they, their…), scored separately: a list of `{start, end, risk_score, predicted_label}`, where `start`/`end` are character offsets into `content`. The text itself isn't repeated, so logs stay free of content. Empty when the check didn't run: gate block, whole text already rejected, no such sentence, or the check disabled. Not stored by the current SQL table; the Data team can add an `NVARCHAR(MAX)` JSON column if they want it. |
 | `thresholds`, `model_version`, `gate_version` | These are included so every logged decision can be reproduced and audited after thresholds or models change. |
 
@@ -102,6 +104,15 @@ A storage failure never costs the caller its decision:
 Connection settings come from the environment or `flask_api/.env`: `DB_SERVER`,
 `DB_NAME`, `DB_USER`/`DB_PASSWORD` (if these are unset, Windows authentication is
 used), `DB_DRIVER`, `DB_TRUST_SERVER_CERTIFICATE` and `DB_TIMEOUT_SECONDS`.
+
+## Showing feedback to the author (platform front end)
+
+When `decision` is `revise`, show `feedback.title` and `feedback.message`, then
+render `content` with each `feedback.issues[i]` range (`start` to `end`)
+highlighted, and list each issue's `message`. Keep the author's text editable,
+and resubmit it to `/v1/moderate` as a new request. The demo page
+(`/demo`, `flask_api/app/static/demo.html`, function `nudge`) is a working
+reference.
 
 ## Open questions for the Data team
 

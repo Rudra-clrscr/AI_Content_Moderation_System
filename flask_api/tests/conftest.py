@@ -26,6 +26,10 @@ rules:
     category: spam
     action: flag
     patterns: ['\bbit\.ly/\S+']
+  - id: test.revise_payment
+    category: fraud
+    action: revise
+    patterns: ['\bpay (?:in|by) crypto\b']
 """
 
 

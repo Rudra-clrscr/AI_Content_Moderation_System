@@ -5,7 +5,7 @@ from tests.conftest import FixedScorer
 REQUIRED_KEYS = {
     "schema_version", "request_id", "status", "content_id", "content_type", "content",
     "content_sha256", "decision", "decided_by", "risk_score", "predicted_label",
-    "label_scores", "gate_matches", "targeted_segments", "gate_version", "model_version", "thresholds",
+    "label_scores", "gate_matches", "targeted_segments", "feedback", "gate_version", "model_version", "thresholds",
     "latency_ms", "decided_at",
 }
 
@@ -24,8 +24,8 @@ def test_allow(client, sink):
     assert sink.results == [body]
 
 
-def test_review_and_reject_by_score(make_settings, sink):
-    for risk, expected in [(0.5, "review"), (0.9, "reject")]:
+def test_revise_and_reject_by_score(make_settings, sink):
+    for risk, expected in [(0.5, "revise"), (0.9, "reject")]:
         c = create_app(make_settings(), scorer=FixedScorer(risk), sink=sink).test_client()
         assert post(c).get_json()["decision"] == expected
 
@@ -39,10 +39,12 @@ def test_gate_block_skips_model(client, scorer, sink):
     assert len(sink.results) == 1
 
 
-def test_gate_flag_forces_review(client):
+def test_gate_flag_is_recorded_only(client):
     body = post(client, content="details at bit.ly/xyz").get_json()
-    assert body["decision"] == "review" and body["decided_by"] == "model"
-    assert body["gate_matches"][0]["action"] == "flag"
+    assert body["decision"] == "allow" and body["decided_by"] == "model"
+    m = body["gate_matches"][0]
+    assert m["action"] == "flag" and m["spans"] == [[11, 21]]   # "bit.ly/xyz"
+    assert body["feedback"] is None
 
 
 def test_invalid_json(client):

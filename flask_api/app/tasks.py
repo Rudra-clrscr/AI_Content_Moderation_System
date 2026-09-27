@@ -20,6 +20,7 @@ from celery import Celery
 from celery.signals import worker_process_init
 
 from app.config import Settings, load_settings
+from app.feedback import Feedback
 from app.gate import Gate
 from app.model import ModelRegistry
 from app.pipeline import ModerationRequest, Pipeline
@@ -51,7 +52,8 @@ def _load_model(**_):
     s = _settings
     models = ModelRegistry()
     models.load(s.model_backend, s.model_dir, **s.model_kwargs())
-    _pipeline = Pipeline(Gate.from_yaml(s.gate_patterns_file), models, s.thresholds, s.latency_budget_ms, s.targeted)
+    _pipeline = Pipeline(Gate.from_yaml(s.gate_patterns_file), models, s.thresholds, s.latency_budget_ms, s.targeted,
+                         Feedback.from_yaml(s.feedback_messages_file))
 
 
 def run_moderation(payload: dict) -> dict:

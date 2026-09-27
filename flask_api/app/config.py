@@ -47,6 +47,7 @@ class Settings:
     label_weights: dict[str, float] | None = None
     thresholds: Thresholds = field(default_factory=lambda: Thresholds(0.30, 0.70))
     gate_patterns_file: Path = PROJECT_ROOT / "config" / "gate_patterns.yaml"
+    feedback_messages_file: Path = PROJECT_ROOT / "config" / "feedback_messages.yaml"
     max_chars: int = 10_000
     latency_budget_ms: float = 30.0
     celery_broker_url: str = "redis://localhost:6379/0"
@@ -105,6 +106,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
             reject_min=float(env("THRESHOLD_REJECT_MIN", thr.get("reject_min", 0.70))),
         ),
         gate_patterns_file=_resolve(raw.get("gate", {}).get("patterns_file", "config/gate_patterns.yaml")),
+        feedback_messages_file=_resolve(raw.get("feedback", {}).get("messages_file", "config/feedback_messages.yaml")),
         max_chars=int(raw.get("limits", {}).get("max_chars", 10_000)),
         latency_budget_ms=float(raw.get("latency_budget_ms", 30)),
         celery_broker_url=env("CELERY_BROKER_URL", celery.get("broker_url", "redis://localhost:6379/0")),

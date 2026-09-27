@@ -203,7 +203,7 @@ def test_skipped_when_whole_text_already_rejected(make_settings):
     assert scorer.calls == 1 and body["targeted_segments"] == []
 
 
-def test_gate_flag_floor_kept_with_targeted(make_settings):
+def test_gate_flag_does_not_change_decision(make_settings):
     text = "See bit.ly/abc for prices. They deliver on time every week."
     body = post(create_app(make_settings(), scorer=SegmentScorer()).test_client(), text)
-    assert body["decision"] == "review"
+    assert body["decision"] == "allow"
