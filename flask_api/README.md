@@ -33,6 +33,29 @@ curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
 
 For a live demonstration, set up with [DEMO_GUIDE_POWERSHELL.md](DEMO_GUIDE_POWERSHELL.md) or [DEMO_GUIDE_CMD.md](DEMO_GUIDE_CMD.md), then follow [DEMO_GUIDE.md](DEMO_GUIDE.md) for the run of show and tested sentences.
 
+## Abuse aimed at someone
+
+Two checks stop comments that attack another person or business:
+
+- **Gate rule `abuse.targeted`** (instant, no model): a subject word (he, she,
+  his, her, him, they, them, their) followed later in the same sentence by an
+  insult or profanity is rejected.
+- **Sentence check** ([app/targeted.py](app/targeted.py)): for each sentence that
+  mentions someone, the model scores the text from the subject word to the end
+  of the sentence. If that scores at reject level, the whole post is rejected
+  (`decided_by: "targeted"`). This catches a threat hidden inside an otherwise
+  friendly comment. It's configured under `targeted_abuse` in `settings.yaml`,
+  and each request runs at most `max_segments` extra inferences.
+
+The profanity lists aren't committed. Download them with
+`python scripts/fetch_wordlists.py`, which pins each list to a commit and checks
+its checksum. Entries with innocent B2B meanings are removed by
+`config/wordlist_exclusions.txt`.
+
+After changing the model, thresholds or rules, run
+`python scripts/verify_demo_sentences.py` against a running server. It checks
+every demo sentence against the decision the demo guide promises.
+
 ## Endpoints
 
 | Method | Path | |

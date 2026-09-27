@@ -64,7 +64,7 @@ def create_app(
     app.extensions["moderation"] = Services(
         settings=settings,
         pipeline=Pipeline(Gate.from_yaml(settings.gate_patterns_file), models,
-                          settings.thresholds, settings.latency_budget_ms),
+                          settings.thresholds, settings.latency_budget_ms, settings.targeted),
         models=models,
         sink=sink or build_sink(settings),
         enqueue=enqueue,

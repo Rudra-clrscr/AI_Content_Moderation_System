@@ -12,6 +12,7 @@ Env overrides (all optional):
     ADMIN_TOKEN           enables POST /v1/admin/model/reload when set
     RESULT_SINK           sql | log
     DEMO_PAGE             1 to serve the demo UI at /demo (off by default)
+    TARGETED_ABUSE        0 to turn off per-sentence scoring of text aimed at someone
     DB_SERVER, DB_NAME    SQL Server host and database
     DB_USER, DB_PASSWORD  SQL auth; if DB_USER is unset, Windows auth (Trusted_Connection) is used
     DB_DRIVER             ODBC driver name (default "ODBC Driver 18 for SQL Server")
@@ -30,6 +31,7 @@ import yaml
 from dotenv import load_dotenv
 
 from app.routing import Thresholds
+from app.targeted import DEFAULT_SUBJECTS, TargetedAbuse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SETTINGS = PROJECT_ROOT / "config" / "settings.yaml"
@@ -60,6 +62,7 @@ class Settings:
     db_timeout_seconds: int = 5
     result_sink: str = "sql"
     demo_page: bool = False
+    targeted: TargetedAbuse = field(default_factory=TargetedAbuse)
 
     def model_kwargs(self) -> dict:
         """Keyword args for ModelRegistry.load / OnnxScorer."""
@@ -87,6 +90,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
     thr = raw.get("thresholds", {})
     celery = raw.get("celery", {})
     db = raw.get("database", {})
+    ta = raw.get("targeted_abuse", {})
     env = os.environ.get
 
     return Settings(
@@ -117,6 +121,11 @@ def load_settings(path: str | Path | None = None) -> Settings:
         db_timeout_seconds=int(env("DB_TIMEOUT_SECONDS", db.get("timeout_seconds", 5))),
         result_sink=env("RESULT_SINK", raw.get("result_sink", "sql")),
         demo_page=_as_bool(env("DEMO_PAGE", raw.get("demo_page", False))),
+        targeted=TargetedAbuse(
+            enabled=_as_bool(env("TARGETED_ABUSE", ta.get("enabled", True))),
+            subjects=tuple(ta.get("subjects") or DEFAULT_SUBJECTS),
+            max_segments=int(ta.get("max_segments", 3)),
+        ),
     )
 
 

@@ -1,0 +1,103 @@
+# Words and phrases removed from the downloaded profanity lists because they
+# have ordinary meanings on a B2B marketplace. One entry per line; plural forms
+# are listed explicitly. Applies only to terms loaded from files; inline terms in
+# gate_patterns.yaml are chosen deliberately and are not filtered.
+
+# Industrial, hardware and engineering
+flange
+vibrator
+nipple
+nipples
+knob
+screwing
+sucker
+balls
+butt
+hard core
+alaskan pipeline
+tied up
+spread legs
+tongue in a
+clover clamps
+
+# Food, agriculture, animals
+cock
+cocks
+breasts
+pollock
+jerk
+hoe
+coon
+coons
+hot chick
+jelly donut
+chocolate rosebuds
+baby juice
+tea bagging
+taste my
+shrimping
+
+# Fashion, textiles, beauty, household
+nude
+sexy
+kinky
+shag
+panty
+panties
+bum
+tight white
+big black
+muff
+wrapping men
+
+# Business, finance and common English
+cum
+cums
+ho
+spac
+pawn
+fool
+dumb
+homo
+domination
+snowballing
+how to kill
+huge fat
+girl on
+tainted love
+lemon party
+hell
+damn
+bloody
+dike
+fanny
+
+# Names, places and other languages
+wang
+cox
+willy
+punta
+dick
+
+# Music, sport and security
+fingering
+snatch
+escort
+hooker
+hardcore
+scissoring
+
+# Medical and anatomical (legitimate pharma and medical supply listings)
+anal
+anus
+penis
+vagina
+vulva
+labia
+rectum
+scrotum
+testicle
+testical
+genitals
+semen
+clitoris

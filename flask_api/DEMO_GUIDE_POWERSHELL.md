@@ -55,6 +55,15 @@ dir models\current
 `model_int8.onnx` should be about **172266637** bytes (the `Length` column). If
 it's only a few hundred bytes, run `git lfs pull` and check again.
 
+Download the profanity word lists used by the gate. They aren't stored in git;
+the script checks each file's checksum:
+
+```powershell
+.venv\Scripts\python.exe scripts\fetch_wordlists.py
+```
+
+It should print `checksum OK` twice.
+
 ---
 
 ## 3. Start the server (every time)
@@ -105,7 +114,7 @@ Invoke-RestMethod http://127.0.0.1:8000/ready
 ```
 
 `/health` shows `status : ok`. `/ready` should show `status : ready` and
-`gate_rules : 6`.
+`gate_rules : 8` (7 means the word lists weren't downloaded).
 
 **Next:** follow [DEMO_GUIDE.md](DEMO_GUIDE.md) from section 2.
 

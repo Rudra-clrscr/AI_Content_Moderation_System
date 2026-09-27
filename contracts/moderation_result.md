@@ -27,7 +27,7 @@ Layer 1 gate blocks the content:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "request_id": "5b0c7e0e-…",
   "status": "completed",
   "content_id": "LST-10293",
@@ -40,6 +40,7 @@ Layer 1 gate blocks the content:
   "predicted_label": "safe",
   "label_scores": {"safe": 0.959, "spam": 0.03, "fraud": 0.011},
   "gate_matches": [],
+  "targeted_segments": [],
   "gate_version": 1,
   "model_version": "deberta-v3-small-int8-2026.10.01",
   "thresholds": {"allow_max": 0.3, "reject_min": 0.7},
@@ -51,8 +52,9 @@ Layer 1 gate blocks the content:
 | Field | Notes |
 |---|---|
 | `decision` | `allow` / `review` / `reject` |
-| `decided_by` | `gate` means Layer 1 blocked it. `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. |
+| `decided_by` | `gate` means Layer 1 blocked it. `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. `targeted` means the whole text passed, but a sentence aimed at someone scored at reject level (see `targeted_segments`). |
 | `gate_matches` | A list of `{rule_id, category, action}`. A `flag` match raises the decision to at least `review`. |
+| `targeted_segments` | *Added in 1.1.* Sentences that mention someone (he, she, they, their…), scored separately: a list of `{start, end, risk_score, predicted_label}`, where `start`/`end` are character offsets into `content`. The text itself isn't repeated, so logs stay free of content. Empty when the check didn't run: gate block, whole text already rejected, no such sentence, or the check disabled. Not stored by the current SQL table; the Data team can add an `NVARCHAR(MAX)` JSON column if they want it. |
 | `thresholds`, `model_version`, `gate_version` | These are included so every logged decision can be reproduced and audited after thresholds or models change. |
 
 **`202` pending.** This comes back in async mode when the gate didn't block:

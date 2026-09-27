@@ -28,6 +28,11 @@ limits:
 
 latency_budget_ms: 30      # inference-only budget; overruns are logged, not failed
 
+targeted_abuse:            # per-sentence model check for abuse aimed at a person/business
+  enabled: true
+  subjects: [he, she, his, her, him, they, them, their]
+  max_segments: 3          # at most this many extra inferences per request
+
 demo_page: false           # true (or DEMO_PAGE=1) serves the browser demo at /demo
 
 result_sink: sql           # sql -> write to SQL Server (failures are logged, never fail the request)
