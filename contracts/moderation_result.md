@@ -16,8 +16,8 @@
 
 | Field | Required | Notes |
 |---|---|---|
-| `content` | yes | A non-empty string of at most `limits.max_chars` characters (default 10,000). |
-| `content_type` | yes | One of `business_profile`, `product_listing`, `post`, `advertisement`. |
+| `content` | yes | A non-empty string of at most `limits.max_chars` characters (default 25,000, enough for a 20,000-character article body plus title and links). |
+| `content_type` | yes | One of `business_profile`, `product_listing`, `post`, `advertisement`, `article`. It also sets the wording of `feedback` ("Your article needs a few changes"). |
 | `content_id` | no | The platform's own ID, as a string or an integer. It's always returned as a string. |
 
 ## Responses
@@ -106,6 +106,24 @@ A storage failure never costs the caller its decision:
 Connection settings come from the environment or `flask_api/.env`: `DB_SERVER`,
 `DB_NAME`, `DB_USER`/`DB_PASSWORD` (if these are unset, Windows authentication is
 used), `DB_DRIVER`, `DB_TRUST_SERVER_CERTIFICATE` and `DB_TIMEOUT_SECONDS`.
+
+## Articles: what to send
+
+Send the title, body and link URLs as one text, and keep the offsets of each
+part so feedback can be mapped back to the fields:
+
+```
+<title>
+
+<body as plain text>[
+
+<link URL 1>
+<link URL 2>...]
+```
+
+Link URLs must be included, because a scam domain hidden behind "click here"
+isn't part of the visible text. `flask_api/app/static/articles/moderation-client.js`
+does all of this (`buildArticleContent`, `mapIssues`) and can be copied as-is.
 
 ## Showing feedback to the author (platform front end)
 

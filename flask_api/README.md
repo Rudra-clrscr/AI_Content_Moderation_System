@@ -53,23 +53,69 @@ curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
 
 For a live demonstration, set up with [DEMO_GUIDE_POWERSHELL.md](DEMO_GUIDE_POWERSHELL.md) or [DEMO_GUIDE_CMD.md](DEMO_GUIDE_CMD.md), then follow [DEMO_GUIDE.md](DEMO_GUIDE.md) for the run of show and tested sentences.
 
+## Articles: publish-time moderation (front-end reference)
+
+`/articles` (with `DEMO_PAGE=1`) is a working reference for the platform's
+Articles tab and "Write article" modal, in BONC Business Dashboard styling:
+
+- **Publish** sends title, body and link URLs to `/v1/moderate`
+  (`content_type: "article"`):
+  - **allow**: the article is published and uses one of the free publishes.
+  - **revise**: the modal stays open, the problem parts are highlighted in the
+    editor (CSS Custom Highlight API, so the text itself isn't changed), and each
+    issue has a **Show** button. The article is kept under *Needs changes*.
+  - **reject**: the policy area is shown, and the article is kept under *Rejected*.
+  - If the check fails (network, 503), nothing is published (fail closed).
+- **Save as Draft** skips moderation, because drafts aren't public.
+- Only successful publishes use up the free-publish quota.
+- `app/static/articles/moderation-client.js` is framework-free and can be copied
+  into the platform unchanged. It turns the rich-text editor into moderation text
+  (with link URLs) and maps the feedback offsets back onto the title, body and links.
+
+Articles are stored in the browser (localStorage), because this is a front-end
+reference, not the platform's article service.
+
+A browser test covers every flow: `pip install playwright`, start the server with
+`DEMO_PAGE=1`, then run `python scripts/e2e_articles.py --url http://127.0.0.1:8000`.
+It uses your installed Chrome and runs 26 checks.
+
 ## Sentence scan
 
 A scammer can hide one harmful sentence inside a normal listing, and the whole
-text then scores as clean. For example, "Handmade leather wallets and belts.
-Earn 50000 per week from home, no experience needed." scores 0.007 as a whole.
-So every sentence of a multi-sentence post is also scored on its own (up to
-`sentence_scan.max_sentences`, default 8), and **any one sentence at reject
-level rejects the post** (`decided_by: "sentence"`). Sentences in the middle band
-don't escalate, because ordinary short sentences often land there.
+text then scores as clean. For example, "Solar panels 330W mono PERC, 25 year
+warranty. Limited slots for dealers, register now with a small fee." scores
+0.000 as a whole. So every sentence of a multi-sentence post is also scored on
+its own (up to `sentence_scan.max_sentences`, default 400, enough for a full
+article):
 
-On our 50-text test set with v3, this raised harmful posts caught from 13 to 15
-of 18 (rejects from 5 to 9), with no change to legitimate posts. The cost is one
-inference per sentence: a 3–4 sentence post takes about 30–45 ms of model time
-instead of about 11 ms. Sentences are scored one at a time, because batching
+- **Any sentence at reject level rejects the post** (`decided_by: "sentence"`).
+- **A middle-band sentence in an otherwise allowed post asks for a revision**,
+  with that sentence highlighted (`revise_on_middle`). This only works with
+  calibrated `label_weights` (see below), because otherwise ordinary sentences
+  land in the middle band.
+
+The cost is one inference per sentence, about 10 ms each: a 40-sentence
+article takes about 0.5 s. Sentences are scored one at a time, because batching
 them changes the INT8 model's scores (dynamic quantization scales across the
-whole batch; we measured differences up to 0.63). Turn the scan off with
-`SENTENCE_SCAN=0`.
+whole batch; we measured differences up to 0.63). Grouping sentences into
+larger windows was also tried for long articles, and dropped: a buried scam
+sentence gets diluted inside the window. Turn the scan off with `SENTENCE_SCAN=0`.
+
+## Score calibration (`label_weights`)
+
+`risk = weight(safe) × P(safe) + weight(review) × P(review) + weight(reject) × P(reject)`.
+v3's "review" class fires on almost any prose that isn't a product listing:
+P(review) is about 0.999 for ordinary articles, titles and reviews, while
+P(reject) stays at or below 0.015 on legitimate text. So its weight is calibrated
+down to **0.25**, and "unsure" text scores about 0.25 and is allowed. Measured with
+`scripts/compare_models.py models/v3 models/v3 --old-review-weight 0.5 --new-review-weight 0.25`:
+
+| review weight | legit allowed | harmful caught | defects | sigma level | McNemar p |
+|---|---|---|---|---|---|
+| 0.50 | 4/36 | 17/18 | 33/54 | 1.22 | |
+| **0.25** | **36/36** | 12/18 | **6/54** | **2.72** | < 0.0001 |
+
+Re-measure for every new model. See `docs/MODEL_IMPROVEMENT_GUIDE.md`.
 
 ## Abuse aimed at someone
 

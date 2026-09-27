@@ -1,14 +1,22 @@
 # What authors see when their post isn't published straight away.
 # Edit the wording here; no code change is needed.
 
+# {noun} is replaced by the content type's name below, e.g. "Your article needs a few changes".
+nouns:
+  article: article
+  product_listing: listing
+  business_profile: business profile
+  advertisement: ad
+  post: post
+
 revise:
-  title: Your post needs a few changes
+  title: Your {noun} needs a few changes
   message: >-
-    Some parts of your post may go against BONC's community policies.
-    Edit the highlighted parts and post again.
+    Some parts of your {noun} may go against BONC's community policies.
+    Edit the highlighted parts and publish again.
 
 reject:
-  title: Your post can't be published
+  title: Your {noun} can't be published
   # {categories} is replaced with the policy areas, e.g. "fraud and scams".
   message: >-
     It appears to break BONC's community policies on {categories}.

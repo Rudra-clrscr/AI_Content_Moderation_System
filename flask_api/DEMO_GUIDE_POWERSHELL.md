@@ -116,6 +116,8 @@ Invoke-RestMethod http://127.0.0.1:8000/ready
 `/health` shows `status : ok`. `/ready` should show `status : ready` and
 `gate_rules : 8` (7 means the word lists weren't downloaded).
 
+The Articles page with publish-time moderation is at `http://127.0.0.1:8000/articles`.
+
 **Next:** follow [DEMO_GUIDE.md](DEMO_GUIDE.md) from section 2.
 
 ---
