@@ -119,3 +119,34 @@ def test_shipped_demo_terms_are_word_bounded(text):
 def test_sentence_split_handles_numbers():
     from app.gate import sentences
     assert sentences("price 2.5 kg. he said 50. ok") == ["price 2.5 kg", " he said 50", " ok"]
+
+
+@pytest.mark.parametrize("text", [
+    "his thinking and mindset shameless",
+    "her behaviour is disgraceful and despicable",
+    "their owner is a crook",
+    "they are cheats, avoid them",
+    "he is a liar and a fraudster",
+    "their manager is a con artist",
+    "she is sick-minded",
+    "he keeps cheating customers",
+])
+def test_shipped_character_insults_aimed_at_someone_block(text):
+    from app.config import PROJECT_ROOT
+    r = Gate.from_yaml(PROJECT_ROOT / "config" / "gate_patterns.yaml").check(text)
+    assert r.blocked and r.matches[0].rule_id == "abuse.targeted"
+
+
+@pytest.mark.parametrize("text", [
+    "He found the test results disturbing and recalled the batch.",
+    "They handle toxic chemicals safely and follow all regulations.",
+    "They made a cheat sheet for installers.",
+    "Their evil-eye bracelets are handmade in Jaipur.",
+    "He caught the thief at our warehouse and called the police.",
+    "Their prices are shamelessly low this week, grab the deal.",
+    "They reported a corrupt file in the upload, please resend.",
+    "We warn buyers about scammers. They should only pay through BONC.",
+])
+def test_shipped_insult_words_have_no_innocent_false_blocks(text):
+    from app.config import PROJECT_ROOT
+    assert not Gate.from_yaml(PROJECT_ROOT / "config" / "gate_patterns.yaml").check(text).blocked
