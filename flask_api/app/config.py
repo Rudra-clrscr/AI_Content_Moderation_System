@@ -6,8 +6,7 @@ Env overrides (all optional):
     MODEL_BACKEND         onnx | stub
     MODEL_DIR             directory holding the ONNX model bundle
     MODEL_INTRA_OP_THREADS  ONNX Runtime threads per inference (default 4)
-    THRESHOLD_ALLOW_MAX   float, risk <= this -> allow
-    THRESHOLD_REJECT_MIN  float, risk >= this -> reject
+    THRESHOLD_REJECT_MIN  float, risk >= this -> reject, otherwise allow
     CELERY_BROKER_URL / CELERY_RESULT_BACKEND
     ADMIN_TOKEN           enables POST /v1/admin/model/reload when set
     RESULT_SINK           sql | log
@@ -45,7 +44,7 @@ class Settings:
     intra_op_threads: int = 4
     inter_op_threads: int = 1
     label_weights: dict[str, float] | None = None
-    thresholds: Thresholds = field(default_factory=lambda: Thresholds(0.30, 0.70))
+    thresholds: Thresholds = field(default_factory=lambda: Thresholds(0.50))
     gate_patterns_file: Path = PROJECT_ROOT / "config" / "gate_patterns.yaml"
     max_chars: int = 10_000
     latency_budget_ms: float = 30.0
@@ -101,8 +100,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         inter_op_threads=int(model.get("inter_op_threads", 1)),
         label_weights=model.get("label_weights"),
         thresholds=Thresholds(
-            allow_max=float(env("THRESHOLD_ALLOW_MAX", thr.get("allow_max", 0.30))),
-            reject_min=float(env("THRESHOLD_REJECT_MIN", thr.get("reject_min", 0.70))),
+            reject_min=float(env("THRESHOLD_REJECT_MIN", thr.get("reject_min", 0.50))),
         ),
         gate_patterns_file=_resolve(raw.get("gate", {}).get("patterns_file", "config/gate_patterns.yaml")),
         max_chars=int(raw.get("limits", {}).get("max_chars", 10_000)),

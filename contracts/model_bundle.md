@@ -64,7 +64,7 @@ Any extra keys (training date, eval metrics, and so on) are kept but ignored.
 models. Flask can also override the weights in `settings.yaml` under `model.label_weights`,
 which is what it does for bonc-v1 today.
 
-The Flask thresholds (`allow_max`, `reject_min`) apply to this `risk` value. When the
+The Flask threshold (`reject_min`: reject when risk ≥ it, otherwise allow) applies to this `risk` value. When the
 model is retrained, please send recommended thresholds along with it, for example the
 values that hit the target precision and recall on the validation set.
 

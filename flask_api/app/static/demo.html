@@ -61,7 +61,7 @@
   .why { color: var(--muted); }
   .why b { color: var(--ink); }
   .meter { position: relative; height: 14px; border-radius: 7px; margin: 26px 0 8px;
-           background: linear-gradient(to right, var(--allow) 0 30%, var(--review) 30% 70%, var(--reject) 70% 100%); opacity: .9; }
+           background: linear-gradient(to right, var(--allow) 0 50%, var(--reject) 50% 100%); opacity: .9; }
   .meter .pin { position: absolute; top: -8px; width: 3px; height: 30px; background: var(--ink); border-radius: 2px; transform: translateX(-1px); }
   .meter .pin span { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font: 600 12px var(--mono); white-space: nowrap; }
   .meter .pin.lo span { left: 0; transform: none; }
@@ -142,9 +142,9 @@
 const EXAMPLES = [
   { tag: "allow", note: "clean listing", type: "product_listing",
     text: "Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order." },
-  { tag: "review", note: "model: suspicious recruitment", type: "post",
+  { tag: "reject", note: "model: suspicious recruitment (unsure counts as reject)", type: "post",
     text: "Looking for distributors in Gujarat. Very high margins, no investment needed, just register with a small fee." },
-  { tag: "review", note: "gate flag overrides a 'safe' model score", type: "product_listing",
+  { tag: "reject", note: "gate: off-platform payment, although the model alone says safe", type: "product_listing",
     text: "Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order. We also accept payment in crypto." },
   { tag: "reject", note: "model: phishing", type: "post",
     text: "Send your bank details and OTP to claim your prize money today" },
@@ -166,7 +166,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (x, d = 3) => (x === null || x === undefined ? "—" : Number(x).toFixed(d));
 const history = [];
-let thresholds = { allow_max: 0.3, reject_min: 0.7 };
+let thresholds = { reject_min: 0.5 };
 
 $("examples").innerHTML = EXAMPLES.map((e, i) =>
   `<button class="ex" data-i="${i}"><span class="tag ${e.tag}">${e.tag}</span><span class="why">${esc(e.note)}</span><br>${esc(e.text)}</button>`
@@ -191,7 +191,7 @@ async function loadStatus() {
       `<span class="chip">mode <b>${esc(s.mode)}</b></span>`,
       s.model_version ? `<span class="chip">model <b>${esc(s.model_version)}</b></span>` : "",
       `<span class="chip">gate rules <b>${esc(s.gate_rules)}</b></span>`,
-      `<span class="chip">allow ≤ <b>${fmt(thresholds.allow_max, 2)}</b> · reject ≥ <b>${fmt(thresholds.reject_min, 2)}</b> (risk)</span>`,
+      `<span class="chip">allow &lt; <b>${fmt(thresholds.reject_min, 2)}</b> ≤ reject (risk)</span>`,
     ];
     $("status").innerHTML = chips.join("");
   } catch { $("status").innerHTML = `<span class="chip bad">service unreachable</span>`; }
@@ -237,10 +237,12 @@ function reason(b) {
       `“<b>${esc(b.content.slice(hit.start, hit.end))}</b>”, scored ${fmt(hit.risk_score)} ≥ ${thresholds.reject_min}.`;
   }
   const s = b.risk_score, t = thresholds;
-  let why = s >= t.reject_min ? `risk ${fmt(s)} ≥ ${t.reject_min}` : s <= t.allow_max ? `risk ${fmt(s)} ≤ ${t.allow_max}` : `${t.allow_max} < risk ${fmt(s)} < ${t.reject_min}`;
-  if (flags.length && b.decision === "review" && s <= t.allow_max)
-    why += `, but Layer 1 flagged <b>${esc(flags[0].rule_id)}</b>, which forces at least review`;
-  return `Model says <b>${esc(b.predicted_label)}</b>: ${why}.`;
+  let why = s >= t.reject_min ? `risk ${fmt(s)} ≥ ${t.reject_min}` : `risk ${fmt(s)} < ${t.reject_min}`;
+  if (flags.length)
+    why += `. Layer 1 also noted <b>${esc(flags[0].rule_id)}</b> for the audit log (it doesn't change the decision)`;
+  // The model's middle label is called "review"; it means "unsure", not a human-review step.
+  const said = b.predicted_label === "review" ? "Model is <b>unsure</b>" : `Model says <b>${esc(b.predicted_label)}</b>`;
+  return `${said}: ${why}${b.predicted_label === "review" && b.decision === "reject" ? ", and unsure content is rejected" : ""}.`;
 }
 
 function showResult(b, roundTrip) {
@@ -259,8 +261,8 @@ function showResult(b, roundTrip) {
     </div>
     <div class="verdict"><span class="badge ${b.decision}">${b.decision}</span><span class="why">${reason(b)}</span></div>
     ${gate ? "" : `
-      <div class="meter"><div class="pin ${risk < 0.15 ? "lo" : risk > 0.85 ? "hi" : ""}" style="left:${Math.min(100, risk * 100)}%"><span>risk ${fmt(risk)} · safety ${fmt(1 - risk)}</span></div></div>
-      <div class="scale"><span style="left:0">0 · allow</span><span style="left:${thresholds.allow_max * 100}%">${thresholds.allow_max}</span><span style="left:${thresholds.reject_min * 100}%">${thresholds.reject_min}</span><span style="left:100%">reject · 1</span></div>`}
+      <div class="meter" style="background: linear-gradient(to right, var(--allow) 0 ${thresholds.reject_min * 100}%, var(--reject) ${thresholds.reject_min * 100}% 100%)"><div class="pin ${risk < 0.15 ? "lo" : risk > 0.85 ? "hi" : ""}" style="left:${Math.min(100, risk * 100)}%"><span>risk ${fmt(risk)} · safety ${fmt(1 - risk)}</span></div></div>
+      <div class="scale"><span style="left:0">0 · allow</span><span style="left:${thresholds.reject_min * 100}%">${thresholds.reject_min}</span><span style="left:100%">reject · 1</span></div>`}
     <div class="grid2">
       <div>
         <h2>Model output</h2>
@@ -295,7 +297,7 @@ function renderHistory() {
   const n = history.length;
   const inf = history.map((h) => h.latency_ms.inference).filter((x) => x !== null);
   const by = (d) => history.filter((h) => h.decision === d).length;
-  $("stats").textContent = `${n} request${n === 1 ? "" : "s"} · allow ${by("allow")} · review ${by("review")} · reject ${by("reject")}` +
+  $("stats").textContent = `${n} request${n === 1 ? "" : "s"} · allow ${by("allow")} · reject ${by("reject")}` +
     (inf.length ? ` · mean inference ${fmt(inf.reduce((a, c) => a + c, 0) / inf.length, 1)} ms` : "");
   $("rows").innerHTML = history.map((h) => `<tr>
     <td>${new Date(h.decided_at).toLocaleTimeString()}</td>

@@ -5,14 +5,15 @@
 #
 # action:
 #   block -> reject immediately, model is skipped
-#   flag  -> model still runs, but the decision is raised to at least "review"
+#   flag  -> recorded in the result's gate_matches for the audit log; the model
+#            still decides allow/reject (there is no human-review outcome)
 #
 # rules[].patterns   : Python regexes
 # rules[].terms      : literal words/phrases; escaped and word-bounded automatically
 # rules[].terms_file : path to a newline-separated term list (for lists that
 #                      shouldn't live in git, e.g. the slur list from policy)
 
-version: 1
+version: 2                   # 2: allow/reject only; payment and profanity rules now block
 
 rules:
   - id: abuse.blocklist
@@ -80,9 +81,9 @@ rules:
 
   - id: profanity.wordlist
     category: profanity
-    action: flag
+    action: block
     kind: words
-    description: Profanity not aimed at anyone - sent to human review, not rejected.
+    description: Profanity from the downloaded lists, even when not aimed at anyone.
     terms_file:
       - config/private/wordlists/ldnoobw_en.txt
       - config/private/wordlists/google_profanity_en.txt
@@ -101,7 +102,7 @@ rules:
   - id: spam.url_shortener
     category: spam
     action: flag
-    description: Shortened links hide the destination.
+    description: Shortened links hide the destination. Recorded only; common in legitimate ads.
     patterns:
       - '\b(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|cutt\.ly|rb\.gy)/\S+'
 
@@ -125,14 +126,14 @@ rules:
 
   - id: payment.off_platform
     category: fraud
-    action: flag
-    description: Requests to pay via untraceable channels.
+    action: block
+    description: Requests to pay via untraceable channels (crypto, gift cards, wire services).
     patterns:
       - '\b(?:pay|payment|send)\b.{0,40}\b(?:gift\s*cards?|crypto|bitcoin|usdt|western\s+union|moneygram)\b'
 
   - id: contact.messenger_redirect
     category: spam
     action: flag
-    description: Pushing users off-platform to messaging apps.
+    description: WhatsApp/Telegram contact numbers. Recorded only; common in legitimate Indian B2B listings.
     patterns:
       - '\b(?:whatsapp|telegram|signal)\b.{0,20}\+?\d[\d\s-]{7,}'

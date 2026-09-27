@@ -24,8 +24,8 @@ def test_allow(client, sink):
     assert sink.results == [body]
 
 
-def test_review_and_reject_by_score(make_settings, sink):
-    for risk, expected in [(0.5, "review"), (0.9, "reject")]:
+def test_allow_and_reject_by_score(make_settings, sink):
+    for risk, expected in [(0.49, "allow"), (0.5, "reject"), (0.9, "reject")]:
         c = create_app(make_settings(), scorer=FixedScorer(risk), sink=sink).test_client()
         assert post(c).get_json()["decision"] == expected
 
@@ -39,9 +39,9 @@ def test_gate_block_skips_model(client, scorer, sink):
     assert len(sink.results) == 1
 
 
-def test_gate_flag_forces_review(client):
+def test_gate_flag_is_recorded_but_model_decides(client):
     body = post(client, content="details at bit.ly/xyz").get_json()
-    assert body["decision"] == "review" and body["decided_by"] == "model"
+    assert body["decision"] == "allow" and body["decided_by"] == "model"   # scorer risk 0.1
     assert body["gate_matches"][0]["action"] == "flag"
 
 

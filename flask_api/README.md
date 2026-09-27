@@ -3,9 +3,9 @@
 This service wraps the DeBERTa-v3-small ONNX model in a Flask API. A request goes
 through three steps:
 
-1. **Layer 1 gate.** Regex and term-list rules in [config/gate_patterns.yaml](config/gate_patterns.yaml) can reject content on the spot (`block`) or force a human review (`flag`).
+1. **Layer 1 gate.** Regex and term-list rules in [config/gate_patterns.yaml](config/gate_patterns.yaml) can reject content on the spot (`block`), or note it for the audit log without changing the decision (`flag`).
 2. **Model.** An ONNX Runtime session is loaded once at startup. It can be hot-swapped through `POST /v1/admin/model/reload`.
-3. **Threshold routing.** The risk score becomes `allow`, `review` or `reject`, using the thresholds in [config/settings.yaml](config/settings.yaml).
+3. **Threshold routing.** The risk score becomes `allow` or `reject` (risk ≥ `reject_min`, default 0.50). There's no human-review step. The threshold is set in [config/settings.yaml](config/settings.yaml).
 
 The interfaces with the other two tracks are documented in [../contracts/](../contracts/).
 
@@ -87,7 +87,7 @@ tests/
 ## Configuration
 
 Everything lives in `config/settings.yaml`. These env vars override it:
-`MODERATION_MODE`, `MODEL_BACKEND`, `MODEL_DIR`, `THRESHOLD_ALLOW_MAX`,
+`MODERATION_MODE`, `MODEL_BACKEND`, `MODEL_DIR`,
 `THRESHOLD_REJECT_MIN`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` and `ADMIN_TOKEN`.
 
 **Sync vs. async.** Set `mode: async` to have Flask run only the gate inline and queue

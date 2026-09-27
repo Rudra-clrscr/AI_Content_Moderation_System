@@ -29,7 +29,7 @@ class ContentType(str, Enum):
 
 class Stage(str, Enum):
     GATE = "gate"     # decided by Layer 1, model skipped
-    MODEL = "model"   # decided by model score (possibly floored by a gate flag)
+    MODEL = "model"   # decided by model score
     TARGETED = "targeted"  # whole text passed, but a sentence aimed at someone scored reject
 
 
@@ -82,8 +82,7 @@ class Pipeline:
         if scored.inference_ms > self.latency_budget_ms:
             log.warning("inference %.1f ms over %.0f ms budget (request %s)",
                         scored.inference_ms, self.latency_budget_ms, req.request_id)
-        floor = Decision.REVIEW if gate.flagged else Decision.ALLOW
-        decision = route(scored.risk_score, self.thresholds, floor=floor)
+        decision = route(scored.risk_score, self.thresholds)
         stage = Stage.MODEL
         inference_ms = scored.inference_ms
 

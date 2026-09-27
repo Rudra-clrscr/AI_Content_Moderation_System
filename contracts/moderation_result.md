@@ -43,7 +43,7 @@ Layer 1 gate blocks the content:
   "targeted_segments": [],
   "gate_version": 1,
   "model_version": "deberta-v3-small-int8-2026.10.01",
-  "thresholds": {"allow_max": 0.3, "reject_min": 0.7},
+  "thresholds": {"reject_min": 0.5},
   "latency_ms": {"gate": 0.02, "inference": 11.4, "total": 11.6},
   "decided_at": "2026-09-25T14:03:11.204+00:00"
 }
@@ -51,9 +51,9 @@ Layer 1 gate blocks the content:
 
 | Field | Notes |
 |---|---|
-| `decision` | `allow` / `review` / `reject` |
+| `decision` | `allow` / `reject`. There's no human-review outcome, because every item is decided automatically. |
 | `decided_by` | `gate` means Layer 1 blocked it. `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. `targeted` means the whole text passed, but a sentence aimed at someone scored at reject level (see `targeted_segments`). |
-| `gate_matches` | A list of `{rule_id, category, action}`. A `flag` match raises the decision to at least `review`. |
+| `gate_matches` | A list of `{rule_id, category, action}`. A `block` match rejects immediately. A `flag` match is recorded for the audit log and doesn't change the decision. |
 | `targeted_segments` | *Added in 1.1.* Sentences that mention someone (he, she, they, their…), scored separately: a list of `{start, end, risk_score, predicted_label}`, where `start`/`end` are character offsets into `content`. The text itself isn't repeated, so logs stay free of content. Empty when the check didn't run: gate block, whole text already rejected, no such sentence, or the check disabled. Not stored by the current SQL table; the Data team can add an `NVARCHAR(MAX)` JSON column if they want it. |
 | `thresholds`, `model_version`, `gate_version` | These are included so every logged decision can be reproduced and audited after thresholds or models change. |
 

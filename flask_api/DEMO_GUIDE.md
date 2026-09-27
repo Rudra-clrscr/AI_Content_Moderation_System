@@ -26,14 +26,14 @@ Each piece of content passes through four steps:
 
 ```
  content ──► 1. Regex gate ──► 2. DeBERTa model ──► 3. Threshold routing ──► 4. Audit log
-             (instant rules)    (AI risk score)       (allow / review / reject)
+             (instant rules)    (AI risk score)       (allow / reject)
 ```
 
 | Step | What it does | Typical time |
 |---|---|---|
-| 1. Regex gate | Checks fixed rules: scam wording, abusive words, blocked domains. A **block** rejects immediately and skips the model. A **flag** forces at least a human review. | ~0.05 ms |
+| 1. Regex gate | Checks fixed rules: scam wording, abusive words, blocked domains. A **block** rejects immediately and skips the model. A **flag** is recorded for the audit log without changing the decision. | ~0.1–0.5 ms |
 | 2. Model | A fine-tuned DeBERTa-v3-small, INT8-quantized, gives a risk score from 0 to 1. | ~10–25 ms |
-| 3. Routing | Risk ≤ 0.30 is **allowed**. Risk ≥ 0.70 is **rejected**. Anything in between goes to **human review**. | — |
+| 3. Routing | Risk ≥ 0.50 is **rejected**; anything lower is **allowed**. There's no human-review step: every item is decided automatically. | — |
 | 4. Audit log | Every decision is stored with its score, the model and rule versions, and the thresholds used. | — |
 
 ---
@@ -42,7 +42,7 @@ Each piece of content passes through four steps:
 
 Open **http://127.0.0.1:8000/demo**. The chips at the top of the page should read:
 
-`status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v1` · `gate rules 8` · `allow ≤ 0.30 · reject ≥ 0.70 (risk)`
+`status ready` · `mode sync` · `model deberta-v3-small-int8-bonc-v1` · `gate rules 8` · `allow < 0.50 ≤ reject (risk)`
 
 If they don't, see section 6.
 
@@ -60,8 +60,8 @@ prepare browser tabs in advance.
 | # | Click | Result | What to say |
 |---|---|---|---|
 | 1 | **ALLOW**: steel valves | allow, risk 0.000 | "Normal business content is published immediately. Inference takes about 10 to 15 milliseconds." |
-| 2 | **REVIEW**: distributors | review, risk 0.50 | "Borderline content isn't auto-rejected. It goes to a human moderator." |
-| 3 | **REVIEW**: crypto payment | review, but the model says safe (0.005) | "This is why there are two layers. The model missed the off-platform payment. A rule flagged it, and a flag always forces human review." |
+| 2 | **REJECT**: distributors | reject, risk 0.50 | "There's no manual review step. When the model is unsure, it sits right at 0.50, and unsure content is rejected, so nothing risky is published while waiting for a person." |
+| 3 | **REJECT**: crypto payment | reject by the **gate**, although the model alone would say safe (0.005) | "This is why there are two layers. The model missed the off-platform payment. A rule catches it and rejects it instantly." |
 | 4 | **REJECT**: bank details and OTP | reject, risk 0.999 | "Phishing is caught by the model." |
 | 5 | **REJECT**: threat | reject, risk 1.000 | "Abuse and threats are caught too." |
 | 6 | **REJECT**: double your money | reject by the **gate**; the model step is struck out | "Obvious scams never reach the model. The rule check costs about 0.05 ms, so it's a free first filter." |
@@ -92,24 +92,25 @@ Copy a sentence into the **Content** box, pick the content type, and click **Mod
 
 **Talking point:** aggressive but legitimate sales language ("70% off", "hurry") is still allowed.
 
-### 4.2 Review: the model is unsure
+### 4.2 Rejected: the model is unsure
+
+These score just above 0.50. With no human-review step, "unsure" counts as reject.
 
 | Sentence | Content type | Result |
 |---|---|---|
-| Looking for distributors in Gujarat. Very high margins, no investment needed, just register with a small fee. | Post | review · 0.501 |
-| Work from home and earn big, message us for details | Advertisement | review · 0.562 |
-| Our competitor sells fake products, do not trust them | Post | review · 0.505 |
-| Limited stock! Contact us on WhatsApp for wholesale prices, full payment in advance only. | Advertisement | review · 0.452 |
+| Looking for distributors in Gujarat. Very high margins, no investment needed, just register with a small fee. | Post | reject · 0.501 |
+| Work from home and earn big, message us for details | Advertisement | reject · 0.562 |
+| Our competitor sells fake products, do not trust them | Post | reject · 0.505 |
 
-### 4.3 Review: a rule flag overrides a "safe" model score
+### 4.3 Rejected by a rule, although the model says safe
 
 | Sentence | Content type | Model alone | Final |
 |---|---|---|---|
-| Premium basmati rice exporter, 20 years in business, FSSAI certified. Bulk orders welcome. Payment accepted via bitcoin. | Product listing | safe · 0.000 | **review** (flag `payment.off_platform`) |
-| Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order. We also accept payment in crypto. | Product listing | safe · 0.005 | **review** (flag `payment.off_platform`) |
+| Premium basmati rice exporter, 20 years in business, FSSAI certified. Bulk orders welcome. Payment accepted via bitcoin. | Product listing | safe · 0.000 | **reject** by gate (`payment.off_platform`) |
+| Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order. We also accept payment in crypto. | Product listing | safe · 0.005 | **reject** by gate (`payment.off_platform`) |
 
 **Talking point:** "The model on its own would publish this. The rule catches a
-payment channel that's risky for buyers, and a person checks it."
+payment channel that's risky for buyers and rejects it."
 
 For contrast, paste the basmati sentence **without** the last sentence ("Payment accepted via bitcoin."). It comes back **allow**.
 
@@ -203,12 +204,12 @@ The rules live in `flask_api/config/gate_patterns.yaml`.
 |---|---|---|
 | `abuse.blocklist` | block | `moron`, `scumbag`, `go to hell`, plus the private policy list when present |
 | `abuse.targeted` | block | A subject word (he, she, his, her, him, they, them, their) followed **later in the same sentence** by a curated insult (idiot, pathetic, clown, loser…) or a word from the downloaded profanity lists |
-| `profanity.wordlist` | flag | Profanity from the downloaded lists that isn't aimed at anyone: sent to review, not rejected |
+| `profanity.wordlist` | block | Profanity from the downloaded lists, even when it isn't aimed at anyone |
 | `spam.blacklisted_domain` | block | `fast-cash-bonanza.example`, `claim-free-gift.test`, `paypa1-verify.example` |
 | `scam.advance_fee` | block | "guaranteed returns/profits of N%", "double/triple your money/investment", "pay a (small) processing/release/clearance fee" |
-| `spam.url_shortener` | flag | Short links: `bit.ly/…`, `tinyurl.com/…`, `t.co/…`, `goo.gl/…` and similar |
-| `payment.off_platform` | flag | "pay/payment/send" within about 40 characters of "gift card", "crypto", "bitcoin", "USDT", "Western Union", "MoneyGram" |
-| `contact.messenger_redirect` | flag | "WhatsApp/Telegram/Signal" followed by a phone number |
+| `spam.url_shortener` | flag | Short links: `bit.ly/…`, `tinyurl.com/…`, `t.co/…`, `goo.gl/…` and similar. Recorded only, because they're common in legitimate ads |
+| `payment.off_platform` | block | "pay/payment/send" within about 40 characters of "gift card", "crypto", "bitcoin", "USDT", "Western Union", "MoneyGram" |
+| `contact.messenger_redirect` | flag | "WhatsApp/Telegram/Signal" followed by a phone number. Recorded only, because it's common in legitimate Indian B2B listings |
 
 The demo domains use reserved endings (`.example`, `.test`) on purpose, so no real website is named.
 
@@ -239,8 +240,8 @@ For terminal and setup problems, see the troubleshooting section of your termina
 
 ## 7. If you're asked about limitations
 
-- **Model v1 is conservative.** Some legitimate text (for example "Family-run textile mill in Surat…") lands in review, and it misses some counterfeit listings ("replica watches"). The ML team is recalibrating it. Until then, the review queue catches its mistakes instead of wrongly rejecting content.
-- **The thresholds (0.30 / 0.70) are placeholders.** They'll be tuned once the model is recalibrated. They're configuration values, so changing them needs no code change.
+- **There's no human-review step, so the v1 model's "unsure" score matters.** It gives many ordinary listings and many harmful posts almost the same score, about 0.50. With the threshold at 0.50, unsure content is rejected. That catches scams and threats, but it also rejects some legitimate text (for example "Family-run textile mill in Surat…"). A few harmful posts still score below 0.50 and are allowed, for example "Limited stock! Contact us on WhatsApp… full payment in advance only" (0.452) and "replica watches" (0.002). The ML team is retraining the model to separate these cases.
+- **The threshold (0.50) is a setting, not code.** It will be re-tuned for the retrained model. Changing `reject_min` in `settings.yaml` needs no code change.
 - **The word and domain lists hold demo entries.** The production slur list comes from the policy team through a private file that isn't stored in git.
-- **The sentence check only looks at he, she, his, her, him, they, them and their.** "You are an idiot" isn't covered by it (the whole-text model score still applies). "You" was left out because it appears in almost every legitimate ad ("we deliver to you"). Some threats also slip through to review with the v1 model ("I hope she dies…"), which is being passed to the ML team for the retrained model.
+- **The sentence check only looks at he, she, his, her, him, they, them and their.** "You are an idiot" isn't covered by it (the whole-text model score still applies). "You" was left out because it appears in almost every legitimate ad ("we deliver to you").
 - **The demo runs in sync mode**, with one request and one answer. An async mode (Celery with Redis) is built in for heavy load. It returns `pending` and processes the content in the background.
