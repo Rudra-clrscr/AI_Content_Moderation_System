@@ -118,8 +118,8 @@ def moderate_media():
       * **Image** — OCR only, which catches the real bypass of putting the scam in a
         screenshot. The picture itself is not classified, so an image with no text is allowed
         and the result says `visual_content_checked: false`.
-      * **Video** — nothing can be read, so it is refused unless
-        `media.allow_unchecked_video` is set.
+      * **Video** — nothing can be read. The shipped config sets `media.allow_unchecked_video`,
+        so it is allowed with `checked: false`; turn the flag off to refuse video instead.
 
     `/v1/moderate/pdf` is the original path and still works; it accepts the other kinds too.
     """

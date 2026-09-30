@@ -16,10 +16,11 @@ feature for every honest seller. `visual_content_checked: false` says so in the 
 rather than leaving the caller to assume otherwise.
 
 **Video** — nothing. Reading it would mean decoding frames and audio, which is a different
-project. The default is to refuse, because accepting an unchecked video is the same hole as
-accepting an unchecked scan. `media.allow_unchecked_video` exists for deployments that would
-rather take the risk, and it is named so that turning it on is a decision someone makes on
-purpose.
+project. The code default is to refuse, because accepting an unchecked video is the same hole
+as accepting an unchecked scan. The shipped config turns `media.allow_unchecked_video` on:
+until there is a visual model, refusing would close the Videos tab altogether, so footage is
+published with `checked: false` on the record instead of being silently passed as clean. The
+flag is named so that either setting is a decision someone makes on purpose.
 
 The kind is decided by the file's leading bytes, never by its name: a `.png` that is really a
 PDF should be treated as a PDF, and an executable renamed `.jpg` should be refused.

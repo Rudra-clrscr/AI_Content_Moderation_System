@@ -7,8 +7,9 @@ Start the server with DEMO_PAGE=1 first. It covers publish -> allow, model rejec
 (risk > 0.5) with the sentence and trigger words highlighted, Show, stale feedback
 after edits, reopening "Rejected" to rewrite, gate revise with highlights across
 formatting, gate reject, link URLs, drafts (no moderation call), the
-free-publish quota, fail-closed errors and phone width. It clears this page's
-localStorage in the test browser only.
+free-publish quota, fail-closed errors, phone width, attachments, and the other
+dashboard tabs (Videos, Business Proposals) each on their own content_type.
+It clears this page's localStorage in the test browser only.
 """
 import argparse
 import sys
@@ -240,22 +241,66 @@ with sync_playwright() as p:
         check("media: photo with no text is allowed but marked not inspected",
               by.get("product_photo.png") == "not inspected", str(by))
         check("media: clean pdf is ok", by.get("catalogue.pdf") == "ok", str(by))
-        check("media: video is refused", by.get("clip.mp4") == "blocked", str(by))
+        # There is no visual model, so footage is published with the risk stated rather than
+        # the Videos feature being closed. The author must see "not inspected", never a tick.
+        check("media: video is published but marked not inspected",
+              by.get("clip.mp4") == "not inspected", str(by))
         SHOTS and page.screenshot(path=f"{SHOTS}/a6_media_checked.png")
         page.click("#publish-btn")
         page.wait_for_selector(".banner.error", timeout=30_000)
         banner = page.inner_text("#banner")
-        check("media: publish blocked, naming the files",
-              "scam_flyer.png" in banner and "clip.mp4" in banner, banner[:120])
+        check("media: publish blocked, naming the file", "scam_flyer.png" in banner, banner[:120])
         check("media: nothing published while an attachment is blocked", "2 of 2" in page.inner_text("#quota"))
-        for _ in range(2):      # drop the blocked ones; the rest should publish
-            i = page.eval_on_selector_all(".attachments li",
-                "els => els.findIndex(e => e.querySelector('.att-state').textContent.trim()==='blocked')")
-            page.click(f".attachments li:nth-child({i + 1}) .att-remove")
+        i = page.eval_on_selector_all(".attachments li",      # drop the blocked one; the rest publish
+            "els => els.findIndex(e => e.querySelector('.att-state').textContent.trim()==='blocked')")
+        page.click(f".attachments li:nth-child({i + 1}) .att-remove")
         page.click("#publish-btn")
         page.wait_for_selector("#modal", state="hidden", timeout=60_000)
         check("media: publishes once the blocked attachments are gone",
               "Bedsheet range with media" in page.inner_text("#list"))
+
+    # 13. the other dashboard tabs (surfaces.js). Same moderator, one content_type each —
+    # what a member sees has to name the thing they were writing, not "post".
+    page.evaluate("localStorage.clear()"); page.reload()
+    page.click("button.tab[data-surface='video']")
+    check("tabs: Videos opens its own form", page.is_visible("#s-title") and page.is_hidden("#articles-view"))
+    check("tabs: the content type is on show", "content_type: video" in page.inner_text("#surface-view"))
+
+    page.fill("#s-title", "Warehouse tour")
+    page.fill("#s-description", "Earn 50000 per week from home, no experience needed. Pay a small registration fee to join.")
+    page.click("#s-submit")
+    page.wait_for_selector("#s-banner .banner.reject", timeout=60_000)
+    check("tabs: a scam in the description is rejected",
+          "Your video can't be published" in page.inner_text("#s-banner"))
+    check("tabs: the offending field is marked",
+          "has-issue" in (page.get_attribute("#s-description", "class") or ""))
+    check("tabs: not published", "Rejected" in page.inner_text("#s-list"))
+    SHOTS and page.screenshot(path=f"{SHOTS}/a7_video_rejected.png")
+
+    page.fill("#s-description", "A walk through our Surat unit. Cotton bedsheets in king and queen sizes.")
+    if media.get("clip.mp4"):
+        page.set_input_files("#s-media-input", str(media["clip.mp4"]))
+        # Wait for a settled state, not just the absence of "checking": the check can start
+        # after this runs, and the row's first state is "not checked".
+        page.wait_for_function(
+            "() => { const el = document.querySelector('#s-attachments .att-state');"
+            " return el && !/checking|not checked/i.test(el.textContent); }", timeout=120_000)
+        check("tabs: the video file is published but marked not inspected",   # the badge is CSS-uppercased
+              "not inspected" in page.inner_text("#s-attachments").lower())
+    page.click("#s-submit")
+    page.wait_for_selector("#s-banner .banner.ok", timeout=60_000)
+    check("tabs: a clean video publishes", "Published" in page.inner_text("#s-list"))
+
+    page.click("button.tab[data-surface='business_proposal']")
+    page.fill("#s-title", "Distributorship")
+    page.fill("#s-proposal", "Invest with us and double your money in 30 days, guaranteed.")
+    page.click("#s-submit")
+    page.wait_for_selector("#s-banner .banner.reject", timeout=60_000)
+    check("tabs: wording names the surface, not 'post'",
+          "Your business proposal can't be published" in page.inner_text("#s-banner"))
+
+    page.click("button.tab[data-surface='article']")
+    check("tabs: Articles still works", page.is_visible("#articles-view") and page.is_hidden("#surface-view"))
     browser.close()
 
 failed = [r for r in results if not r[1]]

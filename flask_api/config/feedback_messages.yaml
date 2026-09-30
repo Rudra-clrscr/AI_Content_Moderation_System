@@ -8,6 +8,10 @@ nouns:
   business_profile: business profile
   advertisement: ad
   post: post
+  video: video
+  request: request
+  proposal: proposal
+  business_proposal: business proposal
 
 revise:
   title: Your {noun} needs a few changes

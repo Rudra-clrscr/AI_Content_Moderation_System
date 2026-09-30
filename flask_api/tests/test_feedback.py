@@ -201,6 +201,30 @@ def test_sentence_highlighted_once_when_targeted_check_already_marked_it(make_se
     assert marked(text, issues) == ["They use odd cartons for shipments"]
 
 
+@pytest.mark.parametrize("content_type,noun", [
+    ("article", "article"), ("video", "video"), ("request", "request"),
+    ("proposal", "proposal"), ("business_proposal", "business proposal"),
+    ("business_profile", "business profile"), ("product_listing", "listing"),
+    ("advertisement", "ad"), ("post", "post"),
+])
+def test_every_dashboard_surface_has_its_own_wording(make_settings, content_type, noun):
+    """One content type per tab. A missing noun would silently fall back to "post" and tell a
+    member their *post* needs changes when they were writing a proposal."""
+    from app.pipeline import ContentType
+    assert ContentType(content_type)                       # the API accepts it
+    c = app_with(make_settings, KeywordScorer())
+    body = c.post("/v1/moderate", json={"content": "double your money now",
+                                        "content_type": content_type}).get_json()
+    assert body["feedback"]["title"] == f"Your {noun} can't be published"
+
+
+def test_shipped_messages_cover_every_content_type():
+    from app.pipeline import ContentType
+    fb = Feedback.from_yaml(PROJECT_ROOT / "config" / "feedback_messages.yaml")
+    missing = [c.value for c in ContentType if c.value not in fb.nouns]
+    assert missing == [], f"no noun configured for {missing}"
+
+
 def test_wording_uses_the_content_types_noun(make_settings):
     c = app_with(make_settings, KeywordScorer())
     art = c.post("/v1/moderate", json={"content": "You can pay in crypto here", "content_type": "article"}).get_json()

@@ -17,8 +17,39 @@
 | Field | Required | Notes |
 |---|---|---|
 | `content` | yes | A non-empty string of at most `limits.max_chars` characters (default 25,000, enough for a 20,000-character article body plus title and links). |
-| `content_type` | yes | One of `business_profile`, `product_listing`, `post`, `advertisement`, `article`. It also sets the wording of `feedback` ("Your article needs a few changes"). |
+| `content_type` | yes | The dashboard surface the member is publishing from — one per tab. It does **not** change how the text is scored; it selects the wording of `feedback` ("Your proposal needs a few changes") and is stored with the decision so a record can be traced back to where it was made. |
 | `content_id` | no | The platform's own ID, as a string or an integer. It's always returned as a string. |
+
+### Surfaces and what to send
+
+Every surface that publishes member-written text goes through the same endpoint. Join the
+form's inputs into one `content` string so harm split across fields is still caught — a clean
+title with the scam in the description is still a scam. `moderation-client.js`'s
+`buildContent` / `moderateFields` does this and keeps a map back to each input for highlighting.
+
+| Dashboard tab | `content_type` | Send |
+|---|---|---|
+| Articles | `article` | title + body + link URLs |
+| Add Business | `business_profile` | name, about, services, address |
+| Videos | `video` | **title + description + tags.** The footage itself is *not* checked — see below |
+| Requests | `request` | title + requirement + category |
+| Proposals | `proposal` | title + proposal text + terms |
+| Business Proposals | `business_proposal` | as above |
+| — | `product_listing`, `advertisement`, `post` | existing surfaces |
+
+Every one of these is clickable at `/articles` with `DEMO_PAGE=1`: the tab bar is live, each
+tab opens its own form, and the `content_type` it sends is printed above that form.
+
+**Pictures and footage are not inspected.** This service reads text. There is no visual model
+here — no nudity, violence or counterfeit detector, and no frame or audio analysis — so a
+video's title and description are moderated while the footage is not, and an image is OCR'd
+for words while the picture is not classified.
+
+The platform's current policy is to publish anyway rather than close those tabs:
+`media.allow_unchecked_video` is **on**, and such a result says so in the record
+(`checked: false`, `visual_content_checked: false`) instead of passing the file off as clean.
+Turn the flag off the day footage must not go out unwatched. Until a visual model exists,
+uploaded pictures and video are covered by human reporting, not by this service.
 
 ## Request: `POST /v1/moderate/media` (and `/v1/moderate/pdf`)
 
@@ -34,7 +65,7 @@ Anything published with a post has to be checked, or the scam simply moves into 
 |---|---|---|
 | `pdf` | Text, with OCR for scanned pages | A page that can't be read is **refused** |
 | `image` | OCR only | Text is moderated. **The picture itself is never classified** — there is no nudity/violence/counterfeit detector here — so an image with no text is **allowed**, and the result says `visual_content_checked: false` |
-| `video` | Nothing | **Refused**, unless `media.allow_unchecked_video` is set |
+| `video` | Nothing | **Allowed unchecked** (`checked: false`) while `media.allow_unchecked_video` is on, as it is in the shipped config; **refused** when it is off |
 | anything else | — | `422 media_unsupported` |
 
 The kind comes from the file's leading bytes, never its name: a `.png` that is really a PDF is

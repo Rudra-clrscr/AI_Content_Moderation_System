@@ -1,9 +1,9 @@
 """Attachments on an article: images, video and the kind-detection that routes them.
 
 The rules differ by kind on purpose (see app/media.py): a PDF page with no text is refused,
-an image with no text is allowed, and video is refused outright. These tests pin those
-differences, because getting them the same way round would either break honest sellers or
-open the bypass this whole feature exists to close.
+an image with no text is allowed, and video is refused unless the deployment says otherwise.
+These tests pin those differences, because getting them the same way round would either break
+honest sellers or open the bypass this whole feature exists to close.
 """
 import io
 
@@ -129,7 +129,9 @@ def test_clean_text_in_an_image_is_allowed(make_settings, ocr):
     assert body["decision"] == "allow" and body["media"]["text_found"] is True
 
 
-def test_video_is_refused_by_default(make_settings):
+def test_video_is_refused_when_the_flag_is_off(make_settings):
+    """The code default, and what a deployment gets back the moment it decides footage must
+    not go out unwatched."""
     r = upload(client(make_settings), fake_video(), "clip.mp4")
     assert r.status_code == 422
     assert r.get_json()["error"]["code"] == "media_not_checkable"
@@ -140,6 +142,14 @@ def test_video_can_be_allowed_unchecked_when_that_is_the_policy(make_settings):
     body = upload(c, fake_video(), "clip.mp4").get_json()
     assert body["decision"] == "allow"
     assert body["media"]["checked"] is False and body["media"]["visual_content_checked"] is False
+
+
+def test_shipped_policy_publishes_video_unchecked_and_says_so():
+    """There is no visual model yet, so the platform publishes footage rather than close the
+    Videos tab. Pinned here so the day that changes it is a deliberate edit, not a drift — and
+    so nobody reads an `allow` on a video as "we looked at it"."""
+    from app.config import load_settings
+    assert load_settings().media.allow_unchecked_video is True
 
 
 def test_unknown_type_is_refused(make_settings):

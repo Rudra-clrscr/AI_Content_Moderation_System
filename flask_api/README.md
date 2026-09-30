@@ -52,6 +52,45 @@ curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
 
 For a live demonstration, set up with [DEMO_GUIDE_POWERSHELL.md](DEMO_GUIDE_POWERSHELL.md) or [DEMO_GUIDE_CMD.md](DEMO_GUIDE_CMD.md), then follow [DEMO_GUIDE.md](DEMO_GUIDE.md) for the run of show and tested sentences.
 
+## Wiring up a dashboard surface
+
+Every tab that publishes member-written text uses the same endpoint and the same client.
+`app/static/articles/moderation-client.js` is framework-free and can be copied as-is:
+
+```js
+const { result, parts, content } = await BoncModeration.moderateFields(
+    [{ name: "title", text: title }, { name: "description", text: description }],
+    { contentType: "video", contentId: id });
+if (result.decision !== "allow") {
+  showIssues(BoncModeration.mapIssues(result.feedback, parts, content));   // per-input ranges
+  return;                                                                  // don't publish
+}
+```
+
+Join a form's inputs into **one** request rather than checking them separately: harm is often
+split across fields, and a clean title with the scam in the description is still a scam.
+`buildContent` keeps a map from the combined text back to each input, so an issue highlights
+the box it came from.
+
+| Tab | `content_type` | Send |
+|---|---|---|
+| Articles | `article` | title + body + link URLs (`moderateArticle`) |
+| Add Business | `business_profile` | name, about, services, address |
+| Videos | `video` | title + description + tags — **not the footage** |
+| Requests | `request` | title + requirement + category |
+| Proposals / Business Proposals | `proposal`, `business_proposal` | title + text + terms |
+
+The type doesn't change how text is scored — it picks the wording the author sees ("Your
+proposal needs a few changes") and is stored with the decision — so send the one the member is
+actually using. Attachments go separately through `moderateFile`, one per file.
+
+**Pictures and footage are not inspected — there is no visual model yet.** This service reads
+text. A video's title and description are moderated; the footage is not. An image is OCR'd for
+words; the picture itself is not classified. The current policy is to publish anyway rather
+than close those tabs: `media.allow_unchecked_video` is **on**, and every such result states it
+(`checked: false`, `visual_content_checked: false`) rather than implying the file was cleared.
+Turn the flag off the day footage must not go out unwatched.
+
 ## Articles: publish-time moderation (front-end reference)
 
 `/articles` (with `DEMO_PAGE=1`) is a working reference for the platform's
@@ -78,9 +117,22 @@ Articles tab and "Write article" modal, in BONC Business Dashboard styling:
 Articles are stored in the browser (localStorage), because this is a front-end
 reference, not the platform's article service.
 
+**The other tabs are live too.** Add Business, Videos, Requests, Proposals and Business
+Proposals each open their own form ([app/static/articles/surfaces.js](app/static/articles/surfaces.js)),
+deliberately plainer than the Articles editor — ordinary inputs, no rich text — so what the
+tabs demonstrate is the moderation, not the widget:
+
+- each sends its fields as **one** `/v1/moderate` call on its own `content_type`, and the
+  page prints that type above the form, so the tab → type mapping is visible while clicking;
+- a rejected submission names the surface ("Your **video** can't be published"), marks the
+  input to rewrite, and quotes the sentence with its trigger words in bold;
+- attachments use the same `/v1/moderate/media` path and show *ok*, *not inspected* or
+  *blocked*, so a video attachment visibly publishes **unwatched** rather than appearing clean;
+- Dashboard and Credits say plainly that they have no member-written content to check.
+
 A browser test covers every flow: `pip install playwright`, start the server with
 `DEMO_PAGE=1`, then run `python scripts/e2e_articles.py --url http://127.0.0.1:8000`.
-It uses your installed Chrome and runs 26 checks.
+It uses your installed Chrome and runs 43 checks.
 
 ## Sentence scan
 
@@ -116,7 +168,7 @@ picture.
 |---|---|---|
 | PDF | text + OCR for scans | a page that can't be read is **refused** |
 | Image | OCR only | text is moderated; **the picture is never classified**, so an image with no text is allowed and the result says `visual_content_checked: false` |
-| Video | nothing | **refused** unless `media.allow_unchecked_video` |
+| Video | nothing | **allowed with `checked: false`** while `media.allow_unchecked_video` is on (the shipped setting); **refused** when off |
 
 That asymmetry is deliberate: a product photo with no writing on it is ordinary, and refusing
 those would break the feature for honest sellers — but a PDF page with no text is a scan, and
@@ -124,9 +176,11 @@ scans are how a screenshot of a scam arrives. The kind is taken from the file's 
 never its name, so a `.png` that is really a PDF is treated as a PDF and a renamed executable
 is refused.
 
-**Known gap, stated plainly:** this service reads text. It has no image classifier, so a
-photograph of anything at all passes as long as it carries no harmful words. Closing that
-needs a separate model; `visual_content_checked: false` is there so nobody assumes otherwise.
+**Known gap, stated plainly:** this service reads text. It has no image or video classifier,
+so a photograph of anything at all passes as long as it carries no harmful words, and footage
+is published unwatched. Closing that needs a separate model; until then `checked: false` and
+`visual_content_checked: false` are on the record, and the editor labels the file "not
+inspected", so nobody assumes otherwise.
 
 `POST /v1/moderate/pdf` is the original path and still works. The response adds a `pdf` block
 mapping character offsets to page numbers, so each issue can be shown on the page it came from.
