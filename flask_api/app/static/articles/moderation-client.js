@@ -1,7 +1,20 @@
 /*
- * BONC moderation client for Articles.
+ * BONC moderation client.
  *
- * Framework-free and reusable: the platform can copy this file as-is.
+ * Framework-free and reusable: the platform can copy this file as-is. It covers every surface
+ * in the dashboard, not just Articles —
+ *
+ *   moderateFields(...)  any form: Videos, Requests, Proposals, Business Proposals, Add Business
+ *   moderateArticle(...) the Articles editor (title + rich-text body + link URLs)
+ *   moderateFile(...)    one attachment: image, video or PDF
+ *
+ * A surface is wired up by listing its inputs and blocking submit unless the result allows:
+ *
+ *   const {result, parts, content} = await BoncModeration.moderateFields(
+ *       [{name: "title", text: title}, {name: "description", text: description}],
+ *       {contentType: "video", contentId: id});
+ *   if (result.decision !== "allow") showIssues(BoncModeration.mapIssues(result.feedback, parts, content));
+ *
  * It turns an article (title, rich-text body, link URLs) into ONE moderation
  * request, and maps the response's feedback offsets back onto those fields so
  * the editor can highlight exactly what the author needs to change.
@@ -59,19 +72,49 @@
       .filter((h) => h && !seen.has(h) && seen.add(h));
   }
 
-  /** Build the single moderation text and remember where each part lives in it. */
-  function buildArticleContent({ title, bodyText, links = [] }) {
-    const t = title.trim();
-    let content = t + SEP + bodyText;
-    const parts = { title: [0, t.length], body: [t.length + SEP.length, t.length + SEP.length + bodyText.length], links: [] };
+  /**
+   * Join a form's fields into the single text the moderator scores, remembering where each
+   * field lives in it so feedback can be mapped back to the input it came from.
+   *
+   * `fields` is an ordered list of {name, text}, so this works for any surface — an article's
+   * title and body, a video's title and description, a request's requirement and budget, a
+   * proposal's terms. Empty fields are skipped. Everything is checked together because harm
+   * can be split across inputs: a clean title with the scam in the description is still a scam.
+   *
+   *   buildContent([{name: "title", text: t}, {name: "description", text: d}], urls)
+   *     -> {content, parts: {fields: {title: [0, 12], description: [14, 96]}, links: [...]}}
+   */
+  function buildContent(fields, links = []) {
+    const parts = { fields: {}, links: [] };
+    let content = "";
+    for (const { name, text } of fields) {
+      const value = (text || "").trim();
+      if (!value) continue;
+      if (content) content += SEP;
+      parts.fields[name] = [content.length, content.length + value.length];
+      content += value;
+    }
     if (links.length) {
-      content += SEP;
+      content += content ? SEP : "";
       links.forEach((url, i) => {
         if (i) content += "\n";
         parts.links.push({ index: i, url, range: [content.length, content.length + url.length] });
         content += url;
       });
     }
+    return { content, parts };
+  }
+
+  /** Build the single moderation text for an article. Thin wrapper over buildContent that also
+   *  exposes the original `parts.title` / `parts.body` shape (contracts/moderation_result.md). */
+  function buildArticleContent({ title, bodyText, links = [] }) {
+    const { content, parts } = buildContent(
+      [{ name: "title", text: title }, { name: "body", text: bodyText }], links);
+    // The article editor highlights inside the body even when the title is empty, so these two
+    // always exist, unlike the generic `fields` map which omits empty inputs.
+    const t = (title || "").trim();
+    parts.title = parts.fields.title || [0, t.length];
+    parts.body = parts.fields.body || [content.length, content.length];
     return { content, parts };
   }
 
@@ -93,8 +136,12 @@
                             ruleId: issue.rule_id, text: content.slice(s, e), words, ...extra });
     };
     for (const issue of feedback.issues) {
-      clip(issue, "title", parts.title);
-      clip(issue, "body", parts.body);
+      // Generic surfaces carry every input in `fields`; the article editor also has the
+      // original title/body pair, which must not be reported twice.
+      const named = parts.fields || { title: parts.title, body: parts.body };
+      for (const [name, range] of Object.entries(named)) {
+        if (range) clip(issue, name, range);
+      }
       parts.links.forEach((l) => clip(issue, "link", l.range, { linkIndex: l.index, url: l.url }));
     }
     return out;
@@ -165,6 +212,40 @@
     return body;
   }
 
-  global.BoncModeration = { serializeEditor, editorLinks, buildArticleContent, mapIssues, rangeFor,
-                            moderateArticle, moderateFile };
+  /**
+   * Moderate any form. Resolves to {result, parts, content}; `parts.fields` maps each input
+   * name to its range so mapIssues can point at the right box.
+   *
+   *   await moderateFields([{name: "title", text: title}, {name: "description", text: desc}],
+   *                        {contentType: "video", contentId: id});
+   *
+   * `contentType` is one of the dashboard's surfaces (article, video, request, proposal,
+   * business_proposal, business_profile, product_listing, advertisement, post). It doesn't
+   * change how the text is scored — it selects the wording the author sees and is stored with
+   * the decision — so send the one the member is actually using.
+   *
+   * Attachments go separately through moderateFile, one per file.
+   */
+  async function moderateFields(fields, { contentType = "post", links = [], contentId, endpoint = "/v1/moderate" } = {}) {
+    const { content, parts } = buildContent(fields, links);
+    let resp;
+    try {
+      resp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, content_type: contentType, content_id: contentId }),
+      });
+    } catch (e) {
+      throw Object.assign(new Error("Could not reach the moderation service."), { code: "network" });
+    }
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = body.error || {};
+      throw Object.assign(new Error(err.message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
+    }
+    return { result: body, parts, content };
+  }
+
+  global.BoncModeration = { serializeEditor, editorLinks, buildContent, buildArticleContent, mapIssues,
+                            rangeFor, moderateArticle, moderateFields, moderateFile };
 })(window);

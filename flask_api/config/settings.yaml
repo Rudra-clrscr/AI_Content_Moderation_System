@@ -41,15 +41,17 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # never its name.
   max_bytes: 15000000       # one attachment (15 MB)
   max_pixels: 40000000      # decoded image size, against decompression bombs
-  allow_unchecked_video: false
-                            # Video cannot be read at all: no frame or audio analysis here.
-                            # Refusing is the fail-closed choice, and matches how scanned PDF
-                            # pages are treated. Set true only if you accept publishing video
-                            # that nothing has looked at.
-                            # NOTE: images are OCR'd for text, but the PICTURE is never
-                            # classified - there is no nudity/violence/counterfeit detector in
-                            # this service, so an image with no text is allowed and the result
-                            # says visual_content_checked: false.
+  allow_unchecked_video: true
+                            # INTERIM POLICY. Video cannot be read at all: no frame or audio
+                            # analysis here. There is no visual model yet, so rather than block
+                            # the Videos tab entirely, video publishes with the risk stated:
+                            # the result carries checked: false and visual_content_checked:
+                            # false, and the editor shows "not inspected" next to the file.
+                            # Set back to false the day footage must not go out unwatched.
+                            # NOTE: images are the same story. They are OCR'd for text, but the
+                            # PICTURE is never classified - there is no nudity/violence/
+                            # counterfeit detector in this service, so an image with no text is
+                            # allowed and the result says visual_content_checked: false.
 
 pdf:                        # POST /v1/moderate/pdf: extract the text, then moderate it normally
   enabled: true             # PDF_UPLOAD=0 turns the endpoint off

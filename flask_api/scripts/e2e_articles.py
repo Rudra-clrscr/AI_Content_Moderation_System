@@ -240,18 +240,19 @@ with sync_playwright() as p:
         check("media: photo with no text is allowed but marked not inspected",
               by.get("product_photo.png") == "not inspected", str(by))
         check("media: clean pdf is ok", by.get("catalogue.pdf") == "ok", str(by))
-        check("media: video is refused", by.get("clip.mp4") == "blocked", str(by))
+        # There is no visual model, so footage is published with the risk stated rather than
+        # the Videos feature being closed. The author must see "not inspected", never a tick.
+        check("media: video is published but marked not inspected",
+              by.get("clip.mp4") == "not inspected", str(by))
         SHOTS and page.screenshot(path=f"{SHOTS}/a6_media_checked.png")
         page.click("#publish-btn")
         page.wait_for_selector(".banner.error", timeout=30_000)
         banner = page.inner_text("#banner")
-        check("media: publish blocked, naming the files",
-              "scam_flyer.png" in banner and "clip.mp4" in banner, banner[:120])
+        check("media: publish blocked, naming the file", "scam_flyer.png" in banner, banner[:120])
         check("media: nothing published while an attachment is blocked", "2 of 2" in page.inner_text("#quota"))
-        for _ in range(2):      # drop the blocked ones; the rest should publish
-            i = page.eval_on_selector_all(".attachments li",
-                "els => els.findIndex(e => e.querySelector('.att-state').textContent.trim()==='blocked')")
-            page.click(f".attachments li:nth-child({i + 1}) .att-remove")
+        i = page.eval_on_selector_all(".attachments li",      # drop the blocked one; the rest publish
+            "els => els.findIndex(e => e.querySelector('.att-state').textContent.trim()==='blocked')")
+        page.click(f".attachments li:nth-child({i + 1}) .att-remove")
         page.click("#publish-btn")
         page.wait_for_selector("#modal", state="hidden", timeout=60_000)
         check("media: publishes once the blocked attachments are gone",

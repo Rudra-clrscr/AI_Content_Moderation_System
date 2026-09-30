@@ -29,11 +29,21 @@ SCHEMA_VERSION = "1.5"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3:
 
 
 class ContentType(str, Enum):
-    BUSINESS_PROFILE = "business_profile"
+    """The surfaces a member can publish from. One per tab in the dashboard, so a decision can
+    be traced back to where it was made and the author is addressed in the right words
+    ("Your proposal needs a few changes"). The type does not change how the model scores text;
+    it selects the wording in config/feedback_messages.yaml and is stored with the decision.
+    """
+
+    BUSINESS_PROFILE = "business_profile"     # Add Business
     PRODUCT_LISTING = "product_listing"
     POST = "post"
     ADVERTISEMENT = "advertisement"
-    ARTICLE = "article"
+    ARTICLE = "article"                       # Articles
+    VIDEO = "video"                           # Videos — the title/description, not the footage
+    REQUEST = "request"                       # Requests
+    PROPOSAL = "proposal"                     # Proposals
+    BUSINESS_PROPOSAL = "business_proposal"   # Business Proposals
 
 
 class Stage(str, Enum):
