@@ -27,6 +27,8 @@ class Issue:
     category: str | None = None
     rule_id: str | None = None
     risk_score: float | None = None
+    # Trigger words inside this span (model issues): [start, end) offsets into the content.
+    words: tuple[tuple[int, int], ...] = ()
 
     def as_dict(self) -> dict:
         d = {"start": self.start, "end": self.end, "source": self.source, "message": self.message}
@@ -36,6 +38,8 @@ class Issue:
             d["category"] = self.category
         if self.risk_score is not None:
             d["risk_score"] = round(self.risk_score, 6)
+        if self.words:
+            d["words"] = [list(w) for w in self.words]
         return d
 
 

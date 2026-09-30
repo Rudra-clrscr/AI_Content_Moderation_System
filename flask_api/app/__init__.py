@@ -45,7 +45,10 @@ def create_app(
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = settings or load_settings()
     app = Flask(__name__, static_folder=None)  # only /demo serves a file, and only when enabled
-    app.config["MAX_CONTENT_LENGTH"] = settings.max_chars * 4 + 4096  # bytes; UTF-8 worst case + JSON overhead
+    # bytes; UTF-8 worst case + JSON overhead, or a PDF upload plus its multipart envelope.
+    json_limit = settings.max_chars * 4 + 4096
+    app.config["MAX_CONTENT_LENGTH"] = max(json_limit, settings.pdf.max_bytes + 8192) \
+        if settings.pdf.enabled else json_limit
 
     models = ModelRegistry()
     if scorer is not None:
@@ -66,7 +69,8 @@ def create_app(
         settings=settings,
         pipeline=Pipeline(Gate.from_yaml(settings.gate_patterns_file), models,
                           settings.thresholds, settings.latency_budget_ms, settings.targeted,
-                          Feedback.from_yaml(settings.feedback_messages_file), settings.sentence_scan),
+                          Feedback.from_yaml(settings.feedback_messages_file), settings.sentence_scan,
+                          settings.word_scan, settings.triage),
         models=models,
         sink=sink or build_sink(settings),
         enqueue=enqueue,

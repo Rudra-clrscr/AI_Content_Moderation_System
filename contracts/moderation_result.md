@@ -20,6 +20,61 @@
 | `content_type` | yes | One of `business_profile`, `product_listing`, `post`, `advertisement`, `article`. It also sets the wording of `feedback` ("Your article needs a few changes"). |
 | `content_id` | no | The platform's own ID, as a string or an integer. It's always returned as a string. |
 
+## Request: `POST /v1/moderate/pdf`
+
+`multipart/form-data` upload of a PDF. Its text is extracted and then moderated by exactly the
+same pipeline, so a brochure is judged by the same rules as a pasted post.
+
+| Field | Required | Notes |
+|---|---|---|
+| `file` | yes | The PDF. Limits are in `settings.yaml` under `pdf` (default 10 MB, 100 pages, 100,000 extracted characters). |
+| `content_type` | no (`article`) | As above. |
+| `content_id` | no | As above. |
+
+The response is the payload below plus a `pdf` block:
+
+```json
+"pdf": {
+  "filename": "catalogue.pdf",
+  "page_count": 4,
+  "extracted_chars": 5120,
+  "pages": [{"page": 1, "start": 0, "end": 1180, "chars": 1180},
+            {"page": 2, "start": 1182, "end": 2300, "chars": 1118,
+             "source": "ocr", "confidence": 0.9937}, …],
+  "unreadable_pages": [],
+  "ocr_pages": [2]
+}
+```
+
+A page carries `"source": "ocr"` and a `confidence` when its text was read off the pixels
+rather than taken from the PDF; `ocr_pages` lists them, and the key is absent when none were.
+
+`pages` maps character offsets in `content` to page numbers, so an issue in `feedback.issues`
+can be shown on the page it came from: find the page whose `start <= issue.start < end`.
+
+**Pages that can't be read are refused, not allowed.** A scanned page holds no extractable
+text, and content that can't be read can't be checked — allowing it would let a screenshot of a
+scam through untouched. Such uploads return `422 pdf_text_not_extractable` with
+`unreadable_pages`. Set `pdf.reject_unreadable_pages: false` to accept them anyway, in which
+case the pages are listed in `pdf.unreadable_pages` and the entry's `"readable": false`, and
+you are publishing pages the moderator never read.
+
+**OCR is attempted on those pages first** (`pdf.ocr` in `settings.yaml`, RapidOCR on
+onnxruntime), so a scanned brochure is read and judged rather than turned away. It only ever
+widens what can be accepted: a page OCR reads with too little text or too low confidence stays
+unreadable and is still refused, so degrading an image to defeat OCR gains nothing. Expect
+~0.5–1.5 s per OCR'd page against ~100 ms for a text PDF; `PDF_OCR=0` turns it off.
+
+Long documents are **rejected, never truncated** (`413 pdf_text_too_long`): truncating would
+leave the tail unchecked while still answering "allowed".
+
+PDF errors: `400 invalid_file`, `413 pdf_too_large` / `pdf_too_many_pages` / `pdf_text_too_long`
+/ `content_too_long`, `422 pdf_invalid` / `pdf_encrypted` / `pdf_unreadable` / `pdf_empty` /
+`pdf_text_not_extractable`, `404 not_found` when `pdf.enabled` is false.
+
+In async mode the `202` response carries the `pdf` block, but the stored result fetched from
+`GET /v1/moderate/{request_id}` does not — the queue carries the extracted text, not the file.
+
 ## Responses
 
 **`200` final result.** This comes back in sync mode, or in either mode when the
@@ -27,7 +82,7 @@ Layer 1 gate blocks the content:
 
 ```json
 {
-  "schema_version": "1.3",
+  "schema_version": "1.5",
   "request_id": "5b0c7e0e-…",
   "status": "completed",
   "content_id": "LST-10293",
@@ -42,10 +97,11 @@ Layer 1 gate blocks the content:
   "gate_matches": [],
   "targeted_segments": [],
   "sentence_scores": [],
+  "word_scores": [],
   "feedback": null,
-  "gate_version": 1,
-  "model_version": "deberta-v3-small-int8-2026.10.01",
-  "thresholds": {"allow_max": 0.3, "reject_min": 0.7},
+  "gate_version": 2,
+  "model_version": "deberta-v3-small-bonc-v4",
+  "thresholds": {"allow_max": 0.5, "reject_min": 0.5},
   "latency_ms": {"gate": 0.02, "inference": 11.4, "total": 11.6},
   "decided_at": "2026-09-25T14:03:11.204+00:00"
 }
@@ -53,11 +109,12 @@ Layer 1 gate blocks the content:
 
 | Field | Notes |
 |---|---|
-| `decision` | `allow` / `revise` / `reject`. *Changed in 1.2:* `review` was replaced by `revise`. There's no human-review queue; `revise` content isn't published, and its author is shown what to fix (see `feedback`) and can resubmit. |
+| `decision` | `allow` / `revise` / `reject`. *Changed in 1.2:* `review` was replaced by `revise`. There's no human-review queue; `revise` content isn't published, and its author is shown what to fix (see `feedback`) and can resubmit. *With v4* the thresholds are one boundary (`allow_max = reject_min = 0.5`): risk ≤ 0.5 is `allow`, risk > 0.5 is `reject`, and the author rewrites the highlighted parts and resubmits. `revise` then only comes from a gate `revise` rule. |
 | `decided_by` | `gate` means a Layer 1 rule decided: a `block` rule (model skipped), or a `revise` rule on content the model would have allowed. After a block, `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. `targeted` means the whole text passed, but a sentence aimed at someone scored in the revise or reject band (see `targeted_segments`). `sentence` (added in 1.3) means one sentence, scored on its own, reached reject level (see `sentence_scores`). |
 | `gate_matches` | A list of `{rule_id, category, action, spans}`. `spans` are `[start, end]` character offsets into `content` (added in 1.2). `block` rejects, `revise` sends the content back to its author, and `flag` is recorded only. |
-| `sentence_scores` | *Added in 1.3.* For posts with 2 or more sentences: every sentence scored on its own, up to `sentence_scan.max_sentences`, as `{start, end, risk_score}` (offsets into `content`). Any sentence at or above `reject_min` rejects the post (`decided_by: "sentence"`). Empty for single-sentence posts, gate blocks, posts already rejected, or when the scan is off. |
-| `feedback` | *Added in 1.2.* Author-facing guidance, and `null` when allowed. `{title, message, issues, categories?}`. Each issue is `{start, end, source, message, rule_id?, category?, risk_score?}`, where `start`/`end` are offsets into `content` for the client to highlight, `source` is `rule` or `model`, and `message` is the instruction to show. For `reject`, `categories` names the policy areas, and `issues` is empty unless `highlight_on_reject` is enabled, so rejected authors aren't shown how to reword around the filters. Wording lives in `flask_api/config/feedback_messages.yaml`. |
+| `sentence_scores` | *Added in 1.3.* For posts with 2 or more sentences: every sentence scored on its own, up to `sentence_scan.max_sentences`, as `{start, end, risk_score}` (offsets into `content`). *1.5:* an entry with `"by": "prefilter"` was scored by the linear triage filter instead of the model (`app/triage.py`) — its `risk_score` comes from that filter, is far below `allow_max`, and never contributes to the decision. Entries without `by` are model scores, as before. Any sentence in the reject band (v4: risk > 0.5) rejects the post (`decided_by: "sentence"`). *1.4:* sentences longer than `word_scan.window_words` words are also scored in overlapping word windows, listed here with `"kind": "window"` (so a long run-on sentence can't dilute a harmful phrase); these can appear even for a single-sentence post. Empty for short single-sentence posts, gate blocks, posts already rejected, or when the scan is off. |
+| `word_scores` | *Added in 1.4.* The word-by-word scan, for each span the model flagged (risk above `allow_max`): every word as `{start, end, contribution}`, where `contribution` = risk of the span minus risk of the span with that word removed. The *trigger words* (in `feedback.issues[].words`) are the words with `contribution >= word_scan.min_contribution` (default 0.10). When no single word reaches that (the harm is spread over several words, or the score is saturated at 0.999), they are the smallest set, found greedily and at most `max_triggers`, whose removal brings the span back to ≤ `allow_max`. Long spans are analysed in their riskiest word window. Empty when nothing was flagged. |
+| `feedback` | *Added in 1.2.* Author-facing guidance, and `null` when allowed. `{title, message, issues, categories?}`. Each issue is `{start, end, source, message, rule_id?, category?, risk_score?, words?}`, where `start`/`end` are offsets into `content` for the client to highlight, `source` is `rule` or `model`, and `message` is the instruction to show. *1.4:* `words` lists the trigger words inside a model issue as `[start, end]` offsets; show them emphasised inside the highlighted sentence. For `reject`, `categories` names the policy areas. Since 1.4 the shipped config sets `highlight_on_reject: true`: with v4 there is no revise band, so a rejected author rewrites and needs to see what to change. Set it to `false` to show only the policy area. Wording lives in `flask_api/config/feedback_messages.yaml`. |
 | `targeted_segments` | *Added in 1.1.* Sentences that mention someone (he, she, they, their…), scored separately: a list of `{start, end, risk_score, predicted_label}`, where `start`/`end` are character offsets into `content`. The text itself isn't repeated, so logs stay free of content. Empty when the check didn't run: gate block, whole text already rejected, no such sentence, or the check disabled. Not stored by the current SQL table; the Data team can add an `NVARCHAR(MAX)` JSON column if they want it. |
 | `thresholds`, `model_version`, `gate_version` | These are included so every logged decision can be reproduced and audited after thresholds or models change. |
 

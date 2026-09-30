@@ -5,27 +5,26 @@ through three steps:
 
 1. **Layer 1 gate.** Regex and term-list rules in [config/gate_patterns.yaml](config/gate_patterns.yaml) can reject content on the spot (`block`), send it back to the author with the problem highlighted (`revise`), or just note it for the audit log (`flag`).
 2. **Model.** An ONNX Runtime session is loaded once at startup. It can be hot-swapped through `POST /v1/admin/model/reload`.
-3. **Threshold routing.** The risk score becomes `allow`, `revise` or `reject`, using the thresholds in [config/settings.yaml](config/settings.yaml).
+3. **Threshold routing.** The risk score becomes a decision, using the thresholds in [config/settings.yaml](config/settings.yaml). With v4 there is one boundary: **risk ≤ 0.5 is allowed, risk > 0.5 is rejected**. The risk is the model's calibrated P(unsafe).
 
-## Revise instead of human review
+## Rewrite instead of human review
 
-There's no moderator queue. Content in the middle band, or content that matches
-a `revise` rule, goes back to its author, the way LinkedIn checks a post before
-publishing it:
+There's no moderator queue. Rejected content, or content that matches a `revise`
+rule, goes back to its author, the way LinkedIn checks a post before publishing it:
 
 - **Rule matches** are highlighted exactly, using character offsets into the
   author's original text, even through tricks like full-width letters or extra
   spaces. Each one comes with the rule's instruction.
-- **Model concerns:** each sentence is scored on its own (up to
-  `max_highlight_sentences`, default 5), and the doubtful ones are highlighted,
-  so the author knows which sentence to rephrase.
-- **Rejects** name the policy area ("fraud and scams") but don't highlight the
-  trigger words, so bad actors can't learn to evade the filters. Set
-  `highlight_on_reject: true` to change this.
+- **Model concerns:**
+  - each sentence is scored on its own, and the sentences over the boundary are highlighted;
+  - inside each highlighted sentence, the **trigger words** (word-by-word scan, below) are marked, so the author knows exactly what to rewrite.
+- **Rejects** name the policy area and highlight what to rewrite
+  (`highlight_on_reject: true`), because with v4 a rejected author is expected to
+  rewrite and resubmit. Set it to `false` to show only the policy area.
 
 All wording lives in [config/feedback_messages.yaml](config/feedback_messages.yaml).
-Allowed posts cost one inference (about 12 ms). A revise decision also scores
-each sentence to find what to highlight (about 45 ms for a 3-sentence post).
+An allowed short post costs one inference (about 11 ms). Multi-sentence posts
+also score every sentence in one batched call.
 
 The interfaces with the other two tracks are documented in [../contracts/](../contracts/).
 
@@ -37,7 +36,7 @@ python -m venv .venv && .venv/Scripts/activate      # Windows; on Linux/macOS: s
 pip install -r requirements-dev.txt
 pytest -q
 
-# The live model is committed under models/v3 (previous model: models/v1) via Git LFS (install from https://git-lfs.com,
+# The live model is committed under models/v4 via Git LFS (install from https://git-lfs.com,
 # then `git lfs install` once). If you cloned before installing LFS, run `git lfs pull`.
 python wsgi.py
 
@@ -88,27 +87,126 @@ warranty. Limited slots for dealers, register now with a small fee." scores
 its own (up to `sentence_scan.max_sentences`, default 400, enough for a full
 article):
 
-- **Any sentence at reject level rejects the post** (`decided_by: "sentence"`).
-- **A middle-band sentence in an otherwise allowed post asks for a revision**,
-  with that sentence highlighted (`revise_on_middle`). This only works with
-  calibrated `label_weights` (see below), because otherwise ordinary sentences
-  land in the middle band.
+- **Any sentence over the reject boundary rejects the post** (`decided_by: "sentence"`).
+- With a middle band configured (`allow_max < reject_min`), a middle-band sentence in
+  an otherwise allowed post asks for a revision (`revise_on_middle`).
+- Sentences are split only at `. ! ?` followed by a space, so URLs and file names
+  ("example.com", "catalogue.pdf") stay whole. Fragments under 3 words ("Thanks.",
+  a one-word heading) are merged into the neighbouring sentence, because scored alone
+  a lone word has no context and its score is noise.
 
-The cost is one inference per sentence, about 10 ms each: a 40-sentence
-article takes about 0.5 s. Sentences are scored one at a time, because batching
-them changes the INT8 model's scores (dynamic quantization scales across the
-whole batch; we measured differences up to 0.63). Grouping sentences into
-larger windows was also tried for long articles, and dropped: a buried scam
-sentence gets diluted inside the window. Turn the scan off with `SENTENCE_SCAN=0`.
+v4 is **batch-invariant** (`batch_invariant: true` in its meta), so all sentences are
+scored in batched calls. v3's dynamic INT8 changed scores by up to 0.63 when batched,
+which forced one call per sentence. Turn the scan off with `SENTENCE_SCAN=0`.
+
+## PDF uploads
+
+`POST /v1/moderate/pdf` takes a PDF as multipart `file`, extracts its text with `pypdf`, and
+runs the ordinary pipeline over it. The response adds a `pdf` block mapping character offsets
+to page numbers, so each issue can be shown on the page it came from.
+
+Two decisions in [app/pdf.py](app/pdf.py) are worth knowing:
+
+- **A page we can't read is refused, not allowed.** Scanned pages yield no text, and a
+  moderator that "checks" empty text approves anything — uploading a screenshot of a scam would
+  defeat the whole system. A page carrying images but almost no extractable text counts as
+  unreadable and the upload is rejected (`422 pdf_text_not_extractable`) naming those pages.
+  `pdf.reject_unreadable_pages: false` accepts them, and then you are publishing pages nothing
+  checked.
+- **OCR is tried on those pages first** (see below), so a legitimate scanned brochure is read
+  and judged rather than turned away.
+- **Wrapped lines are rejoined.** PDFs break paragraphs at every visual line and the sentence
+  scan splits on newlines, so raw extracted text would arrive as dozens of fragments, each
+  judged without its context. Hyphenated splits ("manu-\nfacturer") are joined too, while real
+  paragraph breaks, bullets and headings are kept.
+
+Long documents are rejected rather than truncated, because a truncated check that answers
+"allowed" is worse than no check. Limits (size, pages, characters) are under `pdf` in
+`settings.yaml`; `PDF_UPLOAD=0` disables the endpoint.
+
+### OCR for scanned pages
+
+Pages with no extractable text are rasterised and read with **RapidOCR** ([app/ocr.py](app/ocr.py)):
+PaddleOCR's models exported to ONNX and run through the onnxruntime this service already ships —
+no PyTorch, no Paddle, no system binary, and the weights live inside the package so nothing is
+downloaded at run time (Apache 2.0). Pages are rendered with `pypdfium2` rather than pulled out
+as embedded images, because scans arrive in encodings (CCITT G4, JBIG2) that image extractors
+often refuse, and a decode failure would turn away a legitimate document.
+
+Measured end to end on this service:
+
+| Upload | Latency | Decision |
+|---|---|---|
+| Text PDF (OCR not needed) | 106 ms | allow |
+| Scanned scam flyer | 1.4 s | **reject** 0.999 (OCR confidence 0.99) |
+| Same, at 45% resolution | 0.7 s | **reject** 0.999 |
+| Same, skewed 7° | 0.9 s | **reject** 0.999 |
+| Scanned legitimate catalogue | 0.6 s | **allow** — previously refused |
+| Blank/illegible scan | 0.5 s | still refused |
+
+**It is not a security control.** OCR converts refusals into decisions; it never converts a
+refusal into an approval. A page it reads with too few characters (`min_chars`) or too little
+confidence (`min_confidence`) stays unreadable, so degrading an image until OCR fails gains
+nothing. Everything is bounded — pages per upload, render DPI, pixels per page — because
+decoding untrusted images is real attack surface. `PDF_OCR=0` turns it off, and the optional
+packages being absent disables it gracefully rather than failing uploads.
+
+Because OCR costs ~0.5–1.5 s per page against an 11 ms model call, a deployment expecting many
+scans should run the PDF endpoint in async mode.
+
+## Triage pre-filter (`triage`)
+
+The scan above is the expensive part of an ordinary, allowed post: every sentence is a model
+call, and nearly all come back safe. Layer 1.5 is a logistic regression over hashed word and
+character n-grams ([app/triage.py](app/triage.py)) that clears the obviously-safe spans in
+about 0.1 ms each, so only the rest reach DeBERTa.
+
+- **It is distilled from the model itself**, not trained on the dataset labels: the target is
+  "would DeBERTa have flagged this span?", because a span the model would allow is free to skip.
+- **The threshold is chosen by decision impact, not by span accuracy.** `training/tune_triage.py`
+  runs every held-out text through the real pipeline at each candidate threshold and takes the
+  highest one that changes no decision, halved for margin. At 0.4 two harmful posts started
+  slipping through; nothing changes at 0.2; the shipped value is **0.1**.
+- **Leetspeak can't slip past it**: each span is also scored as its de-obfuscated reading, and
+  it is only cleared when every reading is below the threshold.
+- Cleared spans still appear in `sentence_scores`, marked `"by": "prefilter"`, and can never
+  escalate a decision.
+
+Measured on 619 held-out texts (`models/triage-v1/triage_meta.json`):
+
+| | model calls | ms per text |
+|---|---|---|
+| Allowed posts (most traffic) | −73% | 50 → 25 |
+| Allowed posts over 600 characters | −84% | 267 → 101 |
+| Rejected posts | −6% | unchanged (the word scan dominates, and the filter doesn't touch it) |
+
+Retrain it whenever the model changes — the bundle records the threshold it was measured at,
+and the loader refuses a bundle whose feature version doesn't match the code. `TRIAGE=0`
+turns it off; decisions must not change, only latency.
+
+## Word-by-word scan (`word_scan`)
+
+- **Word windows:** a sentence longer than 40 words (a pasted run-on paragraph) is also
+  scored in overlapping 40-word windows, so a harmful phrase in the middle isn't diluted.
+- **Trigger words:** for every span the model flags, each word is removed in turn and
+  the span re-scored (`word_scores`). Words whose removal lowers the risk by ≥ 0.10 are
+  the trigger words. If none does (harm spread over several words, as in "join by
+  paying a small registration fee and earn 50000"), a greedy search finds the smallest
+  set of words whose removal brings the span back to ≤ 0.5. Trigger words are attached
+  to the issue as `words` and shown in bold to the author. Allowed posts pay nothing for this.
+- **Leetspeak:** words with a digit or symbol between letters ("F1rst c0py R0lex") are
+  also read as plain letters, character for character, and the riskier reading counts.
+  Product codes and quantities ("330W", "A16", "5kg", "3pm") are left alone.
+
+Turn it all off with `WORD_SCAN=0`.
 
 ## Score calibration (`label_weights`)
 
-`risk = weight(safe) × P(safe) + weight(review) × P(review) + weight(reject) × P(reject)`.
-v3's "review" class fires on almost any prose that isn't a product listing:
-P(review) is about 0.999 for ordinary articles, titles and reviews, while
-P(reject) stays at or below 0.015 on legitimate text. So its weight is calibrated
-down to **0.25**, and "unsure" text scores about 0.25 and is allowed. Measured with
-`scripts/compare_models.py models/v3 models/v3 --old-review-weight 0.5 --new-review-weight 0.25`:
+`risk = Σ weight(label) × P(label)`, with the weights taken from the bundle's
+`model_meta.json` (an operator override in `settings.yaml` still wins).
+
+- **v4:** labels `safe`/`unsafe`, weights 0/1, so risk = P(unsafe). It is temperature-calibrated in training (test ECE 0.006), which makes 0.5 a real boundary. See [../training/README.md](../training/README.md).
+- **v3 (rollback):** labels `safe`/`review`/`reject`, with review weighted **0.25** in its own `model_meta.json` because that class fires on almost any prose that isn't a product listing. **Only `models/v4` and `models/triage-v1` are tracked in git** — v1 and v3 are kept on the machines that need them (and remain in this repo's LFS history from earlier commits). To roll back, restore a v3 bundle into `flask_api/models/v3/` and set `model.dir: models/v3` **and** thresholds 0.30/0.70. Measured with `scripts/compare_models.py models/v3 models/v3 --old-review-weight 0.5 --new-review-weight 0.25`:
 
 | review weight | legit allowed | harmful caught | defects | sigma level | McNemar p |
 |---|---|---|---|---|---|
@@ -121,9 +219,16 @@ Re-measure for every new model. See `docs/MODEL_IMPROVEMENT_GUIDE.md`.
 
 Two checks stop comments that attack another person or business:
 
-- **Gate rule `abuse.targeted`** (instant, no model): a subject word (he, she,
-  his, her, him, they, them, their) followed later in the same sentence by an
-  insult or profanity is rejected.
+- **Gate rule `abuse.targeted`** (instant, no model): a word that points at someone
+  (he, she, his, her, him, they, them, their…) and an insult or profanity **in the
+  same sentence, in either order** ("he is a liar", "what a liar he is") is rejected.
+  This is the senior-review policy: nobody may point abuse at an individual.
+- **The model covers contempt the wordlist can't.** Words like *absurd*, *ridiculous* or
+  *nonsense* are deliberately **not** on the blocklist, because they are ordinary when they
+  describe a price or a delay, and the gate can only see that a pronoun and a term share a
+  sentence — not which one the term is about. Adding them would reject "the price he quoted
+  was absurd". The model is trained on both sides instead, so "his way of thinking is absurd"
+  scores 0.999 while "the price they quoted was absurd" scores 0.002.
 - **Sentence check** ([app/targeted.py](app/targeted.py)): for each sentence that
   mentions someone, the model scores the text from the subject word to the end
   of the sentence. If that scores at reject level, the whole post is rejected
@@ -137,8 +242,10 @@ its checksum. Entries with innocent B2B meanings are removed by
 `config/wordlist_exclusions.txt`.
 
 Before switching to a new model, compare it with the current one:
-`python scripts/compare_models.py models/v1 models/v3` runs a fixed set of legitimate and harmful
-texts through the full pipeline with each model and lists every decision that changes.
+`python scripts/compare_models.py models/v3 models/v4 --no-builtin --testset ../training/eval_handwritten.csv`
+runs labelled texts through the full pipeline with each model (each with its own
+recommended thresholds), lists every decision that changes, and reports McNemar's p-value.
+`python ../training/e2e_eval.py` gives allow and catch rates per held-out set.
 
 After changing the model, thresholds or rules, run
 `python scripts/verify_demo_sentences.py` against a running server. It checks
@@ -149,6 +256,7 @@ every demo sentence against the decision the demo guide promises.
 | Method | Path | |
 |---|---|---|
 | POST | `/v1/moderate` | Moderates one piece of content. Returns `200` with the result, or `202` pending in async mode. |
+| POST | `/v1/moderate/pdf` | Moderates an uploaded PDF (multipart `file`). Extracts the text, runs the same pipeline, and adds a `pdf` page map. Refuses pages it can't read. |
 | GET | `/v1/moderate/<request_id>` | Looks up a result (async mode only). |
 | GET | `/demo` | Browser demo UI. Only served when `DEMO_PAGE=1`. |
 | GET | `/health` | Liveness check. |

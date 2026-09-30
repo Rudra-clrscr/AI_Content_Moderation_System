@@ -131,6 +131,8 @@ h1 { font-size: 20px; font-weight: 700; color: var(--heading); margin: 8px 0 2px
 /* moderation highlights inside the editor (CSS Custom Highlight API; no DOM changes) */
 ::highlight(mod-revise) { background-color: #ffe7b3; text-decoration: underline wavy #c47a00; }
 ::highlight(mod-focus) { background-color: #ffd27a; }
+::highlight(mod-word) { background-color: #ffb4a8; color: #7a1200; }   /* trigger words from the word-by-word scan */
+.issues .trigger { background: #ffd9d2; color: #7a1200; border-radius: 3px; padding: 0 2px; }
 
 /* ---------- moderation banners ---------- */
 .banner { border-radius: 10px; padding: 14px 16px; margin-bottom: 18px; border: 1px solid; }

@@ -38,6 +38,9 @@ class Scorer(Protocol):
 
     def score(self, text: str) -> ScoreResult: ...
 
+    # Optional: `score_batch(texts) -> list[ScoreResult]`, used only when the scorer also
+    # sets `batch_invariant = True` (a text's score doesn't depend on what it's batched with).
+
 
 @dataclass(frozen=True)
 class ModelMeta:
@@ -50,6 +53,9 @@ class ModelMeta:
     output_name: str | None = None    # default: first model output
     model_file: str | None = None     # default: model.onnx, else the bundle's only *.onnx
     label_weights: dict[str, float] | None = None  # per-label risk weight; see _risk_from
+    # True only if scores don't change when texts are batched together (FP32, static or
+    # weight-only INT8). Dynamic INT8 (v1, v3) computes activation scales per batch: false.
+    batch_invariant: bool = False
     extra: dict = field(default_factory=dict)
 
     @classmethod
@@ -70,7 +76,7 @@ class OnnxScorer:
     """Wraps one loaded model bundle. Construct once; `score` is thread-safe."""
 
     def __init__(self, model_dir: str | Path, *, intra_op_threads: int = 4, inter_op_threads: int = 1,
-                 label_weights: dict[str, float] | None = None):
+                 label_weights: dict[str, float] | None = None, providers: list[str] | None = None):
         import numpy as np
         import onnxruntime as ort
         from tokenizers import Tokenizer
@@ -99,14 +105,20 @@ class OnnxScorer:
             self.tokenizer.enable_padding(length=self.meta.max_length)
         else:
             self.tokenizer.no_padding()
+        self.pad_id = self.tokenizer.token_to_id("[PAD]") or 0
+        self.batch_invariant = self.meta.batch_invariant and not self.meta.pad_to_max_length
 
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = intra_op_threads
         opts.inter_op_num_threads = inter_op_threads
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        # Production is CPU only (contracts/model_bundle.md). `providers` exists for offline
+        # evaluation, where the same bundle can be run on the GPU to sweep thresholds quickly;
+        # anything measured that way must be confirmed on CPU before it is trusted.
         self.session = ort.InferenceSession(
-            str(model_path), sess_options=opts, providers=["CPUExecutionProvider"]
+            str(model_path), sess_options=opts, providers=providers or ["CPUExecutionProvider"]
         )
+        self.providers = self.session.get_providers()
 
         self.input_names = [i.name for i in self.session.get_inputs()]
         unknown = set(self.input_names) - SUPPORTED_INPUTS
@@ -129,8 +141,40 @@ class OnnxScorer:
         }
         feeds = {name: np.asarray([available[name]], dtype=np.int64) for name in self.input_names}
         logits = self.session.run([self.output_name], feeds)[0][0].astype(np.float64)
-        elapsed = (time.perf_counter() - start) * 1000
+        return self._result(logits, (time.perf_counter() - start) * 1000)
 
+    def score_batch(self, texts: list[str], max_batch: int = 32) -> list[ScoreResult]:
+        """Score many texts with padded batches (one ONNX call per `max_batch`).
+
+        Only valid when `batch_invariant` is true. Texts are grouped by length so short
+        sentences aren't padded to the longest one in the post.
+        """
+        if not self.batch_invariant:
+            return [self.score(t) for t in texts]
+        np = self._np
+        encs = self.tokenizer.encode_batch(list(texts))
+        order = sorted(range(len(texts)), key=lambda i: len(encs[i].ids))
+        results: list[ScoreResult | None] = [None] * len(texts)
+        for b in range(0, len(order), max_batch):
+            idx = order[b:b + max_batch]
+            start = time.perf_counter()
+            width = max(len(encs[i].ids) for i in idx)
+            arrays = {name: np.zeros((len(idx), width), dtype=np.int64) for name in self.input_names}
+            if "input_ids" in arrays:
+                arrays["input_ids"].fill(self.pad_id)
+            for row, i in enumerate(idx):
+                e, n = encs[i], len(encs[i].ids)
+                available = {"input_ids": e.ids, "attention_mask": e.attention_mask, "token_type_ids": e.type_ids}
+                for name in self.input_names:
+                    arrays[name][row, :n] = available[name]
+            logits = self.session.run([self.output_name], arrays)[0].astype(np.float64)
+            per_text = (time.perf_counter() - start) * 1000 / len(idx)
+            for row, i in enumerate(idx):
+                results[i] = self._result(logits[row], per_text)
+        return results  # type: ignore[return-value]
+
+    def _result(self, logits, elapsed_ms: float) -> ScoreResult:
+        np = self._np
         if logits.shape[-1] != len(self.meta.labels):
             raise ValueError(f"model output has {logits.shape[-1]} logits but meta lists {len(self.meta.labels)} labels")
         if self.meta.activation == "softmax":
@@ -144,7 +188,7 @@ class OnnxScorer:
             label=max(label_scores, key=label_scores.get),
             label_scores=label_scores,
             model_version=self.version,
-            inference_ms=elapsed,
+            inference_ms=elapsed_ms,
         )
 
 
@@ -240,3 +284,17 @@ class ModelRegistry:
         if not math.isfinite(result.risk_score):
             raise ValueError(f"model returned non-finite score {result.risk_score}")
         return result
+
+    def score_many(self, texts: list[str]) -> list[ScoreResult]:
+        """Score several texts: batched when the live model is batch-invariant, else one by one."""
+        scorer = self._scorer
+        if scorer is None:
+            raise ModelNotReady(self.last_error or "model not loaded")
+        if getattr(scorer, "batch_invariant", False) and hasattr(scorer, "score_batch"):
+            results = scorer.score_batch(texts)
+        else:
+            results = [scorer.score(t) for t in texts]
+        for r in results:
+            if not math.isfinite(r.risk_score):
+                raise ValueError(f"model returned non-finite score {r.risk_score}")
+        return results

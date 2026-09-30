@@ -8,7 +8,7 @@ Stack: DeBERTa-v3-small (ONNX INT8) + Flask + SQL Server (Celery/Redis for async
 
 | Track | Owner | Folder |
 |---|---|---|
-| NLP training & ONNX export | NLP Training & Optimization Lead | _TBD_ |
+| NLP training & ONNX export | NLP Training & Optimization Lead | [training/](training/) (bonc-v4: data, synthetic generator, GPU training, calibration, export) |
 | Flask API: regex gate, inference, threshold routing | AI Backend & API Lead | [flask_api/](flask_api/) |
 | SQL Server schema & async pipeline | Data Systems & Integration Lead | _TBD_ |
 

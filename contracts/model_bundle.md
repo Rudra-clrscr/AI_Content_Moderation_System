@@ -4,7 +4,11 @@
 **Consumer:** `flask_api/app/model.py` (`OnnxScorer`)
 
 Each model release is one directory. The Flask service loads it from `MODEL_DIR`
-(default `flask_api/models/v3`; the previous model is kept in `flask_api/models/v1`) at startup, or on `POST /v1/admin/model/reload`.
+(default `flask_api/models/v4`) at startup, or on `POST /v1/admin/model/reload`. Only the live
+bundle is tracked in git; superseded ones (v1, v3) are kept on the machines that need them for
+rollback or comparison.
+v4 is built by `training/` (see `training/README.md`): binary labels `["safe", "unsafe"]`,
+`label_weights {safe: 0, unsafe: 1}`, so risk = calibrated P(unsafe), with one boundary at 0.5.
 
 ```
 <model_dir>/
@@ -47,6 +51,8 @@ Each model release is one directory. The Flask service loads it from `MODEL_DIR`
 | `output_name` | no | The output tensor to read, if it isn't the first one. |
 | `model_file` | no | The ONNX file name, if it isn't `model.onnx` and there's more than one `.onnx` file. |
 | `label_weights` | no | The risk weight of each label, from 0 to 1, with every label listed. Required when the labels are ordered decisions (see below). |
+| `batch_invariant` | no (false) | Set to true only if a text's score doesn't change when it's batched with other (padded) texts: FP32, static INT8 or weight-only INT8. The API then scores sentences, word windows and word variants in batches. Dynamic INT8 (v1, v3) is **not** batch-invariant. `training/calibrate_export.py` measures this. |
+| `recommended_thresholds` | no | `{allow_max, reject_min}` the ML team recommends for this model. `scripts/compare_models.py` uses it; the live values are still set in `settings.yaml`. |
 
 Any extra keys (training date, eval metrics, and so on) are kept but ignored.
 

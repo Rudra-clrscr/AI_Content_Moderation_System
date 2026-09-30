@@ -9,6 +9,8 @@ from flask import Blueprint, current_app, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 from app.model import ModelNotReady
+from app.pdf import PdfError
+from app.pdf import extract as pdf_extract
 from app.pipeline import ContentType, ModerationRequest
 
 log = logging.getLogger(__name__)
@@ -54,19 +56,16 @@ def _parse_request() -> ModerationRequest | tuple:
     return ModerationRequest(content, content_type, None if content_id is None else str(content_id))
 
 
-@bp.post("/v1/moderate")
-def moderate():
+def _moderate(req: ModerationRequest, extra: dict | None = None):
+    """Gate, then queue or score. Shared by the JSON and PDF endpoints so a PDF is judged by
+    exactly the same rules. `extra` is merged into the response (the PDF page map)."""
     svc = _svc()
-    req = _parse_request()
-    if isinstance(req, tuple):
-        return req
-
     # Layer 1 always runs inline — it's cheap, and a block needs no model or queue.
     gate, gate_ms = svc.pipeline.run_gate(req)
     if gate.blocked:
         result = svc.pipeline.gate_only_result(req, gate, gate_ms)
         svc.sink.emit(result)
-        return jsonify(result), 200
+        return jsonify({**result, **(extra or {})}), 200
 
     if svc.settings.mode == "async":
         try:
@@ -80,6 +79,7 @@ def moderate():
             "content_id": req.content_id,
             "content_type": req.content_type.value,
             "status_url": f"/v1/moderate/{req.request_id}",
+            **(extra or {}),
         }), 202
 
     try:
@@ -90,7 +90,59 @@ def moderate():
         log.exception("inference failed for request %s", req.request_id)
         return _error(500, "inference_failed", "model inference failed", request_id=req.request_id)
     svc.sink.emit(result)
-    return jsonify(result), 200
+    return jsonify({**result, **(extra or {})}), 200
+
+
+@bp.post("/v1/moderate")
+def moderate():
+    req = _parse_request()
+    if isinstance(req, tuple):
+        return req
+    return _moderate(req)
+
+
+@bp.post("/v1/moderate/pdf")
+def moderate_pdf():
+    """Moderate an uploaded PDF: extract its text, then run the ordinary pipeline.
+
+    multipart/form-data: `file` (required), `content_type` (default "article"), `content_id`.
+    The result is the usual payload plus a `pdf` block mapping character offsets to pages, so
+    the client can show each issue on the page it came from. A PDF whose pages can't be read
+    as text is rejected rather than allowed — see app/pdf.py.
+    """
+    svc = _svc()
+    limits = svc.settings.pdf
+    if not limits.enabled:
+        return _error(404, "not_found", "PDF moderation is disabled")
+
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return _error(400, "invalid_file", "attach a PDF as the 'file' field of a multipart form")
+
+    try:
+        content_type = ContentType(request.form.get("content_type", ContentType.ARTICLE.value))
+    except ValueError:
+        return _error(400, "invalid_content_type", "unknown 'content_type'", allowed=_CONTENT_TYPES)
+    content_id = request.form.get("content_id") or None
+
+    data = upload.read(limits.max_bytes + 1)
+    if len(data) > limits.max_bytes:
+        return _error(413, "pdf_too_large", f"the file is larger than {limits.max_bytes} bytes",
+                      limit=limits.max_bytes)
+
+    try:
+        extracted = pdf_extract(data, limits, upload.filename, svc.settings.ocr)
+    except PdfError as exc:
+        status = 413 if exc.code in ("pdf_too_large", "pdf_too_many_pages", "pdf_text_too_long") else 422
+        return _error(status, exc.code, exc.message, **exc.extra)
+
+    if len(extracted.text) > svc.settings.max_chars:
+        return _error(413, "content_too_long",
+                      f"the PDF's text is {len(extracted.text)} characters, over the "
+                      f"{svc.settings.max_chars} character limit")
+
+    req = ModerationRequest(extracted.text, content_type, content_id)
+    return _moderate(req, {"pdf": {"filename": upload.filename, **extracted.as_dict()}})
 
 
 @bp.get("/v1/moderate/<request_id>")

@@ -29,9 +29,12 @@ def test_floor_never_lowers():
 
 
 def test_equal_thresholds_disable_revise_band():
+    """bonc-v4 policy: risk <= 0.5 is allowed, risk > 0.5 is rejected (the author rewrites)."""
     t = Thresholds(0.5, 0.5)
     assert route(0.49, t) is Decision.ALLOW
-    assert route(0.5, t) is Decision.REJECT      # reject wins when the bands touch
+    assert route(0.5, t) is Decision.ALLOW       # the boundary itself is allowed
+    assert route(0.5001, t) is Decision.REJECT
+    assert route(0.99, t) is Decision.REJECT
 
 
 @pytest.mark.parametrize("a,r", [(0.9, 0.5), (-0.1, 0.5), (0.2, 1.1)])

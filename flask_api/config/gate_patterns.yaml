@@ -34,10 +34,14 @@ rules:
     category: abuse
     action: block
     kind: targeted
-    description: Insults or profanity aimed at a person or business - a subject
-      word (he, she, they...) followed later in the same sentence by a listed term.
-      "They are idiots" is blocked; "the idiot-proof design" is not.
-    subjects: [he, she, his, her, him, they, them, their]
+    description: Insults or profanity aimed at a person or business - a word that
+      points at someone (he, she, his, her, they, them...) and a listed term in the
+      same sentence, in either order. Policy (senior review, 2026-09) - nobody may
+      point abuse at an individual. "They are idiots", "What an idiot he is" and
+      "Idiots like them" are blocked; "the idiot-proof design" is not.
+      you/your are deliberately NOT subjects - they blocked fraud-awareness articles
+      ("Scammers create urgency, so take your time"); the model covers "you idiot".
+    subjects: [he, she, his, her, hers, him, himself, herself, they, them, their, theirs, themselves]
     terms:                                    # curated personal insults (committed)
       - idiot
       - moron

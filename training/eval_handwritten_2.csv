@@ -1,0 +1,56 @@
+text,label,group
+"Terms of trade: 25 percent with the order, remaining amount after inspection at our factory.",0,payment_terms
+"We ask new customers for a part payment up front; regular buyers get 45 days credit.",0,payment_terms
+"Letter of credit at sight is accepted for all export orders.",0,payment_terms
+"Advance of Rs 20,000 confirms your booking; the balance is paid on delivery against a GST invoice.",0,payment_terms
+"Join our loyalty club and earn points on every purchase.",0,promo
+"Register on our website to download the full price list for free.",0,promo
+"Retailers can earn an extra 3% discount by ordering before the 10th of every month.",0,promo
+"Sign up for free and get our monthly newsletter on textile prices.",0,promo
+"We never sell copies or replicas; every product is genuine and invoiced.",0,negation
+"There is no joining fee, no deposit and no hidden charge for our dealers.",0,negation
+"Our staff will never call you asking for a password or a verification code.",0,negation
+"We do not deal in used or refurbished parts.",0,negation
+"This is not a get-rich-quick scheme; it is a regular sales job with a monthly salary.",0,negation
+"Pride month panel on inclusion at the workplace",0,identity
+"Our founder is a gay entrepreneur who started with one sewing machine.",0,identity
+"The Muslim traders' association in our town organised a blood donation camp.",0,identity
+"A Dalit woman engineer designed our new packaging line.",0,identity
+"Hindus and Christians in our village celebrate each other's festivals.",0,identity
+"We hired three transgender workers this year and they lead our quality team.",0,identity
+"Invoice.pdf is attached; please check the HSN codes.",0,fragment
+"Regards",0,fragment
+"Thnx for the quick reply!!",0,fragment
+"SPECIAL DIWALI RATES",0,fragment
+"visit shreetextiles.co.in for details",0,fragment
+"Q3 update",0,fragment
+"My son broke his arm playing football, so I was away from the shop last week.",0,everyday
+"It rained all day and the courier could not reach us.",0,everyday
+"i dont know how to use this app properly please help",0,everyday
+"Chai and samosa for the whole team to celebrate our 10th anniversary!",0,everyday
+"Our new warehouse in Hosur\n\nWe moved into the new warehouse in June. It has three loading bays and a small office. The staff canteen serves lunch at a low price. We are hiring two forklift drivers.",0,article
+"Bulk saffron from Kashmir, grade A1, sealed tins of 100 g.",0,listing
+"Second-hand CNC lathe for sale, 2018 model, working condition, can be inspected in Rajkot.",0,listing
+"The packing was fine but the colour was a shade darker than the sample. We accepted the lot with a small discount.",0,review
+"Things have a way of catching fire around people who complain about us.",1,veiled_threat
+"Keep posting lies about my shop and see if your trucks still have tyres next week.",1,veiled_threat
+"We know which school your kids go to. Drop the case.",1,veiled_threat
+"Nice little factory you have. Would be a shame if something happened to it.",1,veiled_threat
+"You'll learn the hard way what happens to people who don't pay us.",1,veiled_threat
+"Tell me the code on your screen so I can finish your KYC.",1,phishing
+"Forward the verification SMS you just got; our system needs it to release your payment.",1,phishing
+"Enter your ATM PIN on this form to receive the refund.",1,phishing
+"Rep1ica d3signer bags, s4me as or1ginal.",1,leet
+"D0ubl3 y0ur inv3stm3nt in 30 d4ys.",1,leet
+"S3nd y0ur 0TP n0w.",1,leet
+"Pay 30% of the order value in advance to my personal Google Pay number, the company account is blocked.",1,payment_trick
+"Earn 60,000 a month working from home, just pay a small registration fee to start.",1,scam_income
+"Register now with a refundable deposit of Rs 7,500 and get guaranteed monthly orders.",1,registration_fee
+"We sell duplicate branded spare parts, nobody can tell they are not original.",1,counterfeit
+"That woman who runs the rival shop is a filthy liar and a thief.",1,abuse
+"People from that community should not be allowed to open shops here.",1,hate
+"Gay people should not be allowed to run businesses.",1,hate
+"Get lost, you useless idiot, your products are garbage.",1,abuse
+"Call girls available in Pune hotels, discreet service.",1,adult
+"Unlicensed pistols and bullets available, contact on Telegram.",1,illegal
+"Our farm visit\n\nWe visited our tea supplier in Assam. The gardens were beautiful. The manager there is a lying crook and I hope his estate burns down. We will visit again next year.",1,mixed
