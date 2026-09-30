@@ -183,8 +183,12 @@ def extract(data: bytes, limits: PdfLimits | None = None, filename: str = "",
         page_count = len(pages)
     except PdfError:
         raise
-    except Exception as exc:
-        raise PdfError("pdf_unreadable", f"the PDF could not be read ({type(exc).__name__})")
+    except Exception:
+        # The parser's own exception name ("PdfStreamError") was being shown to the author,
+        # who can do nothing with it. It goes to the log, where someone can.
+        log.warning("PDF could not be parsed", exc_info=True)
+        raise PdfError("pdf_unreadable", "this PDF appears to be damaged and could not be opened. "
+                                         "Try saving it again from the program that made it.")
 
     if page_count == 0:
         raise PdfError("pdf_empty", "the PDF has no pages")

@@ -8,3 +8,8 @@ res/
 # not reclaim that storage, which would need a history rewrite.
 flask_api/models/v1/
 flask_api/models/v3/
+
+# OCR recognition models for scripts RapidOCR doesn't bundle. Third-party weights we don't
+# redistribute, fetched by `python scripts/fetch_ocr_langs.py <script>` and verified against
+# the SHA256 RapidOCR publishes.
+flask_api/models/ocr/

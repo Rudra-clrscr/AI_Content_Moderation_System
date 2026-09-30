@@ -164,14 +164,32 @@ def moderate_media():
             return _error(413, "media_too_large", f"the file is larger than {media.max_bytes} bytes",
                           limit=media.max_bytes)
         try:
-            text, confidence = image_text(data, svc.settings.ocr, media)
+            read = image_text(data, svc.settings.ocr, media)
         except MediaError as exc:
             return _error(413 if exc.code == "media_too_large" else 422, exc.code, exc.message, **exc.extra)
+        text = read.text
         # A photograph with no writing on it is ordinary, so no text is not a refusal here —
         # but the picture itself was never inspected and the caller must be able to see that.
-        block.update(text_found=bool(text.strip()), ocr_confidence=round(confidence, 4),
-                     visual_content_checked=False)
+        block.update(text_found=read.has_text, ocr_confidence=round(read.confidence, 4),
+                     text_readable=read.readable, visual_content_checked=False)
         extra = {"media": block}
+        if read.failed:
+            # The checker broke, which is ours to fix and nothing the author did. Still refused:
+            # an image nothing looked at must not publish as clean.
+            return _error(503, "media_not_checkable",
+                          "this image could not be checked just now. Please try again in a "
+                          "moment.", kind=kind)
+        if read.has_text and not read.readable:
+            # There IS writing here and OCR could not read it, so nothing in this picture has
+            # been checked. Answering "allow" was how a Devanagari threat published with a
+            # clean result while the extracted text was gibberish.
+            if not media.allow_unreadable_image:
+                return _error(422, "media_unreadable",
+                              "there is writing in this image that could not be read, so it "
+                              "cannot be checked. Upload a clearer picture, or put the words "
+                              "in the post itself.", kind=kind, text_readable=False)
+            block.update(checked=False)
+            return jsonify({**_allowed_without_text(upload.filename, content_type, content_id), **extra}), 200
         if not text.strip():
             return jsonify({**_allowed_without_text(upload.filename, content_type, content_id), **extra}), 200
 

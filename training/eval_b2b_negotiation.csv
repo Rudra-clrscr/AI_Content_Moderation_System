@@ -1,0 +1,40 @@
+text,label,group
+"Need a supplier who can beat our current price.",0,pricing
+"Urgent: need a supplier who can beat our current price, we are paying Rs 95 per kg today.",0,pricing
+"We will beat your current price by 10%.",0,pricing
+"We will crush your current price by 10% if you commit to a six-month contract.",0,pricing
+"We will beat any quote you have in hand, send it across and we will better it.",0,pricing
+"Our rates will kill anything you are paying today, guaranteed on paper.",0,pricing
+"We can undercut your existing vendor by 8% on the same grade of cotton.",0,pricing
+"Give us your target price and we will destroy it.",0,pricing
+"We will crush the competition on delivery time, not just on rate.",0,pricing
+"Looking for a mill that can slash our landed cost per kg this quarter.",0,pricing
+"Urgent requirement, we are paying Rs 95 per kg today and need better.",0,pricing
+"We will match or beat any written quotation from a GST-registered supplier.",0,pricing
+"Our price war with the importers is good news for buyers like you.",0,pricing
+"We killed our defect rate last year by moving to automated stitching.",0,idiom
+"This demo shows how to kill the background process that slows the app.",0,idiom
+"We destroyed our old dispatch record: 4,200 parcels in one day.",0,idiom
+"The new line absolutely murders our old cycle time.",0,idiom
+"Our team killed it at the Surat trade fair this year.",0,idiom
+"Run kill -9 on the stuck worker and restart the queue.",0,idiom
+"We want to kill the middleman model and sell direct to retailers.",0,idiom
+"That batch was a disaster and we ate the loss ourselves.",0,idiom
+"Their quote blew ours out of the water, so we revised it.",0,idiom
+"We are bleeding margin on this SKU and need a cheaper source.",0,idiom
+"Cut-throat pricing in this segment means we survive on volume.",0,idiom
+"The old packaging line was a nightmare to maintain.",0,idiom
+"We took a beating on freight last monsoon.",0,idiom
+"Frankly the delivery was late and the packaging was poor, we want a credit note.",0,complaint
+"The last three consignments were short by 12 kg and we need this resolved.",0,complaint
+"Quality has dropped since the factory moved, please look into it.",0,complaint
+"We are disappointed with the response time and are reviewing the contract.",0,complaint
+"This is the third delay this quarter and it is costing us orders.",0,complaint
+"The samples did not match the specification we agreed in writing.",0,complaint
+"We are escalating this because two emails have gone unanswered.",0,complaint
+"Report abusive messages instead of replying to them.",0,awareness
+"If a buyer writes something like 'you idiot' in chat, use the report button.",0,awareness
+"Scammers often create urgency, so take your time and verify the GST number.",0,awareness
+"Never share an OTP, even with someone claiming to be from BONC support.",0,awareness
+"This guide explains how to spot a fake purchase order before you ship.",0,awareness
+"A supplier asking for a processing fee up front is a warning sign.",0,awareness

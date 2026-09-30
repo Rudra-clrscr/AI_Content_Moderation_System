@@ -52,6 +52,16 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # PICTURE is never classified - there is no nudity/violence/
                             # counterfeit detector in this service, so an image with no text is
                             # allowed and the result says visual_content_checked: false.
+  allow_unreadable_image: false
+                            # An image OCR found writing in but could NOT read (a script the
+                            # recognition model doesn't cover, or a picture too poor to read).
+                            # Nothing in such a picture has been checked, so it is refused -
+                            # the same rule as pdf.reject_unreadable_pages, and for the same
+                            # reason. Until the Devanagari recognition model is bundled (see
+                            # ocr below), this refuses Hindi signage that used to publish with
+                            # a clean result while the text read as gibberish. Set true to
+                            # publish them anyway; they are then recorded with checked: false
+                            # and the editor shows "not inspected", never a green OK.
 
 pdf:                        # POST /v1/moderate/pdf: extract the text, then moderate it normally
   enabled: true             # PDF_UPLOAD=0 turns the endpoint off
@@ -75,6 +85,26 @@ pdf:                        # POST /v1/moderate/pdf: extract the text, then mode
     max_pixels: 4000000     # hard cap per page whatever the dpi implies (hostile page sizes)
     min_chars: 20           # OCR must recover at least this much, or the page stays unreadable
     min_confidence: 0.5     # and be at least this confident, or we don't trust what it read
+    min_chars_per_box: 6    # Detection finds where the writing is; recognition turns it into
+    trust_short_confidence: 0.90
+                            # characters. A script the recognition model doesn't cover still
+                            # detects every line and then returns near-nothing, at a confidence
+                            # that clears min_confidence - which is how a Devanagari threat in a
+                            # PNG was reported as read and clean. Measured on rendered 48pt
+                            # text, characters recovered per detected line: English 25-28 at
+                            # conf 0.99, Hindi 1.5-4 at conf 0.62-0.76. So a line OCR really
+                            # read comes back as a word or more; below min_chars_per_box the
+                            # reading is not trusted unless recognition is at least
+                            # trust_short_confidence sure (genuinely short signage: "SALE").
+                            # The Devanagari recognition model is NOT bundled - RapidOCR ships
+                            # Latin and Chinese only, which is why Hindi pictures are refused
+                            # rather than read. Fetch it (~8 MB, once, not at request time) and
+                            # uncomment the two keys below:
+                            #   python scripts/fetch_ocr_langs.py devanagari
+                            # It reads Latin script too, so it replaces the default rather than
+                            # running alongside it. `--list` shows the other scripts available.
+    # rec_model_path: models/ocr/devanagari_rec.onnx
+    # rec_lang: devanagari
 
 latency_budget_ms: 30      # inference-only budget for ONE call; overruns are logged, not failed.
                            # Realistic for short content (a listing is ~11 ms, p95 ~30 ms measured with

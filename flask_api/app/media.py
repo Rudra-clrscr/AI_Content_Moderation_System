@@ -65,6 +65,11 @@ class MediaLimits:
     max_bytes: int = 15_000_000        # one attachment
     max_pixels: int = 40_000_000       # decoded image size, against decompression bombs
     allow_unchecked_video: bool = False
+    # An image with writing OCR could not read. Refusing is the fail-closed choice and matches
+    # the PDF rule (pdf.reject_unreadable_pages): a picture whose words nobody read is exactly
+    # how a scam arrives. Turn it on to publish those anyway - they are then recorded with
+    # checked: false, never as a clean result.
+    allow_unreadable_image: bool = False
 
     def __post_init__(self) -> None:
         if min(self.max_bytes, self.max_pixels) < 1:
@@ -82,11 +87,35 @@ def detect_kind(data: bytes, filename: str = "") -> str:
     return "unknown"
 
 
-def image_text(data: bytes, ocr, limits: MediaLimits) -> tuple[str, float]:
-    """Text OCR can read out of an image, and its mean confidence. ("", 0.0) when there is
-    none — which is normal for a photograph and is not, on its own, a reason to refuse."""
+@dataclass(frozen=True)
+class ImageText:
+    """What OCR could make of a picture.
+
+    The three outcomes are deliberately distinct, because the right answer differs for each:
+
+    * `not has_text` — no writing in the picture. Ordinary for a product photo, so it is
+      allowed, with `visual_content_checked: false` saying the picture itself wasn't judged.
+    * `has_text and readable` — the writing was read, and it is moderated like any other text.
+    * `has_text and not readable` — there is writing that OCR could not read, so nothing about
+      it has been checked. Reporting this as an allow is how a threat in Devanagari published
+      with a clean result; see `media.allow_unreadable_image`.
+    """
+
+    text: str
+    confidence: float
+    boxes: int = 0
+    has_text: bool = False
+    readable: bool = False
+    # OCR itself failed, so we know nothing about the picture either way. Distinct from
+    # unreadable writing, because the author can act on that and not on this.
+    failed: bool = False
+
+
+def image_text(data: bytes, ocr, limits: MediaLimits) -> ImageText:
+    """What OCR can read out of an image. An empty result is normal for a photograph and is
+    not, on its own, a reason to refuse one."""
     if ocr is None or not ocr.enabled:
-        return "", 0.0
+        return ImageText("", 0.0)
     try:
         import io
 
@@ -94,7 +123,7 @@ def image_text(data: bytes, ocr, limits: MediaLimits) -> tuple[str, float]:
         from PIL import Image
     except ImportError:
         log.warning("image OCR unavailable: Pillow or numpy missing")
-        return "", 0.0
+        return ImageText("", 0.0)
 
     try:
         Image.MAX_IMAGE_PIXELS = limits.max_pixels          # Pillow's own bomb guard
@@ -107,12 +136,17 @@ def image_text(data: bytes, ocr, limits: MediaLimits) -> tuple[str, float]:
             array = np.asarray(frame)
     except MediaError:
         raise
-    except Exception as exc:
-        raise MediaError("media_unreadable", f"the image could not be decoded ({type(exc).__name__})")
+    except Exception:
+        log.warning("image could not be decoded", exc_info=True)   # the name is for the log, not the author
+        raise MediaError("media_unreadable", "this image file appears to be damaged and could not "
+                                             "be opened. Try saving it again, or upload a different one.")
 
     try:
-        result = ocr.read_image(array)
+        page = ocr.read_image(array)
     except Exception:
         log.exception("OCR failed on an image upload")
-        return "", 0.0
-    return result.text, result.confidence
+        # OCR fell over rather than reporting on the picture, so nothing is known about it.
+        # Reporting "no text" here would publish it as checked.
+        return ImageText("", 0.0, failed=True)
+    return ImageText(page.text, page.confidence, page.boxes,
+                     has_text=page.has_text, readable=ocr.config.reads_as_text(page))
