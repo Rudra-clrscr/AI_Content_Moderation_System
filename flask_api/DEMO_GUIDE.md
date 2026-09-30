@@ -258,6 +258,27 @@ to check. If we let that through, uploading a *screenshot* of a scam would defea
 system. So we OCR the page — and if OCR can't read it either, we refuse it rather than approve
 it. Blurring the image until the OCR fails doesn't get you published; it gets you turned away."
 
+### 4.11 Article media (images, video, PDFs)
+
+On **http://127.0.0.1:8000/articles**, click **+ Write Article**, fill in a title and body,
+then use the **Upload image, video, or PDF** dropzone. Each attachment is checked as you add
+it, and a blocked one stops the publish.
+
+| Attach | State shown | Why |
+|---|---|---|
+| A picture of "Earn 50000 per week… pay a small registration fee" | **blocked**, quoting the phrase | OCR read the scam out of the image |
+| An ordinary product photo | **not inspected** | no text in it — allowed, but the picture itself is never classified |
+| A clean PDF catalogue | **ok**, "1 page read" | text extracted and checked |
+| Any video | **blocked** | nothing in a video can be read by this service |
+
+Press **Publish** with the bad ones attached: the article is *not* published and the banner
+names the files to remove. Remove them and it publishes.
+
+**Talking point:** "An article goes out as a whole, so the attachments are moderated with it —
+otherwise you write a clean article and put the scam in the picture. Notice the photo says
+*not inspected*, not *ok*: we read text, we don't classify pictures. Saying so is the honest
+thing; pretending a green tick means the image is safe would be worse than no check at all."
+
 Point at the response: the page shows `"source": "ocr"` with its confidence, so an auditor can
 see which pages were read off pixels rather than text. A text PDF answers in ~100 ms; an OCR'd
 page costs about half a second to a second and a half. Long PDFs are rejected rather than

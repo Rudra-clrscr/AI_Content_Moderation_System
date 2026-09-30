@@ -105,6 +105,27 @@ class OcrEngine:
         return {i: p for i, p in out.items()
                 if len(p.text) >= self.config.min_chars and p.confidence >= self.config.min_confidence}
 
+    def read_image(self, array) -> PageText:
+        """OCR an already-decoded RGB image (app/media.py hands us attachments this way)."""
+        if not self.enabled:
+            return PageText("", 0.0, 0.0)
+        t0 = time.perf_counter()
+        with self._lock:
+            try:
+                result = self._load()(array)
+            except ImportError as exc:
+                log.warning("OCR disabled: %s", exc)
+                self._failed = True
+                return PageText("", 0.0, 0.0)
+        return self._to_page_text(result, (time.perf_counter() - t0) * 1000)
+
+    @staticmethod
+    def _to_page_text(result, ms: float) -> PageText:
+        texts = list(getattr(result, "txts", None) or [])
+        scores = [float(s) for s in (getattr(result, "scores", None) or [])]
+        return PageText(" ".join(t.strip() for t in texts if t.strip()),
+                        float(sum(scores) / len(scores)) if scores else 0.0, ms)
+
     def _read_page(self, doc, index: int, engine, np) -> PageText:
         page = doc[index]
         width, height = page.get_size()                        # points (1/72 inch)
@@ -115,9 +136,4 @@ class OcrEngine:
         t0 = time.perf_counter()
         bitmap = page.render(scale=scale)
         image = np.asarray(bitmap.to_pil().convert("RGB"))
-        result = engine(image)
-        texts = list(getattr(result, "txts", None) or [])
-        scores = [float(s) for s in (getattr(result, "scores", None) or [])]
-        return PageText(" ".join(t.strip() for t in texts if t.strip()),
-                        float(sum(scores) / len(scores)) if scores else 0.0,
-                        (time.perf_counter() - t0) * 1000)
+        return self._to_page_text(engine(image), (time.perf_counter() - t0) * 1000)

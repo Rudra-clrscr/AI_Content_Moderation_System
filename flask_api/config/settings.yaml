@@ -35,6 +35,22 @@ feedback:                  # what authors see when asked to revise or when rejec
 limits:
   max_chars: 25000          # articles: 20,000-char body + title + link URLs
 
+media:                      # POST /v1/moderate/media: attachments on an article (app/media.py).
+  enabled: true             # Anything published with a post must be checked, or the scam just
+                            # moves into the picture. The kind is read from the file's bytes,
+                            # never its name.
+  max_bytes: 15000000       # one attachment (15 MB)
+  max_pixels: 40000000      # decoded image size, against decompression bombs
+  allow_unchecked_video: false
+                            # Video cannot be read at all: no frame or audio analysis here.
+                            # Refusing is the fail-closed choice, and matches how scanned PDF
+                            # pages are treated. Set true only if you accept publishing video
+                            # that nothing has looked at.
+                            # NOTE: images are OCR'd for text, but the PICTURE is never
+                            # classified - there is no nudity/violence/counterfeit detector in
+                            # this service, so an image with no text is allowed and the result
+                            # says visual_content_checked: false.
+
 pdf:                        # POST /v1/moderate/pdf: extract the text, then moderate it normally
   enabled: true             # PDF_UPLOAD=0 turns the endpoint off
   max_bytes: 10000000       # 10 MB upload

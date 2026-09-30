@@ -48,6 +48,10 @@
   let tab = "published";
   let editing = null;        // article being edited (object), or null for a new one
   let feedbackState = null;  // {issues, serialized} while moderation feedback is on screen
+  // Attachments in the open modal: {name, size, kind, file, state, detail}. `state` is
+  // "new" | "checking" | "ok" | "unchecked" | "bad" — publishing needs every one of them
+  // past the moderator, or the article's media becomes the way round it.
+  let attachments = [];
 
   // ---------------- list ----------------
   function render() {
@@ -120,6 +124,8 @@
 
   function openModal(article) {
     editing = article;
+    attachments = (article?.attachments || []).map((a) => ({ ...a, file: null }));
+    renderAttachments();
     $("modal-title").textContent = article ? "Edit article" : "Write article";
     $("title").value = article?.title || "";
     body.innerHTML = article?.bodyHtml || "";
@@ -232,6 +238,97 @@
     closeModal(); tab = "draft"; render(); toast("Saved as draft");
   });
 
+  // ---------------- article media ----------------
+  const dropzone = $("dropzone");
+  const mediaInput = $("media-input");
+
+  dropzone.addEventListener("click", () => mediaInput.click());
+  dropzone.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); mediaInput.click(); }
+  });
+  ["dragenter", "dragover"].forEach((ev) => dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); dropzone.classList.add("over");
+  }));
+  ["dragleave", "drop"].forEach((ev) => dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); dropzone.classList.remove("over");
+  }));
+  dropzone.addEventListener("drop", (e) => addFiles(e.dataTransfer.files));
+  mediaInput.addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+
+  function addFiles(fileList) {
+    for (const file of fileList) {
+      attachments.push({ name: file.name, size: file.size, file, state: "new", detail: "" });
+    }
+    renderAttachments();
+    checkAttachments();
+  }
+
+  $("attachments").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-remove]");
+    if (!btn) return;
+    attachments.splice(Number(btn.dataset.remove), 1);
+    renderAttachments();
+  });
+
+  const KB = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+  const STATE_LABEL = { new: ["att-warn", "not checked"], checking: ["att-checking", "checking…"],
+                        ok: ["att-ok", "ok"], unchecked: ["att-warn", "not inspected"],
+                        bad: ["att-bad", "blocked"] };
+
+  function renderAttachments() {
+    $("attachments").innerHTML = attachments.map((a, i) => {
+      const [cls, label] = STATE_LABEL[a.state] || STATE_LABEL.new;
+      return `<li>
+          <span class="att-state ${cls}">${label}</span>
+          <span class="grow"><span class="name">${esc(a.name)}</span>
+            <div class="meta">${KB(a.size)}${a.detail ? ` · ${esc(a.detail)}` : ""}</div></span>
+          <button class="att-remove" data-remove="${i}" aria-label="Remove ${esc(a.name)}">✕</button>
+        </li>`;
+    }).join("");
+  }
+
+  /** Check every attachment that hasn't been checked yet. Resolves when all are settled. */
+  async function checkAttachments() {
+    const pending = attachments.filter((a) => a.state === "new" && a.file);
+    await Promise.all(pending.map(async (a) => {
+      a.state = "checking"; a.detail = ""; renderAttachments();
+      try {
+        const result = await M.moderateFile(a.file, { contentId: editing?.id });
+        const media = result.media || {};
+        if (result.decision !== "allow") {
+          a.state = "bad";
+          a.detail = firstIssue(result) || (result.feedback?.message ?? "Can't be published.");
+        } else if (media.visual_content_checked === false && media.text_found === false) {
+          // Allowed, but nothing in it could actually be read. Say so rather than showing a tick.
+          a.state = "unchecked";
+          a.detail = media.kind === "video" ? "video isn't checked by the moderator"
+                                            : "no text found; the picture itself isn't checked";
+        } else {
+          a.state = "ok";
+          a.detail = media.kind === "pdf" ? `${media.page_count} page${media.page_count === 1 ? "" : "s"} read`
+                                          : "text read and checked";
+        }
+      } catch (e) {
+        a.state = "bad";
+        a.detail = e.message;
+      }
+      renderAttachments();
+    }));
+  }
+
+  /** Attachment records for storage. The File objects themselves aren't kept: this page is a
+   *  front-end reference with no upload service behind it, so reopening re-checks them. */
+  function storedAttachments() {
+    return attachments.map(({ name, size, state, detail }) => ({ name, size, state, detail }));
+  }
+
+  function firstIssue(result) {
+    const issue = (result.feedback?.issues || [])[0];
+    if (!issue) return "";
+    const quoted = (result.content || "").slice(issue.start, issue.end).trim();
+    return quoted ? `“${quoted.slice(0, 70)}”` : issue.message;
+  }
+
   $("publish-btn").addEventListener("click", publish);
 
   async function publish() {
@@ -249,6 +346,16 @@
 
     const serialized = M.serializeEditor(body);
     try {
+      // Attachments first: an article is published as a whole, so a blocked picture must stop
+      // it just as a blocked sentence does. Nothing is published while any of them is unchecked.
+      await checkAttachments();
+      const blocked = attachments.filter((a) => a.state === "bad");
+      if (blocked.length) {
+        showError("Some attachments can't be published",
+                  `${blocked.map((a) => a.name).join(", ")} — remove or replace ${blocked.length === 1 ? "it" : "them"}, then publish again.`);
+        return;
+      }
+
       const { result, parts, content } = await M.moderateArticle({
         title: $("title").value, bodyText: serialized.text, links: M.editorLinks(body), contentId: editing?.id,
       });
@@ -257,13 +364,14 @@
         showError("Still checking", "Your article is being checked. Please try publishing again in a moment.");
       } else if (result.decision === "allow") {
         if (!alreadyPublished) state.used += 1;
-        snapshot("published", { moderation, publishedAt: Date.now() });
+        snapshot("published", { moderation, publishedAt: Date.now(), attachments: storedAttachments() });
         closeModal(); tab = "published"; render();
         toast(alreadyPublished ? "Article updated" : "Article published");
       } else {
         // An already-published article stays live as it was; only the attempted edit is rejected.
         if (!alreadyPublished) {
-          snapshot(result.decision === "revise" ? "needs_changes" : "rejected", { moderation });
+          snapshot(result.decision === "revise" ? "needs_changes" : "rejected",
+                   { moderation, attachments: storedAttachments() });
           render();
         }
         showFeedback(result, parts, content, serialized);

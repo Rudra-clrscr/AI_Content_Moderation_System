@@ -20,10 +20,46 @@
 | `content_type` | yes | One of `business_profile`, `product_listing`, `post`, `advertisement`, `article`. It also sets the wording of `feedback` ("Your article needs a few changes"). |
 | `content_id` | no | The platform's own ID, as a string or an integer. It's always returned as a string. |
 
-## Request: `POST /v1/moderate/pdf`
+## Request: `POST /v1/moderate/media` (and `/v1/moderate/pdf`)
 
-`multipart/form-data` upload of a PDF. Its text is extracted and then moderated by exactly the
-same pipeline, so a brochure is judged by the same rules as a pasted post.
+`multipart/form-data` upload of **one** attachment — post one file per request, so each gets
+its own decision and its own audit row. Its text is extracted and then moderated by exactly
+the same pipeline, so a brochure is judged by the same rules as a pasted post.
+`/v1/moderate/pdf` is the original path and still works; both accept every kind below.
+
+Anything published with a post has to be checked, or the scam simply moves into the picture.
+**What can be read differs by kind, so the rule differs too:**
+
+| Kind | What is read | Rule |
+|---|---|---|
+| `pdf` | Text, with OCR for scanned pages | A page that can't be read is **refused** |
+| `image` | OCR only | Text is moderated. **The picture itself is never classified** — there is no nudity/violence/counterfeit detector here — so an image with no text is **allowed**, and the result says `visual_content_checked: false` |
+| `video` | Nothing | **Refused**, unless `media.allow_unchecked_video` is set |
+| anything else | — | `422 media_unsupported` |
+
+The kind comes from the file's leading bytes, never its name: a `.png` that is really a PDF is
+treated as a PDF, and an executable renamed `.jpg` is refused.
+
+Every response carries a `media` block:
+
+```json
+"media": {"filename": "flyer.png", "kind": "image", "text_found": true,
+          "ocr_confidence": 0.9937, "visual_content_checked": false}
+```
+
+A file with nothing to read (a photo with no text, or an unchecked video) still returns a
+normal `allow` result and is still written to the audit log, so the record shows both what was
+published and that nothing in it could be read.
+
+**Why an image with no text is allowed but a blank PDF page is not:** a product photo with no
+writing on it is completely ordinary, and refusing those would break the feature for every
+honest seller. A PDF page with no text is not ordinary — it is a scan, and scans are how a
+screenshot of a scam arrives. The asymmetry is deliberate.
+
+Media errors: `413 media_too_large`, `422 media_unsupported` / `media_not_checkable` /
+`media_unreadable`, plus all the PDF codes below.
+
+### The PDF case in detail
 
 | Field | Required | Notes |
 |---|---|---|

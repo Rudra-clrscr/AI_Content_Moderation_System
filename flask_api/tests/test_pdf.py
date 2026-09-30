@@ -267,9 +267,9 @@ def test_missing_file(make_settings):
     assert r.status_code == 400 and r.get_json()["error"]["code"] == "invalid_file"
 
 
-def test_non_pdf_upload(make_settings):
+def test_unsupported_upload(make_settings):
     r = upload(client(make_settings), b"just a text file", name="notes.txt")
-    assert r.status_code == 422 and r.get_json()["error"]["code"] == "pdf_invalid"
+    assert r.status_code == 422 and r.get_json()["error"]["code"] == "media_unsupported"
 
 
 def test_bad_content_type(make_settings):
