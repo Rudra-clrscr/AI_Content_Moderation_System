@@ -12,6 +12,10 @@
  *
  * Link URLs are included because they aren't part of the visible text: a scam
  * domain hidden behind "click here" must still be checked.
+ *
+ * Attachments are sent separately to POST /v1/moderate/media, one per request
+ * (see moderateFile). An article is only published when the text and every
+ * attachment are allowed.
  */
 (function (global) {
   "use strict";
@@ -133,5 +137,34 @@
     return { result: body, parts, content };
   }
 
-  global.BoncModeration = { serializeEditor, editorLinks, buildArticleContent, mapIssues, rangeFor, moderateArticle };
+  /**
+   * Moderate one attachment. Resolves to the usual result payload plus a `media` block
+   * ({kind, text_found, visual_content_checked, …}).
+   *
+   * Attachments go one per request so each gets its own decision and its own audit row.
+   * Anything published with a post has to be checked, or the scam simply moves into the
+   * picture — and what can be checked differs by kind, which is why the server answers
+   * "refused" for video rather than pretending.
+   */
+  async function moderateFile(file, { contentId, contentType = "article", endpoint = "/v1/moderate/media" } = {}) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("content_type", contentType);
+    if (contentId) form.append("content_id", contentId);
+    let resp;
+    try {
+      resp = await fetch(endpoint, { method: "POST", body: form });
+    } catch (e) {
+      throw Object.assign(new Error("Could not reach the moderation service."), { code: "network" });
+    }
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = body.error || {};
+      throw Object.assign(new Error(err.message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
+    }
+    return body;
+  }
+
+  global.BoncModeration = { serializeEditor, editorLinks, buildArticleContent, mapIssues, rangeFor,
+                            moderateArticle, moderateFile };
 })(window);

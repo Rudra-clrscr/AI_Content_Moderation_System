@@ -38,6 +38,62 @@ def write(page, title, body_html):
                      b.dispatchEvent(new Event('input', {bubbles: true})); }""", body_html)
 
 
+def _media_files() -> dict:
+    """Attachments for the media checks, written to a temp dir. Empty if Pillow is missing."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return {}
+    import tempfile
+    out = Path(tempfile.mkdtemp(prefix="bonc-media-"))
+
+    def picture(name, lines=()):
+        img = Image.new("RGB", (1100, 260), "white")
+        if lines:
+            draw = ImageDraw.Draw(img)
+            try:
+                font = ImageFont.truetype("arial.ttf", 34)
+            except OSError:
+                font = ImageFont.load_default()
+            for i, line in enumerate(lines):
+                draw.text((60, 50 + i * 60), line, fill=(20, 20, 20), font=font)
+        img.save(out / name)
+        return out / name
+
+    files = {
+        "scam_flyer.png": picture("scam_flyer.png", ["Earn 50000 per week from home.",
+                                                     "Pay a small registration fee to join."]),
+        "product_photo.png": picture("product_photo.png"),
+    }
+    pdf = out / "catalogue.pdf"
+    pdf.write_bytes(_one_page_pdf("Cotton bedsheets in king and queen sizes. Bulk orders welcome."))
+    files["catalogue.pdf"] = pdf
+    clip = out / "clip.mp4"
+    clip.write_bytes(b"\x00\x00\x00\x20ftypisom" + b"\x00" * 256)
+    files["clip.mp4"] = clip
+    return files
+
+
+def _one_page_pdf(text: str) -> bytes:
+    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+    objs = {1: b"<< /Type /Catalog /Pages 2 0 R >>",
+            2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+               b"/Resources << /Font << /F1 5 0 R >> >> >>",
+            4: b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+            5: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"}
+    out, offsets = bytearray(b"%PDF-1.4\n"), {}
+    for n in sorted(objs):
+        offsets[n] = len(out)
+        out += b"%d 0 obj\n%s\nendobj\n" % (n, objs[n])
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    for n in sorted(objs):
+        out += b"%010d 00000 n \n" % offsets[n]
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    return bytes(out)
+
+
 def highlights(page):
     return page.evaluate("() => CSS.highlights.has('mod-revise') ? [...CSS.highlights.get('mod-revise')].map(r => r.toString()) : []")
 
@@ -164,6 +220,42 @@ with sync_playwright() as p:
     overflow = page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth")
     check("mobile: no horizontal scroll", not overflow)
     SHOTS and page.screenshot(path=f"{SHOTS}/a5_mobile_modal.png")
+    page.click("#close-btn")
+
+    # 12. article media. Last, on a reset page: it publishes, and the quota checks above
+    # assume they own the two free publishes.
+    media = _media_files()
+    if not media:
+        print("SKIP media checks (Pillow not installed)")
+    else:
+        page.set_viewport_size({"width": 1280, "height": 900})
+        page.evaluate("localStorage.clear()"); page.reload()
+        write(page, "Bedsheet range with media", "<p>Cotton bedsheets in king and queen sizes.</p>")
+        page.set_input_files("#media-input", [str(p) for p in media.values()])
+        page.wait_for_function("() => !document.querySelectorAll('.att-checking').length", timeout=120_000)
+        by = {r["name"]: r["state"] for r in page.eval_on_selector_all(".attachments li",
+              "els => els.map(e => ({name: e.querySelector('.name').textContent,"
+              " state: e.querySelector('.att-state').textContent.trim()}))")}
+        check("media: scam inside an image is blocked", by.get("scam_flyer.png") == "blocked", str(by))
+        check("media: photo with no text is allowed but marked not inspected",
+              by.get("product_photo.png") == "not inspected", str(by))
+        check("media: clean pdf is ok", by.get("catalogue.pdf") == "ok", str(by))
+        check("media: video is refused", by.get("clip.mp4") == "blocked", str(by))
+        SHOTS and page.screenshot(path=f"{SHOTS}/a6_media_checked.png")
+        page.click("#publish-btn")
+        page.wait_for_selector(".banner.error", timeout=30_000)
+        banner = page.inner_text("#banner")
+        check("media: publish blocked, naming the files",
+              "scam_flyer.png" in banner and "clip.mp4" in banner, banner[:120])
+        check("media: nothing published while an attachment is blocked", "2 of 2" in page.inner_text("#quota"))
+        for _ in range(2):      # drop the blocked ones; the rest should publish
+            i = page.eval_on_selector_all(".attachments li",
+                "els => els.findIndex(e => e.querySelector('.att-state').textContent.trim()==='blocked')")
+            page.click(f".attachments li:nth-child({i + 1}) .att-remove")
+        page.click("#publish-btn")
+        page.wait_for_selector("#modal", state="hidden", timeout=60_000)
+        check("media: publishes once the blocked attachments are gone",
+              "Bedsheet range with media" in page.inner_text("#list"))
     browser.close()
 
 failed = [r for r in results if not r[1]]

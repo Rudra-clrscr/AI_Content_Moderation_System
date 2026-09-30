@@ -65,6 +65,10 @@ Articles tab and "Write article" modal, in BONC Business Dashboard styling:
     issue has a **Show** button. The article is kept under *Needs changes*.
   - **reject**: the policy area is shown, and the article is kept under *Rejected*.
   - If the check fails (network, 503), nothing is published (fail closed).
+- **Article media** matches the platform's own dropzone: drag or pick images, video and PDFs.
+  Each one is checked as it's attached and shown with its state — *ok*, *not inspected* (nothing
+  readable in it), or *blocked* with the phrase that tripped it. **A blocked attachment stops
+  the publish**, naming the files to remove, because an article goes out as a whole.
 - **Save as Draft** skips moderation, because drafts aren't public.
 - Only successful publishes use up the free-publish quota.
 - `app/static/articles/moderation-client.js` is framework-free and can be copied
@@ -99,11 +103,33 @@ v4 is **batch-invariant** (`batch_invariant: true` in its meta), so all sentence
 scored in batched calls. v3's dynamic INT8 changed scores by up to 0.63 when batched,
 which forced one call per sentence. Turn the scan off with `SENTENCE_SCAN=0`.
 
-## PDF uploads
+## Attachments: images, video and PDFs
 
-`POST /v1/moderate/pdf` takes a PDF as multipart `file`, extracts its text with `pypdf`, and
-runs the ordinary pipeline over it. The response adds a `pdf` block mapping character offsets
-to page numbers, so each issue can be shown on the page it came from.
+`POST /v1/moderate/media` takes one file as multipart `file` and runs the ordinary pipeline
+over whatever text it carries. The article editor sends every attachment through it before
+publishing — anything published with a post has to be checked, or the scam just moves into the
+picture.
+
+**The rule differs by kind, because what we can read differs** ([app/media.py](app/media.py)):
+
+| Kind | Read | Rule |
+|---|---|---|
+| PDF | text + OCR for scans | a page that can't be read is **refused** |
+| Image | OCR only | text is moderated; **the picture is never classified**, so an image with no text is allowed and the result says `visual_content_checked: false` |
+| Video | nothing | **refused** unless `media.allow_unchecked_video` |
+
+That asymmetry is deliberate: a product photo with no writing on it is ordinary, and refusing
+those would break the feature for honest sellers — but a PDF page with no text is a scan, and
+scans are how a screenshot of a scam arrives. The kind is taken from the file's leading bytes,
+never its name, so a `.png` that is really a PDF is treated as a PDF and a renamed executable
+is refused.
+
+**Known gap, stated plainly:** this service reads text. It has no image classifier, so a
+photograph of anything at all passes as long as it carries no harmful words. Closing that
+needs a separate model; `visual_content_checked: false` is there so nobody assumes otherwise.
+
+`POST /v1/moderate/pdf` is the original path and still works. The response adds a `pdf` block
+mapping character offsets to page numbers, so each issue can be shown on the page it came from.
 
 Two decisions in [app/pdf.py](app/pdf.py) are worth knowing:
 
@@ -256,7 +282,8 @@ every demo sentence against the decision the demo guide promises.
 | Method | Path | |
 |---|---|---|
 | POST | `/v1/moderate` | Moderates one piece of content. Returns `200` with the result, or `202` pending in async mode. |
-| POST | `/v1/moderate/pdf` | Moderates an uploaded PDF (multipart `file`). Extracts the text, runs the same pipeline, and adds a `pdf` page map. Refuses pages it can't read. |
+| POST | `/v1/moderate/media` | Moderates one uploaded attachment (multipart `file`): PDF, image or video. Reads whatever text it carries and runs the same pipeline. Refuses what it can't check. |
+| POST | `/v1/moderate/pdf` | The original path for the above; still works and accepts every kind. |
 | GET | `/v1/moderate/<request_id>` | Looks up a result (async mode only). |
 | GET | `/demo` | Browser demo UI. Only served when `DEMO_PAGE=1`. |
 | GET | `/health` | Liveness check. |

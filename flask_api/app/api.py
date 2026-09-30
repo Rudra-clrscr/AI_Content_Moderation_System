@@ -8,10 +8,12 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
+from app.media import MediaError, detect_kind, image_text
 from app.model import ModelNotReady
 from app.pdf import PdfError
 from app.pdf import extract as pdf_extract
-from app.pipeline import ContentType, ModerationRequest
+from app.pipeline import ContentType, ModerationRequest, Stage
+from app.routing import Decision
 
 log = logging.getLogger(__name__)
 bp = Blueprint("moderation", __name__)
@@ -102,22 +104,33 @@ def moderate():
 
 
 @bp.post("/v1/moderate/pdf")
-def moderate_pdf():
-    """Moderate an uploaded PDF: extract its text, then run the ordinary pipeline.
+@bp.post("/v1/moderate/media")
+def moderate_media():
+    """Moderate one uploaded file: read whatever text it carries, then run the ordinary pipeline.
 
     multipart/form-data: `file` (required), `content_type` (default "article"), `content_id`.
-    The result is the usual payload plus a `pdf` block mapping character offsets to pages, so
-    the client can show each issue on the page it came from. A PDF whose pages can't be read
-    as text is rejected rather than allowed — see app/pdf.py.
+    Post one file per request — each gets its own decision and its own audit row.
+
+    What can be read differs by kind, and so does the rule (see app/media.py):
+
+      * **PDF** — text, with OCR for scanned pages. A page that can't be read is refused, and
+        the result carries a `pdf` block mapping offsets to page numbers.
+      * **Image** — OCR only, which catches the real bypass of putting the scam in a
+        screenshot. The picture itself is not classified, so an image with no text is allowed
+        and the result says `visual_content_checked: false`.
+      * **Video** — nothing can be read, so it is refused unless
+        `media.allow_unchecked_video` is set.
+
+    `/v1/moderate/pdf` is the original path and still works; it accepts the other kinds too.
     """
     svc = _svc()
-    limits = svc.settings.pdf
-    if not limits.enabled:
-        return _error(404, "not_found", "PDF moderation is disabled")
+    pdf_limits, media = svc.settings.pdf, svc.settings.media
+    if not pdf_limits.enabled:
+        return _error(404, "not_found", "file moderation is disabled")
 
     upload = request.files.get("file")
     if upload is None or not upload.filename:
-        return _error(400, "invalid_file", "attach a PDF as the 'file' field of a multipart form")
+        return _error(400, "invalid_file", "attach a file as the 'file' field of a multipart form")
 
     try:
         content_type = ContentType(request.form.get("content_type", ContentType.ARTICLE.value))
@@ -125,24 +138,75 @@ def moderate_pdf():
         return _error(400, "invalid_content_type", "unknown 'content_type'", allowed=_CONTENT_TYPES)
     content_id = request.form.get("content_id") or None
 
-    data = upload.read(limits.max_bytes + 1)
-    if len(data) > limits.max_bytes:
-        return _error(413, "pdf_too_large", f"the file is larger than {limits.max_bytes} bytes",
-                      limit=limits.max_bytes)
+    cap = max(pdf_limits.max_bytes, media.max_bytes)
+    data = upload.read(cap + 1)
+    if len(data) > cap:
+        return _error(413, "media_too_large", f"the file is larger than {cap} bytes", limit=cap)
 
-    try:
-        extracted = pdf_extract(data, limits, upload.filename, svc.settings.ocr)
-    except PdfError as exc:
-        status = 413 if exc.code in ("pdf_too_large", "pdf_too_many_pages", "pdf_text_too_long") else 422
-        return _error(status, exc.code, exc.message, **exc.extra)
+    kind = detect_kind(data, upload.filename)
+    block = {"filename": upload.filename, "kind": kind}
 
-    if len(extracted.text) > svc.settings.max_chars:
+    if kind == "pdf":
+        if len(data) > pdf_limits.max_bytes:
+            return _error(413, "pdf_too_large", f"the file is larger than {pdf_limits.max_bytes} bytes",
+                          limit=pdf_limits.max_bytes)
+        try:
+            extracted = pdf_extract(data, pdf_limits, upload.filename, svc.settings.ocr)
+        except PdfError as exc:
+            status = 413 if exc.code in ("pdf_too_large", "pdf_too_many_pages", "pdf_text_too_long") else 422
+            return _error(status, exc.code, exc.message, **exc.extra)
+        text = extracted.text
+        block = {**block, **extracted.as_dict()}
+        extra = {"pdf": block, "media": block}          # "pdf" kept for the original contract
+
+    elif kind == "image":
+        if len(data) > media.max_bytes:
+            return _error(413, "media_too_large", f"the file is larger than {media.max_bytes} bytes",
+                          limit=media.max_bytes)
+        try:
+            text, confidence = image_text(data, svc.settings.ocr, media)
+        except MediaError as exc:
+            return _error(413 if exc.code == "media_too_large" else 422, exc.code, exc.message, **exc.extra)
+        # A photograph with no writing on it is ordinary, so no text is not a refusal here —
+        # but the picture itself was never inspected and the caller must be able to see that.
+        block.update(text_found=bool(text.strip()), ocr_confidence=round(confidence, 4),
+                     visual_content_checked=False)
+        extra = {"media": block}
+        if not text.strip():
+            return jsonify({**_allowed_without_text(upload.filename, content_type, content_id), **extra}), 200
+
+    elif kind == "video":
+        if not media.allow_unchecked_video:
+            return _error(422, "media_not_checkable",
+                          "video cannot be checked by this service, so it cannot be published. "
+                          "Upload a still image or a PDF instead.", kind=kind)
+        block.update(text_found=False, visual_content_checked=False, checked=False)
+        return jsonify({**_allowed_without_text(upload.filename, content_type, content_id),
+                        "media": block}), 200
+
+    else:
+        return _error(422, "media_unsupported",
+                      "this file type cannot be checked. Attach an image, a video or a PDF.",
+                      kind=kind)
+
+    if len(text) > svc.settings.max_chars:
         return _error(413, "content_too_long",
-                      f"the PDF's text is {len(extracted.text)} characters, over the "
+                      f"the file's text is {len(text)} characters, over the "
                       f"{svc.settings.max_chars} character limit")
 
-    req = ModerationRequest(extracted.text, content_type, content_id)
-    return _moderate(req, {"pdf": {"filename": upload.filename, **extracted.as_dict()}})
+    return _moderate(ModerationRequest(text, content_type, content_id), extra)
+
+
+def _allowed_without_text(filename: str, content_type: ContentType, content_id: str | None) -> dict:
+    """An allow for a file that carries no text to judge. Recorded like any other decision so
+    the audit trail shows what was published and that nothing could be read in it."""
+    svc = _svc()
+    req = ModerationRequest(f"[{filename}]", content_type, content_id)
+    gate, gate_ms = svc.pipeline.run_gate(req)
+    result = svc.pipeline.gate_only_result(req, gate, gate_ms) if gate.blocked else \
+        svc.pipeline._build(req, Decision.ALLOW, Stage.MODEL, gate, None, gate_ms, gate_ms, [], [], None, None, [])
+    svc.sink.emit(result)
+    return result
 
 
 @bp.get("/v1/moderate/<request_id>")

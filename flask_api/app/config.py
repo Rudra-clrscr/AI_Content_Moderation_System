@@ -17,7 +17,8 @@ Env overrides (all optional):
     WORD_SCAN             0 to turn off word windows and word-by-word trigger analysis
     TRIAGE                0 to turn off the linear pre-filter (every span then goes to the model)
     TRIAGE_THRESHOLD      float, overrides the threshold chosen when the filter was trained
-    PDF_UPLOAD            0 to turn off POST /v1/moderate/pdf
+    PDF_UPLOAD            0 to turn off POST /v1/moderate/pdf and /v1/moderate/media
+    MEDIA_UPLOAD          0 to turn off image/video attachment checking
     PDF_OCR               0 to turn off OCR of scanned pages (they are then refused, as before)
     DB_SERVER, DB_NAME    SQL Server host and database
     DB_USER, DB_PASSWORD  SQL auth; if DB_USER is unset, Windows auth (Trusted_Connection) is used
@@ -37,6 +38,7 @@ import yaml
 from dotenv import load_dotenv
 
 from app.routing import Thresholds
+from app.media import MediaLimits
 from app.ocr import OcrConfig, OcrEngine
 from app.pdf import PdfLimits
 from app.targeted import DEFAULT_SUBJECTS, SentenceScan, TargetedAbuse, WordScan
@@ -77,6 +79,7 @@ class Settings:
     word_scan: WordScan = field(default_factory=WordScan)
     triage: TriageFilter = field(default_factory=TriageFilter)   # disabled unless a bundle is configured
     pdf: PdfLimits = field(default_factory=PdfLimits)
+    media: MediaLimits = field(default_factory=MediaLimits)
     ocr: OcrEngine = field(default_factory=lambda: OcrEngine(OcrConfig(enabled=False)))
 
     def model_kwargs(self) -> dict:
@@ -111,6 +114,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
     tr = raw.get("triage", {})
     pdf = raw.get("pdf", {})
     ocr = pdf.get("ocr", {})
+    med = raw.get("media", {})
     env = os.environ.get
     triage_threshold = env("TRIAGE_THRESHOLD", tr.get("threshold"))
     triage = (TriageFilter.load(_resolve(tr.get("dir", "models/triage-v1")),
@@ -176,6 +180,12 @@ def load_settings(path: str | Path | None = None) -> Settings:
             max_chars=int(pdf.get("max_chars", 100_000)),
             min_chars_per_page=int(pdf.get("min_chars_per_page", 20)),
             reject_unreadable_pages=_as_bool(pdf.get("reject_unreadable_pages", True)),
+        ),
+        media=MediaLimits(
+            enabled=_as_bool(env("MEDIA_UPLOAD", med.get("enabled", True))),
+            max_bytes=int(med.get("max_bytes", 15_000_000)),
+            max_pixels=int(med.get("max_pixels", 40_000_000)),
+            allow_unchecked_video=_as_bool(med.get("allow_unchecked_video", False)),
         ),
         ocr=OcrEngine(OcrConfig(
             enabled=_as_bool(env("PDF_OCR", ocr.get("enabled", True))),
