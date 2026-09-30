@@ -117,9 +117,22 @@ Articles tab and "Write article" modal, in BONC Business Dashboard styling:
 Articles are stored in the browser (localStorage), because this is a front-end
 reference, not the platform's article service.
 
+**The other tabs are live too.** Add Business, Videos, Requests, Proposals and Business
+Proposals each open their own form ([app/static/articles/surfaces.js](app/static/articles/surfaces.js)),
+deliberately plainer than the Articles editor — ordinary inputs, no rich text — so what the
+tabs demonstrate is the moderation, not the widget:
+
+- each sends its fields as **one** `/v1/moderate` call on its own `content_type`, and the
+  page prints that type above the form, so the tab → type mapping is visible while clicking;
+- a rejected submission names the surface ("Your **video** can't be published"), marks the
+  input to rewrite, and quotes the sentence with its trigger words in bold;
+- attachments use the same `/v1/moderate/media` path and show *ok*, *not inspected* or
+  *blocked*, so a video attachment visibly publishes **unwatched** rather than appearing clean;
+- Dashboard and Credits say plainly that they have no member-written content to check.
+
 A browser test covers every flow: `pip install playwright`, start the server with
 `DEMO_PAGE=1`, then run `python scripts/e2e_articles.py --url http://127.0.0.1:8000`.
-It uses your installed Chrome and runs 26 checks.
+It uses your installed Chrome and runs 43 checks.
 
 ## Sentence scan
 

@@ -37,6 +37,9 @@ title with the scam in the description is still a scam. `moderation-client.js`'s
 | Business Proposals | `business_proposal` | as above |
 | — | `product_listing`, `advertisement`, `post` | existing surfaces |
 
+Every one of these is clickable at `/articles` with `DEMO_PAGE=1`: the tab bar is live, each
+tab opens its own form, and the `content_type` it sends is printed above that form.
+
 **Pictures and footage are not inspected.** This service reads text. There is no visual model
 here — no nudity, violence or counterfeit detector, and no frame or audio analysis — so a
 video's title and description are moderated while the footage is not, and an image is OCR'd

@@ -26,31 +26,36 @@
     <button class="ai-pill" type="button">✨ AI</button>
   </div>
 
-  <nav class="tabs" aria-label="Dashboard sections">
-    <button class="tab">Dashboard</button>
-    <button class="tab">Add Business</button>
-    <button class="tab">Videos</button>
-    <button class="tab active" aria-current="page">Articles</button>
-    <button class="tab">Requests</button>
-    <button class="tab">Proposals</button>
-    <button class="tab">Business Proposals</button>
-    <button class="tab">Credits</button>
+  <nav class="tabs" aria-label="Dashboard sections" id="tabs">
+    <button class="tab" data-surface="">Dashboard</button>
+    <button class="tab" data-surface="business_profile">Add Business</button>
+    <button class="tab" data-surface="video">Videos</button>
+    <button class="tab active" aria-current="page" data-surface="article">Articles</button>
+    <button class="tab" data-surface="request">Requests</button>
+    <button class="tab" data-surface="proposal">Proposals</button>
+    <button class="tab" data-surface="business_proposal">Business Proposals</button>
+    <button class="tab" data-surface="">Credits</button>
   </nav>
 
-  <h1>Articles</h1>
-  <p class="subtitle">Share case studies and updates with the BONC Network community.</p>
+  <div id="articles-view">
+    <h1>Articles</h1>
+    <p class="subtitle">Share case studies and updates with the BONC Network community.</p>
 
-  <section class="card" aria-labelledby="articles-heading">
-    <div class="card-head">
-      <div>
-        <h2 id="articles-heading">Your articles</h2>
-        <p class="quota" id="quota"></p>
+    <section class="card" aria-labelledby="articles-heading">
+      <div class="card-head">
+        <div>
+          <h2 id="articles-heading">Your articles</h2>
+          <p class="quota" id="quota"></p>
+        </div>
+        <button class="btn btn-primary" id="write-btn">+ Write Article</button>
       </div>
-      <button class="btn btn-primary" id="write-btn">+ Write Article</button>
-    </div>
-    <div class="pills" role="tablist" id="pills"></div>
-    <div id="list"></div>
-  </section>
+      <div class="pills" role="tablist" id="pills"></div>
+      <div id="list"></div>
+    </section>
+  </div>
+
+  <!-- The other tabs. Same moderator, different content_type — see surfaces.js. -->
+  <div id="surface-view" hidden></div>
 </main>
 
 <!-- Write article modal -->
@@ -141,5 +146,6 @@
 
 <script src="/articles/moderation-client.js"></script>
 <script src="/articles/articles.js"></script>
+<script src="/articles/surfaces.js"></script>
 </body>
 </html>
