@@ -38,12 +38,48 @@ class OcrConfig:
     max_pixels: int = 4_000_000  # hard cap per page, whatever the dpi works out to
     min_chars: int = 20          # below this the page is still unreadable
     min_confidence: float = 0.5  # mean recognition confidence below this is not trusted
+    # Detection finds where the writing is; recognition turns it into characters. When the
+    # recognition model doesn't cover the script, detection still finds every line and
+    # recognition returns near-nothing at a plausible-looking confidence. Measured on rendered
+    # 48pt text, characters recovered per detected line:
+    #   English  "Cotton saris wholesale" / "Surat, Gujarat - since 1994"  25-28 chars, conf 0.99
+    #   Hindi    "सूती साड़ियाँ थोक में"                                        4 chars ("TURT"), conf 0.76
+    #   Hindi    "तुम सब बेवकूफ हो, मर जाओ / मैं तुम्हें जान से मार दूंगा"          1.5 chars ("上 亚"),  conf 0.62
+    # The Hindi threat cleared min_confidence, so confidence alone cannot catch it and the
+    # picture was reported as read and clean. A line OCR really read comes back as a word or
+    # more, so the yield per line is the signal.
+    min_chars_per_box: int = 6
+    # ...except that genuinely short signage ("SALE", "95/kg") is one line of few characters.
+    # Recognition that is this sure of itself is trusted however little it returned.
+    trust_short_confidence: float = 0.90
+    # A recognition model for a script the package doesn't bundle (it ships Latin and Chinese).
+    # `scripts/fetch_ocr_langs.py devanagari` downloads one into models/ocr; the path is local
+    # so nothing is fetched while serving a request. Both are needed together: the path supplies
+    # the weights, the language tells RapidOCR which pre/post-processing they expect.
+    rec_model_path: str = ""
+    rec_lang: str = ""
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.min_confidence <= 1.0:
             raise ValueError("ocr.min_confidence must be in [0, 1]")
-        if min(self.max_pages, self.dpi, self.max_pixels, self.min_chars) < 1:
+        if not 0.0 <= self.trust_short_confidence <= 1.0:
+            raise ValueError("ocr.trust_short_confidence must be in [0, 1]")
+        if min(self.max_pages, self.dpi, self.max_pixels, self.min_chars, self.min_chars_per_box) < 1:
             raise ValueError("ocr limits must be positive")
+
+    def reads_as_text(self, page: "PageText") -> bool:
+        """Do we trust what OCR recovered, or did it only prove there is writing it can't read?
+
+        False means the image demonstrably carries text that was not read. That is not the same
+        as an image with no text in it (`PageText.has_text`), and it must never be reported as
+        checked: a threat in Devanagari would otherwise publish with a clean result.
+        """
+        chars = len(page.text.strip())
+        if not chars or page.confidence < self.min_confidence:
+            return False
+        if page.confidence >= self.trust_short_confidence:
+            return True
+        return chars >= self.min_chars_per_box * max(page.boxes, 1)
 
 
 @dataclass(frozen=True)
@@ -51,6 +87,12 @@ class PageText:
     text: str
     confidence: float
     ms: float
+    boxes: int = 0               # text lines detection found, whether or not they were recognised
+
+    @property
+    def has_text(self) -> bool:
+        """Whether there is writing in the image at all, read or not."""
+        return bool(self.text.strip()) or self.boxes > 0
 
 
 class OcrEngine:
@@ -70,9 +112,27 @@ class OcrEngine:
     def _load(self):
         if self._engine is None:
             from rapidocr import RapidOCR
-            self._engine = RapidOCR()
-            log.info("OCR engine loaded (RapidOCR on onnxruntime)")
+            self._engine = RapidOCR(params=self._params())
+            log.info("OCR engine loaded (RapidOCR on onnxruntime)%s",
+                     f", {self.config.rec_lang} recognition" if self.config.rec_lang else "")
         return self._engine
+
+    def _params(self) -> dict | None:
+        """RapidOCR overrides, or None for the models bundled with the package."""
+        path, lang = self.config.rec_model_path, self.config.rec_lang
+        if not path or not lang:
+            if path or lang:
+                log.warning("ocr.rec_model_path and ocr.rec_lang must be set together; "
+                            "using the bundled recognition model")
+            return None
+        from pathlib import Path as _Path
+        if not _Path(path).exists():
+            log.error("ocr.rec_model_path %s does not exist; using the bundled recognition "
+                      "model (run scripts/fetch_ocr_langs.py %s)", path, lang)
+            return None
+        # engine_type/ocr_version are left alone: RapidOCR reads the character list out of the
+        # .onnx itself, so the weights and the language are all it needs from us.
+        return {"Rec.model_path": str(path), "Rec.lang_type": lang}
 
     def read_pages(self, pdf_bytes: bytes, page_indexes: list[int]) -> dict[int, PageText]:
         """OCR the given 0-based pages of a PDF. Returns only the pages it managed to read;
@@ -102,8 +162,11 @@ class OcrEngine:
         except Exception:
             log.exception("OCR could not run; pages stay unreadable")
             return out
+        # A page has to clear the absolute floor AND look like text that was really read, so a
+        # scan in a script the recognition model doesn't cover stays unreadable (and is refused
+        # upstream) instead of passing as a page with a few characters on it.
         return {i: p for i, p in out.items()
-                if len(p.text) >= self.config.min_chars and p.confidence >= self.config.min_confidence}
+                if len(p.text) >= self.config.min_chars and self.config.reads_as_text(p)}
 
     def read_image(self, array) -> PageText:
         """OCR an already-decoded RGB image (app/media.py hands us attachments this way)."""
@@ -123,8 +186,10 @@ class OcrEngine:
     def _to_page_text(result, ms: float) -> PageText:
         texts = list(getattr(result, "txts", None) or [])
         scores = [float(s) for s in (getattr(result, "scores", None) or [])]
+        boxes = getattr(result, "boxes", None)
         return PageText(" ".join(t.strip() for t in texts if t.strip()),
-                        float(sum(scores) / len(scores)) if scores else 0.0, ms)
+                        float(sum(scores) / len(scores)) if scores else 0.0, ms,
+                        len(boxes) if boxes is not None else len(texts))
 
     def _read_page(self, doc, index: int, engine, np) -> PageText:
         page = doc[index]

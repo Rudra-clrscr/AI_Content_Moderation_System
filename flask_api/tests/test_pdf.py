@@ -202,6 +202,17 @@ def test_corrupt_pdf():
     assert exc.value.code in ("pdf_unreadable", "pdf_text_not_extractable")
 
 
+def test_corrupt_pdf_message_names_no_internals():
+    """The author was being shown "PdfStreamError", which tells them nothing they can act on.
+    The exception name belongs in the log; the message has to say what to do instead."""
+    with pytest.raises(PdfError) as exc:
+        extract(b"%PDF-1.4\nnot really a pdf at all")
+    message = exc.value.message
+    assert "Error" not in message and "Exception" not in message
+    assert "(" not in message                     # no parenthesised class name
+    assert "Try saving it again" in message       # says what the author can do about it
+
+
 def test_limits_are_enforced():
     pdf = make_pdf(["Cotton yarn and bedsheets in all sizes."] * 3)
     with pytest.raises(PdfError) as exc:

@@ -283,6 +283,12 @@
         if (result.decision !== "allow") {
           a.state = "bad";
           a.detail = result.feedback?.message || "Can't be published.";
+        } else if (media.text_found === true && media.text_readable === false) {
+          // There is writing here that OCR could not read, and the deployment publishes those
+          // anyway (media.allow_unreadable_image). Nothing in it has been checked, so it must
+          // not get a tick - this is what let a Devanagari threat through looking clean.
+          a.state = "unchecked";
+          a.detail = "there is writing here the moderator couldn't read";
         } else if (media.visual_content_checked === false && media.text_found === false) {
           // Allowed, but nothing in it could be read. Say so rather than showing a tick.
           a.state = "unchecked";

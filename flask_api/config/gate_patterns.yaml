@@ -126,6 +126,139 @@ rules:
       - sexual
       - sexuality
 
+  # ---------------------------------------------------------------------------------------
+  # Hindi and Hinglish. Members write Devanagari, Roman-script Hindi and a mix of both in the
+  # same sentence; the model is English-centric and scored Hindi abuse at 0.02-0.05, so none
+  # of it was caught (QA, 2026-09-30). Roman transliteration has no standard spelling, so the
+  # common variants are listed out. Text is NFKC-normalised and casefolded before matching,
+  # and a word character includes Devanagari vowel marks (app/targeted.py WORD_CHAR).
+  # ---------------------------------------------------------------------------------------
+
+  - id: abuse.hi_blocklist
+    category: abuse
+    action: block
+    kind: words
+    description: Hindi/Hinglish profanity and slurs with no innocent reading, in Devanagari
+      and Roman script. Words that also have an ordinary meaning (chor, gadha, bewakoof)
+      are deliberately NOT here - they are in abuse.hi_targeted, which only fires when the
+      abuse is pointed at someone, the same split the English rules use.
+    terms:
+      - मादरचोद
+      - बहनचोद
+      - भोसड़ी
+      - भोसड़ीके
+      - चूतिया
+      - चुतिया
+      - चूतिये
+      - गांडू
+      - लंडू
+      - रंडी
+      - हरामी
+      - हरामखोर
+      - हरामजादा
+      - हरामजादे
+      - कमीना
+      - कमीने
+      - कमीनी
+      - भड़वा
+      - चुदाई
+      - madarchod
+      - madarchood
+      - behenchod
+      - bhenchod
+      - bhosadi
+      - bhosdike
+      - bhosadike
+      - chutiya
+      - chutiye
+      - chutiyapa
+      - gandu
+      - gaandu
+      - lodu
+      - randi
+      - harami
+      - haramkhor
+      - haramzada
+      - haramzade
+      - haramjada
+      - kamina
+      - kamine
+      - kamini
+      - bhadwa
+      - chudai
+
+  - id: abuse.hi_targeted
+    category: abuse
+    action: block
+    kind: targeted
+    description: >-
+      Hindi/Hinglish insults aimed at a person or business - a word that points at someone
+      and a listed term in the same sentence. Same policy as abuse.targeted (nobody may
+      point abuse at an individual), and the subject requirement is there for the same
+      reason: "chor bazaar ka saaman" and "gadha 40 kg" are ordinary listings, while "tum
+      chor ho" and "ye manager bewakoof hai" are not. Unlike the English rule the informal
+      second person (tum/tu/tera) IS a subject, because it reads as confrontational in B2B
+      Hindi, where ordinary copy addresses the reader as aap.
+    subjects: [तुम, तुम्हें, तुमको, तुम्हारा, तुम्हारी, तुम्हारे, तू, तुझे, तुझको, तेरा, तेरी, तेरे,
+               ये, यह, वो, वह, सब, सबको, इनका, उनका, साला, साले,
+               tum, tumhe, tumhein, tumko, tumhara, tumhari, tumhare, tu, tujhe, tujhko,
+               tera, teri, tere, ye, yeh, wo, woh, sab, sabko, inka, unka, saala, saale]
+    terms:
+      - बेवकूफ
+      - बेवकूफों
+      - मूर्ख
+      - गधा
+      - गधे
+      - चोर
+      - झूठा
+      - झूठे
+      - धोखेबाज
+      - नालायक
+      - निकम्मा
+      - बदमाश
+      - लुटेरा
+      - ठग
+      - घटिया
+      - bewakoof
+      - bewaqoof
+      - bevakoof
+      - bewkoof
+      - murkh
+      - gadha
+      - gadhe
+      - chor
+      - jhootha
+      - jhoota
+      - dhokhebaaz
+      - dhokebaaz
+      - nalayak
+      - nikamma
+      - badmash
+      - badmaash
+      - lutera
+      - thag
+
+  - id: threat.violence_hi
+    category: abuse
+    action: block
+    description: Threats of violence or arson in Hindi/Hinglish ("jaan se maar dunga",
+      "dukaan jala denge"). Written as phrases, not single words, because "maar" and "jala"
+      are ordinary verbs on their own ("machine band kar ke jala diya" is a fault report).
+    patterns:
+      - 'जान से मार'
+      - 'मार\s*(?:दूंगा|दूँगा|दूगा|दूंगी|देंगे|डालूंगा|डालूँगा|डालेंगे)'
+      - 'जला\s*(?:दूंगा|दूँगा|दूगा|दूंगी|देंगे|डालूंगा|डालूँगा|डालेंगे)'
+      - 'खत्म\s+कर\s*(?:दूंगा|दूँगा|देंगे)'
+      - '(?:जिंदा|ज़िंदा|जिन्दा)\s+नहीं\s+छोड़ूंगा'
+      - '(?:टांगें|टाँगें|हाथ\s+पैर)\s+तोड़'
+      - 'गोली\s+मार'
+      - '\bjaan\s+se\s+maar'
+      - '\bmaar\s+(?:dunga|doonga|dungi|denge|dalunga|daalunga|dalenge)\b'
+      - '\bjala\s+(?:dunga|doonga|dungi|denge|dalunga|daalunga|dalenge)\b'
+      - '\bkhatam\s+kar\s+(?:dunga|doonga|denge)\b'
+      - '\bzinda\s+nahi[n]?\s+(?:chodunga|chhodunga)\b'
+      - '\bgoli\s+maar'
+
   - id: spam.url_shortener
     category: spam
     action: flag

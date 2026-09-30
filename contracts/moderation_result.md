@@ -64,7 +64,7 @@ Anything published with a post has to be checked, or the scam simply moves into 
 | Kind | What is read | Rule |
 |---|---|---|
 | `pdf` | Text, with OCR for scanned pages | A page that can't be read is **refused** |
-| `image` | OCR only | Text is moderated. **The picture itself is never classified** — there is no nudity/violence/counterfeit detector here — so an image with no text is **allowed**, and the result says `visual_content_checked: false` |
+| `image` | OCR only | Text is moderated. **The picture itself is never classified** — there is no nudity/violence/counterfeit detector here — so an image with no text is **allowed**, and the result says `visual_content_checked: false`. An image with writing OCR **could not read** is a third case: it is **refused** (`422 media_unreadable`), because nothing in it has been checked |
 | `video` | Nothing | **Allowed unchecked** (`checked: false`) while `media.allow_unchecked_video` is on, as it is in the shipped config; **refused** when it is off |
 | anything else | — | `422 media_unsupported` |
 
@@ -75,8 +75,18 @@ Every response carries a `media` block:
 
 ```json
 "media": {"filename": "flyer.png", "kind": "image", "text_found": true,
-          "ocr_confidence": 0.9937, "visual_content_checked": false}
+          "text_readable": true, "ocr_confidence": 0.9937, "visual_content_checked": false}
 ```
+
+`text_found` is whether there is writing in the file at all; `text_readable` (*added in 1.6*)
+is whether OCR actually read it. The three states are distinct, and a client must not collapse
+them:
+
+| `text_found` | `text_readable` | What it means | Result |
+|---|---|---|---|
+| `false` | `false` | No writing in the picture (a product photo) | `allow`, `visual_content_checked: false` |
+| `true` | `true` | The writing was read and moderated | the usual decision |
+| `true` | `false` | There **is** writing and OCR could not read it | `422 media_unreadable` |
 
 A file with nothing to read (a photo with no text, or an unchecked video) still returns a
 normal `allow` result and is still written to the audit log, so the record shows both what was
@@ -87,8 +97,24 @@ writing on it is completely ordinary, and refusing those would break the feature
 honest seller. A PDF page with no text is not ordinary — it is a scan, and scans are how a
 screenshot of a scam arrives. The asymmetry is deliberate.
 
+**Why writing OCR can't read is refused rather than allowed.** Detection finds where the words
+are; recognition turns them into characters. RapidOCR bundles a Latin and a Chinese recognition
+model, so a Hindi picture came back with every line located and near-nothing recognised — and
+that used to be reported as an ordinary `allow` with a clean record. A Devanagari threat
+published that way (QA, 2026-09-30). Recognition confidence alone does not catch it (0.62,
+above the 0.5 floor); the signal is how many characters came back per detected line, which is
+25–28 for English read properly and 1.5–4 for Hindi read by the wrong model. See
+`ocr.min_chars_per_box` and `ocr.trust_short_confidence` in `settings.yaml`.
+Set `media.allow_unreadable_image: true` to publish these anyway — they then carry
+`checked: false`, never a clean result. To *read* them instead, bundle the matching
+recognition model (`python scripts/fetch_ocr_langs.py devanagari`, then `ocr.rec_model_path`
+and `ocr.rec_lang`); Hindi pictures are then extracted and judged like any other text.
+
 Media errors: `413 media_too_large`, `422 media_unsupported` / `media_not_checkable` /
-`media_unreadable`, plus all the PDF codes below.
+`media_unreadable`, plus all the PDF codes below. `503 media_not_checkable` is different from
+the 422 of the same name: OCR itself failed, so nothing is known about the file either way —
+the upload is still refused, but the caller should offer a retry rather than tell the author
+their file is the problem.
 
 ### The PDF case in detail
 
@@ -149,7 +175,7 @@ Layer 1 gate blocks the content:
 
 ```json
 {
-  "schema_version": "1.5",
+  "schema_version": "1.6",
   "request_id": "5b0c7e0e-…",
   "status": "completed",
   "content_id": "LST-10293",
@@ -248,6 +274,16 @@ part so feedback can be mapped back to the fields:
 Link URLs must be included, because a scam domain hidden behind "click here"
 isn't part of the visible text. `flask_api/app/static/articles/moderation-client.js`
 does all of this (`buildArticleContent`, `mapIssues`) and can be copied as-is.
+
+**A model issue's span never crosses a line break**, so every issue belongs to exactly one
+field and `mapIssues` can attribute it without guessing. The splitter always ended a sentence
+at a newline, but the step after it merged a fragment of under three words into the next
+sentence — so a short title was absorbed into the first body sentence and came back as one
+issue covering both, highlighting a clean business name as the problem (QA, 2026-09-30, on
+`"Bhavani Textiles\n\nBuy from us or we will burn your shop down…"`, which returned a single
+issue spanning 0–84). Merging now stays within a line. Gate issues come from regex matches
+over the whole text and are not bound by this, so keep handling an issue that spans two
+fields; it just no longer happens for model issues.
 
 ## Showing feedback to the author (platform front end)
 

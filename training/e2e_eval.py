@@ -63,7 +63,12 @@ def load_sets(test_n: int) -> dict[str, pd.DataFrame]:
     sets = {"handwritten": pd.read_csv(HERE / "eval_handwritten.csv", keep_default_na=False),
             "handwritten_2": pd.read_csv(HERE / "eval_handwritten_2.csv", keep_default_na=False),
             "dismissive": pd.read_csv(HERE / "eval_dismissive.csv", keep_default_na=False),
-            "articles": pd.read_csv(HERE / "eval_articles.csv", keep_default_na=False)}
+            "articles": pd.read_csv(HERE / "eval_articles.csv", keep_default_na=False),
+            # Business-domain hard negatives: "beat/crush your price", "we killed our defect
+            # rate", complaints, and fraud-awareness writing that quotes abuse in order to
+            # report it. All legitimate; the QA pass of 2026-09-30 found the pricing group
+            # rejected at 0.58-0.97 and it is the largest remaining false-positive class.
+            "b2b_negotiation": pd.read_csv(HERE / "eval_b2b_negotiation.csv", keep_default_na=False)}
     test = Path("D:/AI/bonc-data/test.csv")
     if test.exists():
         t = pd.read_csv(test, keep_default_na=False)

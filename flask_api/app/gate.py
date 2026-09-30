@@ -32,15 +32,22 @@ from typing import Callable
 
 import yaml
 
+from app.targeted import WORD_CHAR
+
 log = logging.getLogger(__name__)
 
 # Zero-width / invisible characters commonly used to dodge keyword filters.
 _INVISIBLE = re.compile("[​-‏⁠-⁤﻿­]")
 _APOSTROPHES = str.maketrans({"‘": "'", "’": "'"})
-_TOKEN = re.compile(r"\w+(?:['-]\w+)*")
-_CLEAN_TERM = re.compile(r"\w+(?:['-]\w+)*(?: \w+(?:['-]\w+)*)*")
+# A word character, including the combining marks Indic scripts write vowels with; plain \w
+# excludes them and shattered every Hindi word (see app/targeted.py).
+_W = WORD_CHAR
+_TOKEN = re.compile(rf"{_W}+(?:['-]{_W}+)*")
+_CLEAN_TERM = re.compile(rf"{_W}+(?:['-]{_W}+)*(?: {_W}+(?:['-]{_W}+)*)*")
 # . ! ? followed by whitespace or the end: "2.5 kg" and "example.com" are not breaks; "costs 50. Call" is.
-_SENTENCE_END = re.compile(r"[.!?]+(?=\s|$)")
+# The Devanagari danda (। and ॥) is Hindi's full stop and needs no such guard - it is never a
+# decimal point or part of a domain - so a Hindi paragraph splits into sentences like an English one.
+_SENTENCE_END = re.compile(r"[.!?]+(?=\s|$)|[।॥]+")
 _ACTIONS = ("block", "revise", "flag")
 _KINDS = ("pattern", "words", "targeted")
 
@@ -113,7 +120,7 @@ class TermSet:
                 odd.append(re.escape(t))
         self.max_len = max((len(p) for p in self.phrases), default=0)
         self.starts = {p[0] for p in self.phrases if len(p) > 1}  # only these can begin a phrase
-        self.odd = (re.compile(r"(?<!\w)(?:" + "|".join(sorted(odd, key=len, reverse=True)) + r")(?!\w)")
+        self.odd = (re.compile(f"(?<!{_W})(?:" + "|".join(sorted(odd, key=len, reverse=True)) + f")(?!{_W})")
                     if odd else None)
 
     def __len__(self) -> int:
@@ -308,7 +315,7 @@ def _compile_rule(spec: dict, base: Path) -> Rule | None:
     alternatives = list(spec.get("patterns") or [])
     if terms:
         escaped = sorted((re.escape(normalize(t)) for t in terms), key=len, reverse=True)
-        alternatives.append(r"(?<!\w)(?:" + "|".join(escaped) + r")(?!\w)")
+        alternatives.append(f"(?<!{_W})(?:" + "|".join(escaped) + f")(?!{_W})")
     if not alternatives:
         log.info("gate rule %s has no patterns/terms, inactive", rule_id)
         return None

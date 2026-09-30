@@ -10,13 +10,27 @@ content is rejected.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
-# A sentence ends at . ! ? followed by whitespace (or the end), or at a newline. So "2.5 kg",
-# "example.com", "catalogue.pdf" and "index.php?id=2" are not broken into orphan fragments
-# ("com", "pdf") that the model would score without context; "costs 50. Call" still breaks.
-_SENTENCE_BREAK = re.compile(r"[.!?]+(?=\s|$)|\n")
-_WORD = re.compile(r"\w+")
+# Python's \w matches letters and digits but NOT the combining marks that Indic scripts write
+# their vowels with (Unicode categories Mn and Mc). Under plain \w, "तुम" tokenized as ["त", "म"]:
+# every Hindi word was shattered into single consonants, word counts were inflated, and a
+# Devanagari term could only ever match by accident. WORD_CHAR is \w plus the mark ranges from
+# the Latin diacritics through the Indic blocks, and is what both this module and the Layer 1
+# gate recognise as a word character. Built once at import (~600 characters from a few thousand
+# category lookups); ASCII text tokenizes exactly as it did before.
+_MARKS = "".join(chr(c) for c in range(0x0300, 0x0E00) if unicodedata.category(chr(c)) in ("Mn", "Mc"))
+WORD_CHAR = f"[\\w{re.escape(_MARKS)}]"
+
+# A sentence ends at . ! ? followed by whitespace (or the end), at a Devanagari danda, or at a
+# newline. So "2.5 kg", "example.com", "catalogue.pdf" and "index.php?id=2" are not broken into
+# orphan fragments ("com", "pdf") that the model would score without context; "costs 50. Call"
+# still breaks. The danda (। and ॥) is Hindi's full stop and needs no whitespace guard - it is
+# never a decimal point or part of a domain - so a Hindi paragraph is scanned sentence by
+# sentence instead of arriving at the model as one diluted block.
+_SENTENCE_BREAK = re.compile(r"[.!?]+(?=\s|$)|[।॥]+|\n")
+_WORD = re.compile(rf"{WORD_CHAR}+")
 MIN_SPAN_WORDS = 3   # shorter fragments are merged into a neighbouring sentence before scoring
 
 DEFAULT_SUBJECTS = ("he", "she", "his", "her", "him", "they", "them", "their")
@@ -38,12 +52,26 @@ def sentence_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-def scan_spans(text: str, min_words: int = MIN_SPAN_WORDS) -> list[tuple[int, int]]:
-    """Sentence spans for scoring on their own: like sentence_spans, but a fragment of fewer
-    than `min_words` words ("Thanks.", a one-word heading, "Winnie.") is merged into the
-    following sentence (or the previous one at the end). Scored alone, a lone word has no
-    context and its risk is noise; merged, it's judged with the words around it."""
-    spans = sentence_spans(text)
+def _line_blocks(text: str, spans: list[tuple[int, int]]) -> list[list[tuple[int, int]]]:
+    """Group sentence spans into runs with no line break between them.
+
+    A newline is where the author ended one block of text and started another, and it is
+    also how a form's fields are joined into one `content` (the title, a blank line, then
+    the body). Merging a span across one is therefore never right: it produced a single
+    issue covering the title and the first body sentence together, so a clean business
+    name was highlighted as the problem next to the threat written below it.
+    """
+    blocks: list[list[tuple[int, int]]] = []
+    for span in spans:
+        if blocks and "\n" not in text[blocks[-1][-1][1]:span[0]]:
+            blocks[-1].append(span)
+        else:
+            blocks.append([span])
+    return blocks
+
+
+def _merge_short(text: str, spans: list[tuple[int, int]], min_words: int) -> list[tuple[int, int]]:
+    """`spans`, all on one line, with each short fragment folded into a neighbour."""
     out: list[list[int]] = []
     carry: int | None = None           # start of short fragments waiting to join the next sentence
     for s, e in spans:
@@ -56,8 +84,27 @@ def scan_spans(text: str, min_words: int = MIN_SPAN_WORDS) -> list[tuple[int, in
         if out:
             out[-1][1] = spans[-1][1]
         else:
+            # Nothing on this line is long enough to merge into, so the fragments are the
+            # whole line (a title, a heading). Scored on their own rather than dropped:
+            # short text is still text a member published, and leaving it out of the scan
+            # would be a way past it.
             out.append([carry, spans[-1][1]])
     return [(s, e) for s, e in out]
+
+
+def scan_spans(text: str, min_words: int = MIN_SPAN_WORDS) -> list[tuple[int, int]]:
+    """Sentence spans for scoring on their own: like sentence_spans, but a fragment of fewer
+    than `min_words` words ("Thanks.", a one-word heading, "Winnie.") is merged into the
+    following sentence (or the previous one at the end). Scored alone, a lone word has no
+    context and its risk is noise; merged, it's judged with the words around it.
+
+    Merging stays inside one line (see `_line_blocks`), so a span never covers text from two
+    fields and every issue can be attributed to the field it came from.
+    """
+    out: list[tuple[int, int]] = []
+    for block in _line_blocks(text, sentence_spans(text)):
+        out += _merge_short(text, block, min_words)
+    return out
 
 
 @dataclass(frozen=True)
