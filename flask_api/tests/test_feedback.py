@@ -6,7 +6,7 @@ from app.config import PROJECT_ROOT
 from app.feedback import Feedback
 from app.gate import Gate, normalize_with_map
 from app.model import ScoreResult
-from app.targeted import SentenceScan, TargetedAbuse, sentence_spans
+from app.targeted import SentenceScan, TargetedAbuse, WordScan, sentence_spans
 
 
 class KeywordScorer:
@@ -93,7 +93,7 @@ def test_revise_from_model_highlights_only_the_bad_sentence(make_settings):
 
 
 def test_when_no_sentence_stands_out_the_riskiest_is_shown(make_settings):
-    text = "Part one here. Part two is odd. Part three."
+    text = "Part one here. Part two is odd. Part three is here."
     scorer = KeywordScorer({"part one here. part two": 0.5, "odd": 0.2})
     body = post(app_with(make_settings, scorer), text)
     assert body["decision"] == "revise"
@@ -106,7 +106,7 @@ def test_highlight_scoring_is_capped(make_settings, tmp_path):
     text = ". ".join(f"Sentence number {i}" for i in range(6))
     scorer = KeywordScorer(default=0.5)
     body = post(app_with(make_settings, scorer, feedback_messages_file=msgs,
-                         sentence_scan=SentenceScan(enabled=False)), text)
+                         sentence_scan=SentenceScan(enabled=False), word_scan=WordScan(enabled=False)), text)
     assert body["decision"] == "revise"
     assert len(scorer.calls) == 1 + 2    # whole text + 2 sentences
 
@@ -128,18 +128,29 @@ def test_targeted_sentence_in_middle_band_asks_for_revision(make_settings):
 
 # ---- reject and allow ----------------------------------------------------------
 
-def test_reject_names_policy_area_without_highlights(make_settings):
-    body = post(app_with(make_settings, KeywordScorer()), "double your money now")
+def test_reject_names_policy_area_and_highlights_what_to_rewrite(make_settings):
+    """Shipped policy (v4): a rejected author rewrites, so the reject shows what to change."""
+    text = "Please double your money now"
+    body = post(app_with(make_settings, KeywordScorer()), text)
     fb = body["feedback"]
     assert body["decision"] == "reject" and fb["categories"] == ["fraud"]
-    assert "fraud" in fb["message"] and fb["issues"] == []
+    assert "fraud" in fb["message"] and "Rewrite" in fb["message"]
+    assert marked(text, fb["issues"]) == ["double your money"]
+
+
+def test_reject_without_highlights_when_turned_off(make_settings, tmp_path):
+    msgs = tmp_path / "fb.yaml"
+    msgs.write_text("highlight_on_reject: false\n")
+    body = post(app_with(make_settings, KeywordScorer(), feedback_messages_file=msgs), "double your money now")
+    assert body["decision"] == "reject" and body["feedback"]["issues"] == []
 
 
 def test_model_reject_uses_generic_message(make_settings):
     body = post(app_with(make_settings, KeywordScorer(default=0.95)), "some text")
     fb = body["feedback"]
-    assert body["decision"] == "reject" and fb["categories"] == [] and fb["issues"] == []
+    assert body["decision"] == "reject" and fb["categories"] == []
     assert "{categories}" not in fb["message"]
+    assert [(i["start"], i["end"]) for i in fb["issues"]] == [(0, 9)]   # the sentence to rewrite
 
 
 def test_highlight_on_reject_can_be_enabled(make_settings, tmp_path):
@@ -171,7 +182,7 @@ def test_every_revise_rule_has_an_instruction():
 
 def test_shipped_messages_load():
     fb = Feedback.from_yaml(PROJECT_ROOT / "config" / "feedback_messages.yaml")
-    assert fb.highlight_on_reject is False and fb.max_highlight_sentences >= 1
+    assert fb.highlight_on_reject is True and fb.max_highlight_sentences >= 1
     assert "{categories}" in fb.reject_message
 
 

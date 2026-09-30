@@ -130,6 +130,9 @@ def test_sentence_split_handles_numbers():
     "their manager is a con artist",
     "she is sick-minded",
     "he keeps cheating customers",
+    "What a liar he is.",                     # insult before the pronoun (senior-review policy)
+    "Pathetic crooks, all of them.",
+    "Only a halfwit like her would buy that.",
 ])
 def test_shipped_character_insults_aimed_at_someone_block(text):
     from app.config import PROJECT_ROOT
@@ -146,6 +149,12 @@ def test_shipped_character_insults_aimed_at_someone_block(text):
     "Their prices are shamelessly low this week, grab the deal.",
     "They reported a corrupt file in the upload, please resend.",
     "We warn buyers about scammers. They should only pay through BONC.",
+    "You can order samples through your BONC account.",
+    "Scammers often create urgency, so take your time and check.",   # fraud-awareness article
+    "They will assess the samples and share a report.",              # 'assess' is not a plural
+    "She says the secret is patience, not spices.",                  # 'spices' is not 'spic' + 'es'
+    "Their team replaced the damaged units quickly.",
+    "She handles all bulk enquiries personally.",
 ])
 def test_shipped_insult_words_have_no_innocent_false_blocks(text):
     from app.config import PROJECT_ROOT

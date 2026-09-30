@@ -14,6 +14,11 @@ Env overrides (all optional):
     DEMO_PAGE             1 to serve the demo UI at /demo (off by default)
     TARGETED_ABUSE        0 to turn off per-sentence scoring of text aimed at someone
     SENTENCE_SCAN         0 to turn off scoring every sentence on its own
+    WORD_SCAN             0 to turn off word windows and word-by-word trigger analysis
+    TRIAGE                0 to turn off the linear pre-filter (every span then goes to the model)
+    TRIAGE_THRESHOLD      float, overrides the threshold chosen when the filter was trained
+    PDF_UPLOAD            0 to turn off POST /v1/moderate/pdf
+    PDF_OCR               0 to turn off OCR of scanned pages (they are then refused, as before)
     DB_SERVER, DB_NAME    SQL Server host and database
     DB_USER, DB_PASSWORD  SQL auth; if DB_USER is unset, Windows auth (Trusted_Connection) is used
     DB_DRIVER             ODBC driver name (default "ODBC Driver 18 for SQL Server")
@@ -32,7 +37,10 @@ import yaml
 from dotenv import load_dotenv
 
 from app.routing import Thresholds
-from app.targeted import DEFAULT_SUBJECTS, SentenceScan, TargetedAbuse
+from app.ocr import OcrConfig, OcrEngine
+from app.pdf import PdfLimits
+from app.targeted import DEFAULT_SUBJECTS, SentenceScan, TargetedAbuse, WordScan
+from app.triage import TriageFilter
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SETTINGS = PROJECT_ROOT / "config" / "settings.yaml"
@@ -42,7 +50,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 class Settings:
     mode: str = "sync"
     model_backend: str = "onnx"
-    model_dir: Path = PROJECT_ROOT / "models" / "v3"
+    model_dir: Path = PROJECT_ROOT / "models" / "v4"
     intra_op_threads: int = 4
     inter_op_threads: int = 1
     label_weights: dict[str, float] | None = None
@@ -66,6 +74,10 @@ class Settings:
     demo_page: bool = False
     targeted: TargetedAbuse = field(default_factory=TargetedAbuse)
     sentence_scan: SentenceScan = field(default_factory=SentenceScan)
+    word_scan: WordScan = field(default_factory=WordScan)
+    triage: TriageFilter = field(default_factory=TriageFilter)   # disabled unless a bundle is configured
+    pdf: PdfLimits = field(default_factory=PdfLimits)
+    ocr: OcrEngine = field(default_factory=lambda: OcrEngine(OcrConfig(enabled=False)))
 
     def model_kwargs(self) -> dict:
         """Keyword args for ModelRegistry.load / OnnxScorer."""
@@ -95,12 +107,20 @@ def load_settings(path: str | Path | None = None) -> Settings:
     db = raw.get("database", {})
     ta = raw.get("targeted_abuse", {})
     sc = raw.get("sentence_scan", {})
+    ws = raw.get("word_scan", {})
+    tr = raw.get("triage", {})
+    pdf = raw.get("pdf", {})
+    ocr = pdf.get("ocr", {})
     env = os.environ.get
+    triage_threshold = env("TRIAGE_THRESHOLD", tr.get("threshold"))
+    triage = (TriageFilter.load(_resolve(tr.get("dir", "models/triage-v1")),
+                                None if triage_threshold is None else float(triage_threshold))
+              if _as_bool(env("TRIAGE", tr.get("enabled", True))) else TriageFilter())
 
     return Settings(
         mode=env("MODERATION_MODE", raw.get("mode", "sync")),
         model_backend=env("MODEL_BACKEND", model.get("backend", "onnx")),
-        model_dir=_resolve(env("MODEL_DIR", model.get("dir", "models/v3"))),
+        model_dir=_resolve(env("MODEL_DIR", model.get("dir", "models/v4"))),
         intra_op_threads=int(env("MODEL_INTRA_OP_THREADS", model.get("intra_op_threads", 4))),
         inter_op_threads=int(model.get("inter_op_threads", 1)),
         label_weights=model.get("label_weights"),
@@ -136,6 +156,35 @@ def load_settings(path: str | Path | None = None) -> Settings:
             max_sentences=int(sc.get("max_sentences", 400)),
             revise_on_middle=_as_bool(sc.get("revise_on_middle", True)),
         ),
+        word_scan=WordScan(
+            enabled=_as_bool(env("WORD_SCAN", ws.get("enabled", True))),
+            min_contribution=float(ws.get("min_contribution", 0.10)),
+            max_triggers=int(ws.get("max_triggers", 5)),
+            max_spans=int(ws.get("max_spans", 5)),
+            max_words=int(ws.get("max_words", 60)),
+            window_words=int(ws.get("window_words", 40)),
+            window_stride=int(ws.get("window_stride", 20)),
+            deobfuscate=_as_bool(ws.get("deobfuscate", True)),
+            max_candidates=int(ws.get("max_candidates", 10)),
+            max_calls=int(ws.get("max_calls", 40)),
+        ),
+        triage=triage,
+        pdf=PdfLimits(
+            enabled=_as_bool(env("PDF_UPLOAD", pdf.get("enabled", True))),
+            max_bytes=int(pdf.get("max_bytes", 10_000_000)),
+            max_pages=int(pdf.get("max_pages", 100)),
+            max_chars=int(pdf.get("max_chars", 100_000)),
+            min_chars_per_page=int(pdf.get("min_chars_per_page", 20)),
+            reject_unreadable_pages=_as_bool(pdf.get("reject_unreadable_pages", True)),
+        ),
+        ocr=OcrEngine(OcrConfig(
+            enabled=_as_bool(env("PDF_OCR", ocr.get("enabled", True))),
+            max_pages=int(ocr.get("max_pages", 10)),
+            dpi=int(ocr.get("dpi", 200)),
+            max_pixels=int(ocr.get("max_pixels", 4_000_000)),
+            min_chars=int(ocr.get("min_chars", 20)),
+            min_confidence=float(ocr.get("min_confidence", 0.5)),
+        )),
     )
 
 

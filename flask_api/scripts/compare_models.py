@@ -1,7 +1,16 @@
 """Compare two model bundles (or two calibrations) end to end: gate + model + sentence checks + routing.
 
-    python scripts/compare_models.py models/v1 models/v3
+    python scripts/compare_models.py models/v3 models/v4
+    python scripts/compare_models.py models/v3 models/v4 --no-builtin --testset ../training/eval_handwritten.csv
     python scripts/compare_models.py models/v3 models/v3 --old-review-weight 0.5 --new-review-weight 0.25
+
+Each side runs with its own bundle's label_weights and recommended_thresholds
+(v3: review 0.25, 0.30/0.70; v4: P(unsafe), one 0.50 boundary) unless overridden.
+
+Note for v4: the built-in texts below were the guide's worked examples, and several of
+them were deliberately used as templates for v4's synthetic training data (guide 3.1:
+"add the section 2.3 cases as hard positives"). They are in-sample for v4. Judge v4 on
+../training/eval_handwritten.csv (held out, never trained on) with --no-builtin.
 
 Runs a fixed set of legitimate and harmful B2B texts through the full pipeline
 with each side and reports:
@@ -18,6 +27,8 @@ Use it before switching `model.dir` or `label_weights`, together with
 scripts/verify_demo_sentences.py for the demo guide.
 """
 import argparse
+import csv
+import json
 import logging
 import math
 import sys
@@ -31,6 +42,7 @@ sys.path.insert(0, str(ROOT))
 
 from app import create_app  # noqa: E402
 from app.config import load_settings  # noqa: E402
+from app.routing import Thresholds  # noqa: E402
 from app.sinks import MemorySink  # noqa: E402
 
 LEGIT = [
@@ -98,17 +110,39 @@ LEGIT += [
     "Case study: cutting logistics costs\n\nWe moved to consolidated shipments. Delivery times improved from twelve days to eight.",
 ]
 
-def run(model_dir, review_weight=None):
+LEGIT_SET = set(LEGIT)
+
+
+def run(model_dir, review_weight=None, thresholds="meta"):
+    """Full pipeline with one model. thresholds: "meta" = the bundle's recommended_thresholds
+    (v3: 0.30/0.70, v4: 0.50/0.50), "settings" = settings.yaml, or "allow_max,reject_min"."""
     s = load_settings()
     s.model_dir = Path(model_dir) if Path(model_dir).is_absolute() else ROOT / model_dir
+    meta = json.loads((s.model_dir / "model_meta.json").read_text(encoding="utf-8"))
+    s.label_weights = None                      # each bundle's own weights (model_meta.json)
     if review_weight is not None:
         s.label_weights = {"safe": 0.0, "review": review_weight, "reject": 1.0}
+    if thresholds == "meta" and meta.get("recommended_thresholds"):
+        rt = meta["recommended_thresholds"]
+        s.thresholds = Thresholds(rt["allow_max"], rt["reject_min"])
+    elif thresholds not in ("meta", "settings"):
+        a, r = (float(x) for x in thresholds.split(","))
+        s.thresholds = Thresholds(a, r)
+    s.max_chars = 50_000
     c = create_app(s, sink=MemorySink()).test_client()
+    print(f"   {meta['version']}: thresholds {s.thresholds.as_dict()}, weights {s.label_weights or meta.get('label_weights')}")
     return {t: c.post("/v1/moderate", json={"content": t, "content_type": "post"}).get_json() for t in LEGIT + HARMFUL}
 
 
+def load_testset(path):
+    """Add a labelled CSV (text,label[,group]; label 0 = legitimate, 1 = harmful) to the texts."""
+    with open(path, encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            (HARMFUL if int(row["label"]) else LEGIT).append(row["text"])
+
+
 def correct(text, decision):
-    return decision == "allow" if text in LEGIT else decision in ("revise", "reject")
+    return decision == "allow" if text in LEGIT_SET else decision in ("revise", "reject")
 
 
 def wilson(k, n, z=1.96):
@@ -153,12 +187,26 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("old_model_dir")
     ap.add_argument("new_model_dir")
-    ap.add_argument("--old-review-weight", type=float)
-    ap.add_argument("--new-review-weight", type=float)
+    ap.add_argument("--old-review-weight", type=float, help="3-label models only (safe/review/reject)")
+    ap.add_argument("--new-review-weight", type=float, help="3-label models only (safe/review/reject)")
+    ap.add_argument("--old-thresholds", default="meta", help='"meta" (default), "settings" or "allow_max,reject_min"')
+    ap.add_argument("--new-thresholds", default="meta")
+    ap.add_argument("--testset", action="append", default=[],
+                    help="extra labelled CSV (text,label); e.g. ../training/eval_handwritten.csv")
+    ap.add_argument("--no-builtin", action="store_true", help="use only --testset texts")
     args = ap.parse_args()
 
-    a = run(args.old_model_dir, args.old_review_weight)
-    b = run(args.new_model_dir, args.new_review_weight)
+    global LEGIT_SET
+    if args.no_builtin:
+        LEGIT.clear()
+        HARMFUL.clear()
+    for path in args.testset:
+        load_testset(path)
+    LEGIT_SET = set(LEGIT)
+    print(f"{len(LEGIT)} legitimate + {len(HARMFUL)} harmful texts")
+
+    a = run(args.old_model_dir, args.old_review_weight, args.old_thresholds)
+    b = run(args.new_model_dir, args.new_review_weight, args.new_thresholds)
 
     for name, texts, good in (("LEGIT (want allow)", LEGIT, {"allow"}),
                               ("HARMFUL (want revise/reject)", HARMFUL, {"revise", "reject"})):

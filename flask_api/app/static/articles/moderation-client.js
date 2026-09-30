@@ -73,7 +73,8 @@
 
   /**
    * Map each feedback issue (offsets into the combined content) onto a field:
-   *   {field: "title" | "body" | "link", start, end (relative to that field), linkIndex?, message, source, text}
+   *   {field: "title" | "body" | "link", start, end (relative to that field), linkIndex?, message, source, text,
+   *    words: [{start, end, text}]}   // trigger words inside the issue (word-by-word scan), same field
    * An issue that spans the title/body separator is split into one entry per field.
    */
   function mapIssues(feedback, parts, content) {
@@ -81,8 +82,11 @@
     const out = [];
     const clip = (issue, field, [a, b], extra = {}) => {
       const s = Math.max(issue.start, a), e = Math.min(issue.end, b);
+      const words = (issue.words || [])
+        .filter(([ws, we]) => ws >= s && we <= e)
+        .map(([ws, we]) => ({ start: ws - a, end: we - a, text: content.slice(ws, we) }));
       if (e > s) out.push({ field, start: s - a, end: e - a, message: issue.message, source: issue.source,
-                            ruleId: issue.rule_id, text: content.slice(s, e), ...extra });
+                            ruleId: issue.rule_id, text: content.slice(s, e), words, ...extra });
     };
     for (const issue of feedback.issues) {
       clip(issue, "title", parts.title);

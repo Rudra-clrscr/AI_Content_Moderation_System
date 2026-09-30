@@ -20,15 +20,18 @@ reject:
   # {categories} is replaced with the policy areas, e.g. "fraud and scams".
   message: >-
     It appears to break BONC's community policies on {categories}.
+    Rewrite the highlighted parts and submit your {noun} again.
     If you think this is a mistake, contact support.
   message_generic: >-
     It appears to break BONC's community policies.
+    Rewrite the highlighted parts and submit your {noun} again.
     If you think this is a mistake, contact support.
 
-# Rejections name the policy area but don't highlight the exact words, so people
-# posting scams can't learn how to reword around the filters. Set to true to
-# highlight them anyway.
-highlight_on_reject: false
+# With v4 there is no middle "revise" band: anything over the 0.5 risk boundary is
+# rejected and the author rewrites it, so rejections highlight the sentences and the
+# trigger words that caused them. (Trade-off: a determined scammer also sees what
+# tripped the filter. Set to false to show only the policy area.)
+highlight_on_reject: true
 
 # At most this many sentences are scored individually to find what to highlight
 # when the model asks for a revision (each is one extra model inference).
@@ -57,8 +60,8 @@ rules:
 # Instructions for text highlighted by the model.
 model:
   sentence: >-
-    This sentence may go against our community policies. Rephrase it so it's
-    factual, specific and respectful.
+    This sentence may go against our community policies. Rewrite it so it's
+    factual, specific and respectful (the words in bold are the main problem).
   targeted: >-
     This sentence about another person or business may come across as hostile.
     Rephrase it respectfully, or remove it.

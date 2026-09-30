@@ -11,8 +11,8 @@ Rule kinds (``kind``):
 
     pattern   (default) regex ``patterns`` and literal ``terms``, matched anywhere
     words     literal ``terms`` matched on whole words/phrases; scales to large word lists
-    targeted  a ``subjects`` word (e.g. he/she/they) followed later in the SAME sentence
-              by one of the ``terms``: abuse aimed at a person or business
+    targeted  a ``subjects`` word (e.g. he/she/they) and one of the ``terms`` in the SAME
+              sentence, in either order: abuse aimed at a person or business
 
 ``terms_file`` (one path or a list) adds terms from newline-separated files; missing
 files are skipped, so large or sensitive lists can live outside git. ``exclude_file``
@@ -39,7 +39,8 @@ _INVISIBLE = re.compile("[​-‏⁠-⁤﻿­]")
 _APOSTROPHES = str.maketrans({"‘": "'", "’": "'"})
 _TOKEN = re.compile(r"\w+(?:['-]\w+)*")
 _CLEAN_TERM = re.compile(r"\w+(?:['-]\w+)*(?: \w+(?:['-]\w+)*)*")
-_SENTENCE_END = re.compile(r"(?<!\d)[.!?]+|[.!?]+(?!\d)")  # "2.5 kg" is not a break; "costs 50. Call" is
+# . ! ? followed by whitespace or the end: "2.5 kg" and "example.com" are not breaks; "costs 50. Call" is.
+_SENTENCE_END = re.compile(r"[.!?]+(?=\s|$)")
 _ACTIONS = ("block", "revise", "flag")
 _KINDS = ("pattern", "words", "targeted")
 
@@ -123,9 +124,13 @@ class TermSet:
         tok = tokens[i]
         if (tok,) in self.phrases:
             return 1
-        if len(tok) > 3 and tok.endswith("es") and (tok[:-2],) in self.phrases:
+        # "-es" plurals only follow s, x, z, ch, sh ("bitches", "asses"). Without this check
+        # "spices" matched a slur ("spic" + "es") and blocked every spice seller.
+        if len(tok) > 3 and tok.endswith("es") and tok[:-2].endswith(("s", "x", "z", "ch", "sh")) \
+                and (tok[:-2],) in self.phrases:
             return 1
-        if len(tok) > 2 and tok.endswith("s") and (tok[:-1],) in self.phrases:
+        # Words ending in "ss" aren't plurals: "assess" must not match a listed "asses".
+        if len(tok) > 2 and tok.endswith("s") and not tok.endswith("ss") and (tok[:-1],) in self.phrases:
             return 1
         if tok not in self.starts:
             return 0
@@ -161,13 +166,14 @@ def _subject_token(tokens: list[re.Match], subjects: frozenset[str]) -> int | No
 
 
 def targeted_finder(subjects: frozenset[str], terms: TermSet) -> Callable[[str], list[Span]]:
+    """A sentence that points at someone (a subject word) AND contains a listed term, in
+    either order: "he is an idiot", "what an idiot he is", "idiots like them" all match."""
     def find(norm: str) -> list[Span]:
         spans: list[Span] = []
         for s, e in sentence_spans(norm):
             tokens = list(_TOKEN.finditer(norm, s, e))
-            first = _subject_token(tokens, subjects)
-            if first is not None:
-                spans += terms.find(norm, tokens[first].end(), e)
+            if _subject_token(tokens, subjects) is not None:
+                spans += terms.find(norm, s, e)
         return spans
     return find
 

@@ -6,26 +6,25 @@ mode: sync                 # sync  -> inference inline, final decision in the re
 
 model:
   backend: onnx            # onnx | stub   (stub = dev only, never deploy)
-  dir: models/v3           # live model. Roll back with dir: models/v1 (or MODEL_DIR=models/v1)
-  intra_op_threads: 4      # measured on bonc-v1 (v3 is the same size): 70-token text p95 58 ms @1 thread, 28 ms @4.
-                           # Keep workers x threads <= CPU cores.
+  dir: models/v4           # live model. To roll back, put a v3 bundle next to it and set
+                           # dir: models/v3 (or MODEL_DIR=...) AND the v3 thresholds below.
+                           # v1 and v3 are no longer tracked in the repo (see flask_api/README.md);
+                           # each bundle's model_meta.json carries its own label_weights.
+  intra_op_threads: 4      # Keep workers x threads <= CPU cores. Measured on this 6-core host
+                           # (p95 for one call): 2 threads 38 ms, 4 threads 30 ms, 6 threads 29 ms,
+                           # 8 threads 30 ms, 12 threads 38 ms. 6 is best for a single request but
+                           # leaves nothing for concurrent workers, so 4 stays the default.
   inter_op_threads: 1
-  label_weights:           # risk = sum(P(label) * weight). The model's labels are decisions,
-    safe: 0.0              # so 1 - P(safe) would score a confident "review" as ~1.0 (reject).
-    review: 0.25           # Calibrated for v3: its "review" class fires on almost any prose that isn't
-    reject: 1.0            # a product listing (P(review) ~0.999 for ordinary articles, titles, reviews),
-                           # while P(reject) stays <= 0.015 on legitimate text. At 0.25 an "unsure"
-                           # text scores ~0.25 (allowed) and real risk comes from P(reject).
-                           # Measured on 36 legit / 18 harmful texts (full pipeline):
-                           #   review 0.50 -> legit allowed 8/36,  harmful caught 15/18
-                           #   review 0.25 -> legit allowed 36/36, harmful caught 12/18
-                           # Re-measure with scripts/compare_models.py for every new model.
+  # label_weights:         # optional operator override of the bundle's weights (keys must match its labels).
+                           # v4: labels [safe, unsafe], weights {safe: 0, unsafe: 1} -> risk = P(unsafe),
+                           # temperature-calibrated in training, so 0.5 means "as likely harmful as not".
+                           # v3 ships {safe: 0, review: 0.25, reject: 1} in models/v3/model_meta.json.
 
-thresholds:                # placeholder values until the model is calibrated
-  allow_max: 0.30          # risk <= 0.30         -> allow   (safety >= 0.70)
-  reject_min: 0.70         # risk >= 0.70         -> reject  (safety <= 0.30)
-                           # 0.30 < risk < 0.70   -> revise: the author is shown what to fix
-                           # (there is no human-review step)
+thresholds:                # v4: one boundary at 0.5 (calibrated P(unsafe))
+  allow_max: 0.50          # risk <= 0.50 -> allow
+  reject_min: 0.50         # risk >  0.50 -> reject: not published; the author sees the highlighted
+                           #                 sentences and trigger words, rewrites and resubmits.
+                           # (allow_max < reject_min restores a middle "revise" band; v3 used 0.30 / 0.70)
 
 gate:
   patterns_file: config/gate_patterns.yaml
@@ -36,7 +35,34 @@ feedback:                  # what authors see when asked to revise or when rejec
 limits:
   max_chars: 25000          # articles: 20,000-char body + title + link URLs
 
-latency_budget_ms: 30      # inference-only budget; overruns are logged, not failed
+pdf:                        # POST /v1/moderate/pdf: extract the text, then moderate it normally
+  enabled: true             # PDF_UPLOAD=0 turns the endpoint off
+  max_bytes: 10000000       # 10 MB upload
+  max_pages: 100
+  max_chars: 100000         # extracted text. Longer documents are rejected, never truncated:
+                            # truncating would leave the tail unchecked but still say "allowed".
+                            # (limits.max_chars above still applies to what reaches the model.)
+  min_chars_per_page: 20    # a page with images but less text than this counts as unreadable
+  reject_unreadable_pages: true
+                            # Scanned pages carry no extractable text, so nothing can be checked
+                            # on them. Rejecting is the fail-closed choice: set false only if you
+                            # accept publishing pages the moderator never read.
+
+  ocr:                      # read the pixels of pages that carry no text (app/ocr.py, RapidOCR
+    enabled: true           # on onnxruntime). PDF_OCR=0 turns it off and those pages go back to
+                            # being refused. It widens what can be ACCEPTED; it is not a security
+                            # control, because a page it fails to read is still refused.
+    max_pages: 10           # per upload: ~0.5 s per page on CPU, so this bounds the request
+    dpi: 200                # enough for body text; pages stay around 2 megapixels
+    max_pixels: 4000000     # hard cap per page whatever the dpi implies (hostile page sizes)
+    min_chars: 20           # OCR must recover at least this much, or the page stays unreadable
+    min_confidence: 0.5     # and be at least this confident, or we don't trust what it read
+
+latency_budget_ms: 30      # inference-only budget for ONE call; overruns are logged, not failed.
+                           # Realistic for short content (a listing is ~11 ms, p95 ~30 ms measured with
+                           # scripts/bench_latency.py). An article that fills the 256-token window costs
+                           # ~110 ms on this CPU and will log an overrun every time - that is the model's
+                           # cost, not a fault. Use scripts/profile_latency.py for whole-request timings.
 
 targeted_abuse:            # per-sentence model check for abuse aimed at a person/business
   enabled: true
@@ -45,8 +71,34 @@ targeted_abuse:            # per-sentence model check for abuse aimed at a perso
 
 sentence_scan:             # score every sentence on its own: one reject-level sentence rejects the post
   enabled: true            # catches a scam tacked onto a clean listing (whole text can score ~0)
-  max_sentences: 400       # every sentence is scored on its own (~10 ms each): a 40-sentence article
-                           # takes ~0.5 s, 200 sentences ~2 s. 400 covers a full 25,000-character article.
+  max_sentences: 400       # sentences + word windows scored on their own. v4 is batch-invariant, so they
+                           # are scored in batches of 32 (one ONNX call each) instead of one by one.
+                           # 400 covers a full 25,000-character article.
+
+triage:                    # Layer 1.5: a linear pre-filter in front of the sentence scan (app/triage.py).
+  enabled: true            # Logistic regression over hashed n-grams, ~0.1 ms per span, distilled from the
+  dir: models/triage-v1    # model's own decisions: it only clears spans the model would have allowed, so
+                           # the scan's model calls drop sharply on clean posts. Retrain it with
+                           # training/train_triage.py whenever the model changes; the bundle records the
+                           # threshold, the skip rate and the misses it was measured at.
+                           # threshold: 0.05   # uncomment to override the trained threshold (higher = skips more)
+                           # TRIAGE=0 turns it off; decisions must not change, only latency.
+
+word_scan:                 # word-by-word analysis (see app/targeted.py WordScan)
+  enabled: true
+  window_words: 40         # a sentence longer than this is also scored in overlapping word windows,
+  window_stride: 20        #   so a harmful phrase in a long run-on sentence isn't diluted
+  min_contribution: 0.10   # for each flagged sentence, each word is removed in turn and the sentence
+  max_triggers: 5          #   re-scored; words that lower the risk by >= 0.10 are "trigger words",
+  max_spans: 5             #   returned in word_scores and highlighted for the author
+  max_words: 60
+  deobfuscate: true        # also score a leetspeak-restored reading, word by word ("F1rst c0py" -> "First copy");
+                           # the riskier of the two readings counts. Product codes (330W, A16, i5, 5kg) are untouched.
+  max_candidates: 10       # This phase only draws highlights: it cannot change a decision, so it is
+  max_calls: 40            # bounded hard. The linear pre-filter ranks the words (~0.1 ms each) and only
+                           # max_candidates per span go to the model; max_calls caps the whole phase.
+                           # Measured: a rejected 15-word sentence went 522 ms -> 199 ms, and a long
+                           # run-on 1556 ms -> 243 ms. Lower them for speed, raise for finer highlights.
 
 demo_page: false           # true (or DEMO_PAGE=1) serves the browser demo at /demo
 

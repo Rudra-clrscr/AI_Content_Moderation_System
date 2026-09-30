@@ -1,0 +1,262 @@
+{
+  "version": "triage-linear-v1",
+  "feature_version": 1,
+  "feature_bits": 18,
+  "threshold": 0.01,
+  "training_threshold": 0.0001785,
+  "threshold_chosen_by": "tune_triage.py: highest threshold at which nothing that was held back becomes published, on the held-out sets, times the safety factor",
+  "alpha": 1e-06,
+  "safety_factor": 0.5,
+  "teacher": "v4",
+  "allow_max": 0.5,
+  "trained_on_spans": 150000,
+  "spans_at_training_threshold": {
+    "val": {
+      "skip_rate": 0.1277,
+      "misses": 0,
+      "n": 31747
+    },
+    "test": {
+      "skip_rate": 0.1333,
+      "misses": 1,
+      "teacher_misses_also_cleared": 307,
+      "n": 31098
+    }
+  },
+  "featurize_ms_per_span": 0.1909,
+  "sweep": [
+    {
+      "threshold": 0.0002,
+      "skip_rate": 0.136,
+      "misses": 0
+    },
+    {
+      "threshold": 0.000267,
+      "skip_rate": 0.1575,
+      "misses": 0
+    },
+    {
+      "threshold": 0.000357,
+      "skip_rate": 0.1799,
+      "misses": 0
+    },
+    {
+      "threshold": 0.000477,
+      "skip_rate": 0.2052,
+      "misses": 1
+    },
+    {
+      "threshold": 0.000637,
+      "skip_rate": 0.2323,
+      "misses": 1
+    },
+    {
+      "threshold": 0.000852,
+      "skip_rate": 0.261,
+      "misses": 1
+    },
+    {
+      "threshold": 0.001138,
+      "skip_rate": 0.2941,
+      "misses": 1
+    },
+    {
+      "threshold": 0.00152,
+      "skip_rate": 0.3286,
+      "misses": 2
+    },
+    {
+      "threshold": 0.002032,
+      "skip_rate": 0.3645,
+      "misses": 4
+    },
+    {
+      "threshold": 0.002714,
+      "skip_rate": 0.4005,
+      "misses": 4
+    },
+    {
+      "threshold": 0.003627,
+      "skip_rate": 0.4353,
+      "misses": 5
+    },
+    {
+      "threshold": 0.004846,
+      "skip_rate": 0.4704,
+      "misses": 7
+    },
+    {
+      "threshold": 0.006475,
+      "skip_rate": 0.505,
+      "misses": 9
+    },
+    {
+      "threshold": 0.008651,
+      "skip_rate": 0.5389,
+      "misses": 13
+    },
+    {
+      "threshold": 0.011559,
+      "skip_rate": 0.572,
+      "misses": 18
+    },
+    {
+      "threshold": 0.015445,
+      "skip_rate": 0.6039,
+      "misses": 21
+    },
+    {
+      "threshold": 0.020636,
+      "skip_rate": 0.6344,
+      "misses": 31
+    },
+    {
+      "threshold": 0.027572,
+      "skip_rate": 0.6635,
+      "misses": 41
+    },
+    {
+      "threshold": 0.03684,
+      "skip_rate": 0.6877,
+      "misses": 49
+    },
+    {
+      "threshold": 0.049224,
+      "skip_rate": 0.7126,
+      "misses": 61
+    },
+    {
+      "threshold": 0.065769,
+      "skip_rate": 0.7353,
+      "misses": 69
+    },
+    {
+      "threshold": 0.087876,
+      "skip_rate": 0.7548,
+      "misses": 82
+    },
+    {
+      "threshold": 0.117415,
+      "skip_rate": 0.7741,
+      "misses": 105
+    },
+    {
+      "threshold": 0.156881,
+      "skip_rate": 0.7905,
+      "misses": 123
+    },
+    {
+      "threshold": 0.209614,
+      "skip_rate": 0.8057,
+      "misses": 151
+    },
+    {
+      "threshold": 0.280073,
+      "skip_rate": 0.8211,
+      "misses": 193
+    },
+    {
+      "threshold": 0.374214,
+      "skip_rate": 0.8339,
+      "misses": 244
+    },
+    {
+      "threshold": 0.5,
+      "skip_rate": 0.8456,
+      "misses": 298
+    }
+  ],
+  "notes": "Logistic regression over hashed word 1-2 grams and char 3-5 grams, distilled from the teacher's decisions on the spans the sentence scan really produces. Clears only spans the teacher would have allowed; everything else still goes to the model.",
+  "model_calls_saved_on_allowed_posts": 0.7299,
+  "decision_tuning": {
+    "device": "cuda",
+    "texts": 619,
+    "baseline_model_calls": 7012,
+    "baseline_ms_per_text": 36.3,
+    "allowed_posts": {
+      "n": 384,
+      "calls": [
+        1973,
+        533
+      ],
+      "ms_per_text": [
+        28.8,
+        18.9
+      ]
+    },
+    "sweep": [
+      {
+        "threshold": 0.0005,
+        "model_calls": 6660,
+        "calls_saved": 0.0502,
+        "ms_per_text": 36.9,
+        "decisions_changed": 0,
+        "caught_then_allowed": 0
+      },
+      {
+        "threshold": 0.002,
+        "model_calls": 6309,
+        "calls_saved": 0.1003,
+        "ms_per_text": 36.0,
+        "decisions_changed": 0,
+        "caught_then_allowed": 0
+      },
+      {
+        "threshold": 0.005,
+        "model_calls": 6042,
+        "calls_saved": 0.1383,
+        "ms_per_text": 35.5,
+        "decisions_changed": 0,
+        "caught_then_allowed": 0
+      },
+      {
+        "threshold": 0.01,
+        "model_calls": 5837,
+        "calls_saved": 0.1676,
+        "ms_per_text": 34.7,
+        "decisions_changed": 0,
+        "caught_then_allowed": 0
+      },
+      {
+        "threshold": 0.02,
+        "model_calls": 5637,
+        "calls_saved": 0.1961,
+        "ms_per_text": 34.1,
+        "decisions_changed": 0,
+        "caught_then_allowed": 0
+      },
+      {
+        "threshold": 0.05,
+        "model_calls": 5456,
+        "calls_saved": 0.2219,
+        "ms_per_text": 33.3,
+        "decisions_changed": 1,
+        "caught_then_allowed": 1
+      },
+      {
+        "threshold": 0.1,
+        "model_calls": 5339,
+        "calls_saved": 0.2386,
+        "ms_per_text": 32.3,
+        "decisions_changed": 1,
+        "caught_then_allowed": 1
+      },
+      {
+        "threshold": 0.2,
+        "model_calls": 5266,
+        "calls_saved": 0.249,
+        "ms_per_text": 32.0,
+        "decisions_changed": 2,
+        "caught_then_allowed": 2
+      },
+      {
+        "threshold": 0.4,
+        "model_calls": 5208,
+        "calls_saved": 0.2573,
+        "ms_per_text": 31.4,
+        "decisions_changed": 2,
+        "caught_then_allowed": 2
+      }
+    ]
+  }
+}

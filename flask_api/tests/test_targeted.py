@@ -3,7 +3,7 @@ import pytest
 from app import create_app
 from app.gate import Gate
 from app.model import ScoreResult
-from app.targeted import SentenceScan, TargetedAbuse
+from app.targeted import SentenceScan, TargetedAbuse, WordScan
 from tests.conftest import FixedScorer
 
 
@@ -53,6 +53,9 @@ def ids(result):
     "HE IS AN ｉｄｉｏｔ",        # case + full-width letters
     "Nice prices. But their manager is an idiot!",    # second sentence
     "He sucks",                                       # excluded only from the words rule
+    "What an idiot he is",                            # term BEFORE the subject, same sentence
+    "Idiots like them should not run a shop",         # term first, object pronoun
+    "Clowns, all of them.",                           # term first, file term
 ])
 def test_targeted_blocks(gate, text):
     r = gate.check(text)
@@ -66,6 +69,7 @@ def test_targeted_blocks(gate, text):
     "Idiots everywhere",                     # no subject
     "He supplies a flange",                  # excluded file term
     "The theme is clowning",                 # 'the'/'theme' aren't subjects; 'clowning' isn't 'clown'
+    "They sell clownes",                     # '-es' only pluralises s/x/z/ch/sh stems
 ])
 def test_targeted_does_not_block(gate, text):
     assert not gate.check(text).blocked
@@ -173,7 +177,8 @@ TEXT = "Great valves and fast delivery from this supplier. But he will regret ch
 
 
 def test_targeted_segment_escalates_to_reject(make_settings):
-    body = post(create_app(make_settings(), scorer=SegmentScorer()).test_client(), TEXT)
+    s = make_settings(word_scan=WordScan(enabled=False))   # word analysis would add inferences
+    body = post(create_app(s, scorer=SegmentScorer()).test_client(), TEXT)
     assert body["decision"] == "reject" and body["decided_by"] == "targeted"
     seg = body["targeted_segments"][0]
     assert TEXT[seg["start"]:seg["end"]] == "he will regret cheating us"
@@ -197,9 +202,12 @@ def test_low_segment_score_does_not_change_decision(make_settings):
     assert len(body["targeted_segments"]) == 1
 
 
-def test_skipped_when_whole_text_already_rejected(make_settings):
+def test_skipped_when_whole_text_already_rejected(make_settings, tmp_path):
+    msgs = tmp_path / "fb.yaml"
+    msgs.write_text("highlight_on_reject: false\n")        # highlights would score sentences
+    s = make_settings(feedback_messages_file=msgs, word_scan=WordScan(enabled=False))
     scorer = FixedScorer(0.9)
-    body = post(create_app(make_settings(), scorer=scorer).test_client(), TEXT)
+    body = post(create_app(s, scorer=scorer).test_client(), TEXT)
     assert body["decision"] == "reject" and body["decided_by"] == "model"
     assert scorer.calls == 1 and body["targeted_segments"] == []
 

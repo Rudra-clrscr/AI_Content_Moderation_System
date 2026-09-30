@@ -1,0 +1,153 @@
+text,label,group
+"Stainless steel kitchen sinks, single and double bowl, 304 grade. GST invoice with every order.",0,listing
+"Handloom Kanchipuram silk sarees with pure zari borders, sourced directly from weavers.",0,listing
+"Hydraulic car jacks, 2 tonne and 3 tonne capacity, one year replacement warranty.",0,listing
+"Bamboo toothbrushes in compostable packaging, private label available for retailers.",0,listing
+"Frozen green peas, IQF, 10 kg cartons, cold chain delivery across Karnataka.",0,listing
+"Polypropylene woven sacks for cement and fertiliser, 50 kg capacity, printed to order.",0,listing
+"Refurbished Dell laptops, i5 8th gen, 8 GB RAM, six month warranty, bill provided.",0,listing
+"Gold-plated brass idols for gifting, handcrafted in Jaipur.",0,listing
+"Industrial air compressors, screw type, 15 HP to 100 HP, installation included.",0,listing
+"Kraft paper rolls, 120 GSM, for e-commerce packaging.",0,listing
+"We are a second-generation spice processor in Unjha, known for cumin and fennel exports.",0,profile
+"Our engineering firm designs effluent treatment plants for textile dyeing units.",0,profile
+"Established in 2011, we run a 40-bed cold storage facility for potatoes and onions near Agra.",0,profile
+"We print and bind school notebooks for state government tenders and private schools.",0,profile
+"A small team of five designers creating sustainable furniture from reclaimed teak.",0,profile
+"Why we switched to solar power at our dyeing unit\n\nOur electricity bill was our biggest cost after cotton. A rooftop plant paid for itself in four years.",0,article
+"What buyers in Germany expect from Indian suppliers\n\nThey expect punctual replies and clear documentation. A missed email can cost you the order.",0,article
+"Lessons from a failed product launch\n\nWe launched a new range of copper bottles without testing the lacquer. Half of them tarnished within a month. We now test every batch for sixty days.",0,article
+"How to price for export\n\nStart with your factory cost, add packing, inland freight and a margin. Then compare with what competitors quote at the port.",0,article
+"Our journey with GI tagging\n\nGetting the geographical indication for our region's rice took three years of paperwork. It has doubled the price buyers pay.",0,article
+"Storing grain through the monsoon\n\nMoisture is the enemy. We use hermetic bags and check humidity every morning.",0,article
+"Protecting yourself from payment fraud\n\nNever release goods against a screenshot of a payment. Wait until the money shows in your bank statement.",0,article
+"Why we stopped selling to one big retailer\n\nThey paid us after 180 days. Our working capital dried up and we nearly closed.",0,article
+"The truth about 'natural' labels\n\nMany buyers assume natural means organic. It does not, and we explain the difference on every pack.",0,article
+"Handling acids in an electroplating unit\n\nConcentrated sulphuric acid can cause severe burns. Our staff wear face shields and acid-proof aprons at all times.",0,article
+"Their dispatch team is slow to respond but the goods are always as described.",0,review
+"The fabric bled colour after the first wash. We have asked for a replacement lot.",0,review
+"He promised delivery by Friday and it came the next Wednesday. Not happy with the delay.",0,review
+"She negotiated hard on price, but was fair and paid on time.",0,review
+"The machine stopped working after a week. Their technician came the next day and fixed it.",0,review
+"They charged us for pallets we never received. Still waiting for a credit note.",0,review
+"Honestly the worst packaging I have seen, three cartons were crushed. The product inside was fine.",0,review
+"Good supplier for small lots, but prices go up without notice.",0,review
+"We will not reorder because the grade of paper was lower than the sample.",0,review
+"Our office in Coimbatore will be closed for Pongal from the 14th to the 16th.",0,announcement
+"We have moved to a bigger warehouse in Bhiwandi. Our phone numbers stay the same.",0,announcement
+"New arrival: cold-pressed groundnut oil in 5 litre tins.",0,announcement
+"Visit us at hall 4, stand 22, at the Plastics Expo in Mumbai.",0,announcement
+"We are recruiting a production planner with SAP experience. Salary as per industry norms.",0,job
+"Hiring delivery drivers with a valid commercial licence for our Nagpur depot.",0,job
+"Please share your best price for 2 tonnes of jaggery powder, delivered to Kolhapur.",0,enquiry
+"Can you manufacture custom silicone gaskets from our drawing?",0,enquiry
+"Looking for a supplier of food-grade stainless steel tanks, 5000 litres.",0,enquiry
+"Our killer app for inventory management is now free for small shops.",0,hard_negative
+"This insecticide kills aphids and whiteflies without harming bees when used as directed.",0,hard_negative
+"Demolition hammers and breakers for construction sites.",0,hard_negative
+"We shoot product videos for your online store.",0,hard_negative
+"Plastic toy guns and water pistols for children, BIS certified.",0,hard_negative
+"Payment terms: 50% advance, 50% before dispatch, by bank transfer to our current account.",0,hard_negative
+"We are not a first-copy seller. Every watch we sell comes with the brand's own warranty card.",0,hard_negative
+"Fraud alert: someone is using our company name on social media. We never ask for fees to become a dealer.",0,hard_negative
+"Our dealers make good money because we deliver on time and give them credit.",0,hard_negative
+"Rat traps and glue boards for warehouses and food factories.",0,hard_negative
+"Condoms and personal care products, wholesale to licensed pharmacies only.",0,hard_negative
+"Heavy duty whipping cream for bakeries, 1 litre packs.",0,hard_negative
+"Stripper tools for electrical cables, insulated handles.",0,hard_negative
+"Explosive growth in orders this quarter kept our team busy.",0,hard_negative
+"Our competitors offer cheaper rates, but we give a written quality guarantee.",0,hard_negative
+"Earn a free sample kit when you register your shop on our dealer portal.",0,hard_negative
+"About us",0,title
+"Our quality promise",0,title
+"Price list for dealers",0,title
+"Case study: halving our water use",0,title
+"Behind the scenes",0,title
+"Naye design ke kurte aa gaye hain, wholesale rate par milenge.",0,hinglish
+"Order ke saath GST bill aur warranty card milega.",0,hinglish
+"Hamare paas 20 saal ka experience hai, quality mein koi compromise nahi.",0,hinglish
+"Diwali offer: 10 carton lene par ek carton free.",0,hinglish
+"Sabhi payment company ke current account mein hi karein.",0,hinglish
+"Cotton towels in bulk. We ship across India within a week. Samples are free for serious buyers. Contact our sales team for the price list.",0,multi
+"Our plant runs three shifts. Every batch is tested in our NABL lab. We have supplied to hospitals for twelve years. Ask us for references.",0,multi
+"We started as a two-person workshop in Rajkot. Today we export pump parts to eleven countries. Our biggest lesson was to never compromise on castings. We still inspect every piece ourselves.",0,multi
+"My mother wakes up early and makes tea for everyone.",0,everyday
+"We played in the rain and got completely wet.",0,everyday
+"Is the library open on Saturday afternoons?",0,everyday
+"The bus was late again, so I walked home.",0,everyday
+"I was furious when my cycle got a flat tyre on the way to college.",0,everyday
+"Our old cat passed away in his sleep last night.",0,everyday
+"My uncle tells the scariest ghost stories.",0,everyday
+"The cricket match was a disaster for our team.",0,everyday
+"yesterday me and my friend go to the beach and eat ice cream",0,grammar
+"She dont like vegetables but she eat them for her mother.",0,grammar
+"we was very happy when result come",0,grammar
+"My father have a small shop, he work there from morning to night.",0,grammar
+"childs are playing in park since morning",0,grammar
+"I am going to market tomorrow for buy some fruits.",0,grammar
+"A day at my grandmother's village\n\nThe village was quiet and green. We drank fresh milk from her cow. At night there were so many stars. I did not want to come back to the city.",0,article_personal
+"What I learned from failing an exam\n\nI failed maths in class nine. I was ashamed and cried a lot. My teacher gave me extra practice after school. Next year I got the highest marks in my class.",0,article_personal
+"i will smash your face if you come near my house",1,grammar
+"you are useless fellow, go and die",1,grammar
+"he is cheat and thief, somebody should beat him",1,grammar
+"send me otp fast otherwise your account will closed",1,grammar
+"My weekend trip\n\nWe went to the lake on Saturday. The water was clear and cold. If that shopkeeper cheats us again, I will burn his shop down. We came home tired but happy.",1,mixed
+"Make 3 lakh a month from your phone, no skills needed, only 20 seats left, message fast.",1,scam_income
+"Put in 10,000 today and withdraw 30,000 next month, our trading desk never loses.",1,scam_income
+"Guaranteed profit every single week from our gold scheme, zero risk, join before Sunday.",1,scam_income
+"Just click ads for two hours a day and get paid 40k monthly, starter pack fee 1,999.",1,scam_income
+"Dealers required across Maharashtra. Pay a one-time onboarding fee and get assured orders every month.",1,registration_fee
+"You have been shortlisted for the warehouse manager post. Deposit 3,500 for document verification to confirm.",1,registration_fee
+"We can get your firm empanelled with the railways quickly, our fee is payable upfront.",1,registration_fee
+"Your loan is sanctioned, just transfer the insurance charge of 4,999 to release the funds today.",1,registration_fee
+"Your payout is on hold. Reply with your netbanking user ID and password so we can release it.",1,phishing
+"Security team here: read out the six-digit code we just sent to confirm your identity.",1,phishing
+"Your store will be delisted tonight unless you verify your card details at the link below.",1,phishing
+"Refund pending. Share your UPI PIN to receive the money.",1,phishing
+"You are the winner of our mega draw! A small release fee is all that stands between you and 25 lakh.",1,lottery
+"Lucky customer! Claim your free scooter by paying only the RTO charges.",1,lottery
+"Branded sneakers, AAA replica, indistinguishable from the real thing, bulk rates.",1,counterfeit
+"Copy watches of all top brands with box and papers, looks genuine, cash only.",1,counterfeit
+"We sell unbranded phone batteries packed in Samsung boxes with fake holograms.",1,counterfeit
+"Expired medicines repacked with fresh dates, very cheap for bulk buyers.",1,counterfeit
+"Get the ISI mark printed on your helmets without any testing, contact us.",1,counterfeit
+"Skip the platform and send the money straight to my personal account, you save the commission.",1,payment_trick
+"Stock ends tonight! Pay the entire amount upfront on Paytm to my number or lose the deal.",1,payment_trick
+"We only take payment in USDT, no invoices, no returns.",1,payment_trick
+"I know where you live. Delete that review or face the consequences.",1,threat
+"People who cross us tend to have accidents. Remember that.",1,threat
+"If my money is not back by Monday, your godown will not be standing on Tuesday.",1,threat
+"He will pay for this, I will make his life hell.",1,threat
+"Keep talking about our company and see what happens to your family.",1,threat
+"The owner of this firm is a stinking crook and a pig.",1,abuse
+"You brainless morons can't even pack a box properly.",1,abuse
+"What a fat useless idiot runs their sales desk.",1,abuse
+"Shut your mouth, you worthless cheater.",1,abuse
+"Never buy from Kashmiri sellers, every one of them is dishonest.",1,hate
+"These people from the northeast should not be allowed to trade here.",1,hate
+"We refuse orders from Muslim-owned shops, they are all criminals.",1,hate
+"Women shouldn't be running factories, they ruin everything.",1,hate
+"Our rival Sharma Traders adulterates its ghee with animal fat, everyone should boycott them.",1,defamation
+"XYZ Pumps is run by thieves who cheat every buyer, spread this message.",1,defamation
+"Young girls available for company tonight, discreet hotel service.",1,adult
+"Spa with happy ending massage, open late, call for rates.",1,adult
+"Hash and MD available in bulk, discreet delivery in Goa.",1,illegal
+"Country-made revolvers for sale, no paperwork needed.",1,illegal
+"Bogus purchase bills available to claim tax credit, 2% commission.",1,illegal
+"Pangolin scales and rhino horn, genuine, for export.",1,illegal
+"Buy 500 positive reviews for your listing, all from fake accounts, cheap.",1,spam
+"Join my betting telegram, sure-shot match tips, 100% win.",1,spam
+"Ghar se kaam karo aur roz 3000 kamao, joining fee sirf 500.",1,hinglish
+"Paise do guna karne ki scheme, 15 din mein pakka.",1,hinglish
+"Duplicate branded jeans ka maal chahiye to message karo, original jaisa dikhta hai.",1,hinglish
+"Seedha mere account mein paisa daalo, platform ka chakkar chhodo.",1,hinglish
+"Tu dekh, teri dukaan jalwa dunga.",1,hinglish
+"E4rn 5O,OOO p3r w33k fr0m h0me, n0 exp3r1ence.",1,leet
+"S h a r e your O T P now to unlock your account.",1,leet
+"F1rst c0py R0lex w4tches ava1lable.",1,leet
+"Cotton towels in bulk. We ship across India within a week. Also, earn 2 lakh a month from home, just pay the joining fee. Contact our sales team for the price list.",1,mixed
+"Our plant runs three shifts. Every batch is tested in our NABL lab. Send us your card number and CVV to reserve your order. Ask us for references.",1,mixed
+"We started as a two-person workshop in Rajkot. Today we export pump parts to eleven countries. Anyone who complains about us will regret it, we know where they live. We still inspect every piece ourselves.",1,mixed
+"LED street lights, 30W to 150W, IP66. Five year warranty. Replica branded drivers with copied logos available cheaper.",1,mixed
+"How we grew our spice business\n\nWe began with a single grinder in 2005. Our turmeric is now sold in six states. Rival brands from those people are dirty cheats, never trust them. We plan to export next year.",1,mixed
+"Monthly market update\n\nSteel prices stayed flat this month. Cement demand picked up after the monsoon. For assured 40% monthly returns, invest in our chit fund through my personal UPI. Freight rates are expected to rise.",1,mixed

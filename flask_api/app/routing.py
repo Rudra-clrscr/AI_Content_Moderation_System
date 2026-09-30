@@ -32,6 +32,10 @@ class Thresholds:
 
     Equivalently, on a safety scale (1 - risk): safety >= 1 - allow_max is safe,
     safety <= 1 - reject_min is rejected.
+
+    With allow_max == reject_min there is no revise band: a single boundary where
+    risk <= boundary is allowed and risk > boundary is rejected (the allow side is
+    inclusive). bonc-v4 uses 0.5: its risk is a calibrated P(unsafe).
     """
 
     allow_max: float
@@ -50,10 +54,10 @@ class Thresholds:
 
 def route(score: float, thresholds: Thresholds, *, floor: Decision = Decision.ALLOW) -> Decision:
     """Map a risk score to a decision. `floor` lets a gate "revise" rule force at least REVISE."""
-    if score >= thresholds.reject_min:
-        decision = Decision.REJECT
-    elif score <= thresholds.allow_max:
+    if score <= thresholds.allow_max:       # checked first: with one boundary, the boundary itself is allowed
         decision = Decision.ALLOW
+    elif score >= thresholds.reject_min:
+        decision = Decision.REJECT
     else:
         decision = Decision.REVISE
     return most_severe(decision, floor)

@@ -3,9 +3,11 @@
  *
  *   Publish -> POST /v1/moderate (title + body + link URLs, content_type "article")
  *     allow  -> published immediately (uses one free publish)
- *     revise -> not published; the modal stays open with the parts to fix highlighted.
- *               The article is kept under "Needs changes" so the author can come back to it.
- *     reject -> not published; the reason (policy area) is shown. Kept under "Rejected".
+ *     revise -> not published (a gate "revise" rule); the modal stays open with the parts to fix
+ *               highlighted. The article is kept under "Needs changes" so the author can come back to it.
+ *     reject -> not published (risk > 0.5, or a gate block); the reason is shown with the sentences
+ *               to rewrite highlighted and their trigger words marked. Kept under "Rejected", where
+ *               the author can reopen it, rewrite and publish again.
  *   Save as Draft -> no moderation (drafts aren't public).
  *
  * Only successful publishes use up the free quota. Articles are stored in this
@@ -79,7 +81,9 @@
       const n = (fb.issues || []).length;
       reason = `<div class="row-reason">${n} ${n === 1 ? "part needs" : "parts need"} changes before this can be published.</div>`;
     } else if (a.status === "rejected" && fb) {
-      reason = `<div class="row-reason danger">${esc(fb.message || "Can't be published.")}</div>`;
+      const n = (fb.issues || []).length;
+      const rewrite = n ? `${n} ${n === 1 ? "part" : "parts"} to rewrite. ` : "";
+      reason = `<div class="row-reason danger">${rewrite}${esc(fb.message || "Can't be published.")}</div>`;
     }
     return `<div class="row">
         <div class="row-main">
@@ -274,7 +278,7 @@
 
   // ---------------- feedback UI ----------------
   function clearHighlights() {
-    if (window.CSS && CSS.highlights) { CSS.highlights.delete("mod-revise"); CSS.highlights.delete("mod-focus"); }
+    if (window.CSS && CSS.highlights) { ["mod-revise", "mod-focus", "mod-word"].forEach((h) => CSS.highlights.delete(h)); }
     $("title").classList.remove("has-issue");
     $("title-msg").innerHTML = "";
   }
@@ -321,6 +325,10 @@
       i.field === "body" ? M.rangeFor(serialized, i.start, i.end) : i.field === "link" ? linkRange(i.linkIndex) : null
     ).filter(Boolean);
     if (ranges.length && window.CSS && CSS.highlights && window.Highlight) CSS.highlights.set("mod-revise", new Highlight(...ranges));
+    // Trigger words (word-by-word scan) get a stronger highlight inside their sentence.
+    const wordRanges = issues.filter((i) => i.field === "body")
+      .flatMap((i) => i.words.map((w) => M.rangeFor(serialized, w.start, w.end))).filter(Boolean);
+    if (wordRanges.length && window.CSS && CSS.highlights && window.Highlight) CSS.highlights.set("mod-word", new Highlight(...wordRanges));
     const titleIssues = issues.filter((i) => i.field === "title");
     if (titleIssues.length) {
       $("title").classList.add("has-issue");
@@ -331,7 +339,16 @@
 
   function issueHtml(i, k, where) {
     const show = i.field === "link" ? "" : ` <button class="btn-link" data-issue="${k}">Show</button>`;
-    const quote = i.field === "link" ? esc(i.url) : esc(i.text);
+    let quote = i.field === "link" ? esc(i.url) : esc(i.text);
+    if (i.field !== "link" && i.words && i.words.length) {
+      // Bold the trigger words inside the quoted sentence (offsets are relative to the field).
+      let html = "", pos = i.start;
+      for (const w of i.words) {
+        html += esc(i.text.slice(pos - i.start, w.start - i.start)) + `<b class="trigger">${esc(w.text)}</b>`;
+        pos = w.end;
+      }
+      quote = html + esc(i.text.slice(pos - i.start));
+    }
     return `<li><span class="where">${where[i.field]}</span><span class="quote">“${quote}”</span>: ${esc(i.message)}${show}</li>`;
   }
 

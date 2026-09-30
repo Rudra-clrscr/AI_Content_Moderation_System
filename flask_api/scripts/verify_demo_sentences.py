@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 GUIDE = ROOT / "DEMO_GUIDE.md"
 DEMO_PAGE = ROOT / "app" / "static" / "demo.html"
 TYPES = {"product listing": "product_listing", "business profile": "business_profile",
-         "post": "post", "advertisement": "advertisement"}
+         "post": "post", "advertisement": "advertisement", "article": "article"}
 RULE_ID = re.compile(r"`([a-z]+\.[a-z_]+)`")
 
 

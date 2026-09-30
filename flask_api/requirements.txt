@@ -7,3 +7,9 @@ celery[redis]>=5.5
 waitress>=3.0
 pyodbc>=5.0
 python-dotenv>=1.0
+pypdf>=5.1                 # text extraction for POST /v1/moderate/pdf (pure Python, no native deps)
+# OCR for scanned PDF pages (pdf.ocr in settings.yaml). Optional: without them the service runs
+# exactly as before and refuses pages it can't read. RapidOCR is PaddleOCR's models on ONNX, so
+# it reuses the onnxruntime above rather than adding a second inference stack.
+rapidocr>=3.0
+pypdfium2>=4.30            # renders a page to pixels; handles CCITT/JBIG2 scans that extractors refuse

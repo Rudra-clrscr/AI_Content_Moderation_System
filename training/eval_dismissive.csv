@@ -1,0 +1,44 @@
+text,label,group
+"The freight charge they added at the last minute was absurd.",0,absurd_about_thing
+"It is ridiculous that a simple GST correction takes six weeks.",0,absurd_about_thing
+"Their minimum order quantity is laughable for a small retailer like us.",0,absurd_about_thing
+"The warranty terms are nonsense; nothing is actually covered.",0,absurd_about_thing
+"A pathetic excuse for packaging, three boxes were crushed.",0,absurd_about_thing
+"The exchange rate they used on the invoice is a joke.",0,absurd_about_thing
+"Honestly the waiting time at their warehouse is a joke.",0,absurd_about_thing
+"She said the absurd penalty clause came from their legal team, not from her.",0,absurd_about_thing
+"We think the revised return policy is ridiculous, but the fabric quality is still good.",0,absurd_about_thing
+"I disagree with his approach to pricing, though he explained his reasoning clearly.",0,professional_criticism
+"His quotation was unrealistic for our budget, so we went with another mill.",0,professional_criticism
+"He misread our drawing and machined the part 2 mm short. We resent the file.",0,professional_criticism
+"Her lead time estimate was too optimistic and the order slipped by ten days.",0,professional_criticism
+"Their technical answer was not detailed enough for our compliance team.",0,professional_criticism
+"We do not agree with their assessment of demand for this season.",0,professional_criticism
+"His costing sheet looks wrong to us; we have asked for a revised version.",0,professional_criticism
+"He is new to this category and still learning, so we inspect every consignment.",0,professional_criticism
+"I would not use them for urgent work, but their standard orders are reliable.",0,professional_criticism
+"The supplier disagreed with our test results and sent the sample to a third-party lab.",0,professional_criticism
+"Our auditor found three gaps in their process and they fixed all of them.",0,professional_criticism
+"His way of thinking is absurd and he should not be in this trade.",1,dismissive
+"Her ideas about this market are laughable.",1,dismissive
+"He has absolutely no clue how importing works.",1,dismissive
+"Their whole approach is ridiculous, they clearly do not understand their own product.",1,dismissive
+"Everything he says about pricing is nonsense.",1,dismissive
+"Don't bother explaining the specification, she will never understand it.",1,dismissive
+"He talks constantly and understands nothing.",1,dismissive
+"His opinion on quality standards is worth nothing at all.",1,dismissive
+"Anyone who thinks the way that man does should not be allowed to trade here.",1,dismissive
+"She is completely out of her depth and the whole market can see it.",1,dismissive
+"Reading their emails is painful, none of it makes any sense.",1,dismissive
+"He is the most incompetent supplier I have ever had the misfortune to deal with.",1,dismissive
+"Our new supplier partnership\n\nWe signed with a mill in Erode this spring. The first three lots were clean. Their costing sheet had an error that we asked them to revise. Overall we are happy with the relationship.",0,article
+"Notes from the trade fair\n\nThe stall rent this year was absurd for the space we got. Footfall was lower than last year. We still met four serious buyers. Next year we will book earlier.",0,article
+"Notes from the trade fair\n\nThe organiser is a clueless fool who has no idea how a trade fair should be run. Footfall was lower than last year. We still met four serious buyers.",1,article
+"Bhai sahab, thoda rate kam kar dijiye to order pakka hai.",0,hinglish_heldout
+"Humein 200 meter kapda chahiye, kya aap supply kar sakte hain?",0,hinglish_heldout
+"Pichle mahine jo order diya tha uska bill abhi tak nahi mila.",0,hinglish_heldout
+"Godown mein jagah kam hai isliye abhi zyada stock nahi le sakte.",0,hinglish_heldout
+"Itne paise lagane ke baad bhi machine chali nahi, bahut dukh hua.",0,hinglish_heldout
+"Aapke yahan se maal mangwa kar dekha, theek thaak nikla.",0,hinglish_heldout
+"Usko apne kaam ki koi samajh nahi hai, bilkul bekar aadmi hai.",1,hinglish_heldout
+"Unki soch hi galat hai, aise logon ko business nahi karna chahiye.",1,hinglish_heldout

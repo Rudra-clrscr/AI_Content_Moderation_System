@@ -75,6 +75,13 @@
   .issues { margin: 10px 0 12px; padding-left: 20px; }
   .issues li { margin: 4px 0; }
   .issues .quote { font-weight: 600; }
+  .issues .trigger { background: var(--reject-bg); color: var(--reject); border-radius: 3px; padding: 0 2px; }
+  .pdfrow { margin-top: 10px; align-items: flex-start; }
+  .filebtn { border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer;
+             background: var(--panel); white-space: nowrap; font-size: 13px; }
+  .filebtn:hover { border-color: var(--accent); }
+  .pagetag { display: inline-block; font: 600 11px var(--mono); background: var(--panel);
+             border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin-right: 6px; }
   .cats { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
   .why { color: var(--muted); }
   .why b { color: var(--ink); }
@@ -128,12 +135,20 @@
       <option value="business_profile">Business profile</option>
       <option value="post">Post</option>
       <option value="advertisement">Advertisement</option>
+      <option value="article">Article</option>
     </select>
     <label for="content" style="margin-top:10px">Content</label>
     <textarea id="content" placeholder="Paste a listing, profile, post or ad…"></textarea>
     <div class="row">
       <span class="grow" id="count">0 characters · Ctrl+Enter to submit</span>
       <button class="primary" id="go">Moderate</button>
+    </div>
+
+    <div class="row pdfrow">
+      <label class="filebtn" for="pdf">Upload a PDF…</label>
+      <input type="file" id="pdf" accept="application/pdf,.pdf" hidden>
+      <span class="grow why" id="pdfname">Its text is extracted and checked the same way. Scanned
+        (image-only) PDFs are refused, because text nobody can read can't be checked.</span>
     </div>
 
     <div class="examples" id="examples"></div>
@@ -160,7 +175,9 @@
 const EXAMPLES = [
   { tag: "allow", note: "clean listing", type: "product_listing",
     text: "Industrial stainless steel valves, sizes 15mm to 300mm. Test certificates provided with every order." },
-  { tag: "revise", note: "sentence: a get-rich-quick line in a normal listing; only that sentence is highlighted", type: "product_listing",
+  { tag: "allow", note: "an everyday article, not business prose: allowed (v3 flagged prose like this)", type: "article",
+    text: "A rainy day at the shop\n\nIt rained all afternoon and the street in front of our shop flooded. We closed early and drank tea with the neighbours. My daughter made paper boats and sailed them in the water. It was a quiet but happy day." },
+  { tag: "reject", note: "model: a get-rich-quick line in a normal listing; that sentence and its trigger words are highlighted to rewrite", type: "product_listing",
     text: "High quality PVC pipes, ISI marked, available in all sizes. Earn 50000 per week from home, no experience needed." },
   { tag: "revise", note: "gate: off-platform payment highlighted for the author to remove", type: "product_listing",
     text: "Cotton bedsheets in king and queen sizes, 300 thread count. We also accept payment in crypto." },
@@ -174,14 +191,14 @@ const EXAMPLES = [
     text: "Our supplier is a scumbag, never order from them" },
   { tag: "reject", note: "gate: blocked phishing domain", type: "post",
     text: "Verify your seller account at paypa1-verify.example today" },
-  { tag: "reject", note: "gate: insult aimed at a business (he/she/they + insult)", type: "post",
-    text: "Their owner is a pathetic clown, avoid this shop" },
-  { tag: "reject", note: "targeted: post looks fine overall, one sentence threatens them", type: "post",
+  { tag: "reject", note: "gate: insult aimed at someone, in either order (he/she/they + insult in one sentence)", type: "post",
+    text: "What a pathetic clown their owner is, avoid this shop" },
+  { tag: "reject", note: "model: a friendly review with a threat in it; the threat sentence is highlighted", type: "post",
     text: "Excellent packaging and prompt delivery on every order. They should all be burned alive along with their shop." },
-  { tag: "revise", note: "model: the work-from-home pitch is highlighted for the author to remove", type: "product_listing",
-    text: "LED panel lights, 12W to 48W, BIS certified. Test certificates provided with every order. Work from home and earn big, message us for details." },
-  { tag: "reject", note: "sentence: a scam sentence hidden in a clean listing", type: "product_listing",
-    text: "Solar panels 330W mono PERC, 25 year warranty. Limited slots for dealers, register now with a small fee." },
+  { tag: "reject", note: "model: leetspeak is read word by word (F1rst c0py -> First copy)", type: "product_listing",
+    text: "Handmade leather wallets and belts. F1rst c0py R0lex w4tches ava1lable." },
+  { tag: "reject", note: "model: one scam sentence inside a long article; only it is highlighted, with its trigger words", type: "article",
+    text: "How we grew our pump business\n\nWe started as a two-person workshop in Rajkot in 1998. Today we export pump parts to eleven countries. Our biggest lesson was to never compromise on castings. Every batch is tested in our own lab. Dealers can join by paying a small registration fee and earn 50000 per week. We still inspect every piece ourselves before it is packed. Our team has grown to sixty people." },
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -214,7 +231,9 @@ async function loadStatus() {
       `<span class="chip">mode <b>${esc(s.mode)}</b></span>`,
       s.model_version ? `<span class="chip">model <b>${esc(s.model_version)}</b></span>` : "",
       `<span class="chip">gate rules <b>${esc(s.gate_rules)}</b></span>`,
-      `<span class="chip">allow ≤ <b>${fmt(thresholds.allow_max, 2)}</b> · revise · reject ≥ <b>${fmt(thresholds.reject_min, 2)}</b> (risk)</span>`,
+      oneBoundary()
+        ? `<span class="chip">allow ≤ <b>${fmt(thresholds.allow_max, 2)}</b> · reject &gt; <b>${fmt(thresholds.reject_min, 2)}</b> (risk)</span>`
+        : `<span class="chip">allow ≤ <b>${fmt(thresholds.allow_max, 2)}</b> · revise · reject ≥ <b>${fmt(thresholds.reject_min, 2)}</b> (risk)</span>`,
     ];
     $("status").innerHTML = chips.join("");
   } catch { $("status").innerHTML = `<span class="chip bad">service unreachable</span>`; }
@@ -223,15 +242,36 @@ async function loadStatus() {
 async function moderate() {
   const content = $("content").value;
   if (!content.trim()) { $("content").focus(); return; }
+  await submit(() => fetch("/v1/moderate", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, content_type: $("ctype").value, content_id: `DEMO-${history.length + 1}` }) }));
+}
+
+// PDF: the same pipeline, but the text comes out of the file. The response carries a page map,
+// so each issue can be shown with the page it was found on.
+$("pdf").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  $("pdfname").textContent = `${file.name} · ${(file.size / 1024).toFixed(0)} KB — checking…`;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("content_type", $("ctype").value);
+  form.append("content_id", `DEMO-PDF-${history.length + 1}`);
+  await submit(() => fetch("/v1/moderate/pdf", { method: "POST", body: form }));
+  $("pdfname").textContent = `${file.name} · ${(file.size / 1024).toFixed(0)} KB`;
+  ev.target.value = "";
+});
+
+async function submit(send) {
   $("go").disabled = true;
   const t0 = performance.now();
   try {
-    const r = await fetch("/v1/moderate", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, content_type: $("ctype").value, content_id: `DEMO-${history.length + 1}` }) });
+    const r = await send();
     const body = await r.json();
     const roundTrip = performance.now() - t0;
     if (!r.ok) return showError(r.status, body);
     if (body.status === "pending") return showPending(body);
+    if (body.pdf) $("content").value = body.content;   // show what was actually checked
+    updateCount();
     lastResult = body;
     showResult(body, roundTrip);
     history.unshift({ ...body, roundTrip }); renderHistory();
@@ -241,7 +281,13 @@ async function moderate() {
 
 function showError(status, body) {
   const e = body.error || {};
-  $("result").innerHTML = `<h2>Decision</h2><div class="error"><b>HTTP ${status}</b> · ${esc(e.code || "error")}<br>${esc(e.message || "")}</div>
+  // A refused PDF is a decision, not a malfunction: nothing was published because nothing could be read.
+  const refused = String(e.code || "").startsWith("pdf_");
+  $("result").innerHTML = `<h2>Decision</h2>
+    <div class="${refused ? "verdict" : "error"}">
+      ${refused ? `<span class="badge reject">not accepted</span><span class="why">${esc(e.message)}</span>`
+                : `<b>HTTP ${status}</b> · ${esc(e.code || "error")}<br>${esc(e.message || "")}`}
+    </div>
     <details open><summary>Response</summary><pre>${esc(JSON.stringify(body, null, 2))}</pre></details>`;
 }
 
@@ -251,28 +297,34 @@ function showPending(body) {
     <details open><summary>Response</summary><pre>${esc(JSON.stringify(body, null, 2))}</pre></details>`;
 }
 
+// v4 uses one boundary (allow_max == reject_min): risk <= 0.5 allow, > 0.5 reject. Same rule as app/routing.py.
+const oneBoundary = () => thresholds.allow_max === thresholds.reject_min;
+const rejects = (s) => s > thresholds.allow_max && s >= thresholds.reject_min;
+const rejectRule = () => (oneBoundary() ? `> ${thresholds.reject_min}` : `≥ ${thresholds.reject_min}`);
+
 function reason(b) {
   const t = thresholds;
   const blocks = b.gate_matches.filter((m) => m.action === "block");
   const revises = b.gate_matches.filter((m) => m.action === "revise");
   if (b.risk_score === null) return `Blocked by Layer 1 rule <b>${esc(blocks[0]?.rule_id)}</b>. The model was not called.`;
   if (b.decided_by === "targeted") {
-    const hit = b.targeted_segments.find((x) => x.risk_score >= t.reject_min)
+    const hit = b.targeted_segments.find((x) => rejects(x.risk_score))
       || b.targeted_segments.find((x) => x.risk_score > t.allow_max) || b.targeted_segments[0];
     return `The whole text scored only ${fmt(b.risk_score)}, but the sentence aimed at someone, ` +
       `“<b>${esc(b.content.slice(hit.start, hit.end))}</b>”, scored ${fmt(hit.risk_score)}` +
-      (b.decision === "reject" ? ` ≥ ${t.reject_min}.` : `, so the author is asked to rephrase it.`);
+      (b.decision === "reject" ? ` ${rejectRule()}.` : `, so the author is asked to rephrase it.`);
   }
   if (b.decided_by === "sentence") {
     const w = b.sentence_scores.reduce((a, c) => (c.risk_score > a.risk_score ? c : a));
-    return `The whole post scored only ${fmt(b.risk_score)}, but one sentence on its own, ` +
-      `“<b>${esc(b.content.slice(w.start, w.end))}</b>”, scored ${fmt(w.risk_score)} ≥ ${t.reject_min}.`;
+    const what = w.kind === "window" ? "a run of words inside a long sentence" : "one sentence on its own";
+    return `The whole post scored only ${fmt(b.risk_score)}, but ${what}, ` +
+      `“<b>${esc(b.content.slice(w.start, w.end))}</b>”, scored ${fmt(w.risk_score)} ${rejectRule()}.`;
   }
   if (b.decided_by === "gate")
     return `The model alone would allow this (risk ${fmt(b.risk_score)}), but rule <b>${esc(revises[0]?.rule_id)}</b> asks the author to fix it.`;
   const s = b.risk_score;
-  const why = s >= t.reject_min ? `risk ${fmt(s)} ≥ ${t.reject_min}`
-    : s <= t.allow_max ? `risk ${fmt(s)} ≤ ${t.allow_max}`
+  const why = s <= t.allow_max ? `risk ${fmt(s)} ≤ ${t.allow_max}`
+    : rejects(s) ? `risk ${fmt(s)} ${rejectRule()}, so the author must rewrite it`
     : `${t.allow_max} < risk ${fmt(s)} < ${t.reject_min}, so the author is asked to revise`;
   // The model's middle label is called "review"; it means "unsure", not a human-review step.
   const said = b.predicted_label === "review" ? "Model is <b>unsure</b>" : `Model says <b>${esc(b.predicted_label)}</b>`;
@@ -297,14 +349,24 @@ function nudge(b) {
   if (!fb) return "";
   const issues = fb.issues || [];
   const cats = (fb.categories || []).map((c) => `<span class="chip">${esc(c)}</span>`).join("");
-  const list = issues.map((i) =>
-    `<li><span class="quote">“${esc(b.content.slice(i.start, i.end))}”</span>: ${esc(i.message)}</li>`).join("");
+  // Trigger words from the word-by-word scan are shown in bold inside their sentence.
+  const quote = (i) => {
+    let out = "", pos = i.start;
+    for (const [s, e] of i.words || []) { out += esc(b.content.slice(pos, s)) + `<b class="trigger">${esc(b.content.slice(s, e))}</b>`; pos = e; }
+    return out + esc(b.content.slice(pos, i.end));
+  };
+  const pageOf = (off) => (b.pdf?.pages || []).find((p) => off >= p.start && off < p.end)?.page;
+  const list = issues.map((i) => {
+    const page = pageOf(i.start);
+    const tag = page ? `<span class="pagetag">page ${page}</span>` : "";
+    return `<li>${tag}<span class="quote">“${quote(i)}”</span>: ${esc(i.message)}</li>`;
+  }).join("");
   return `<div class="nudge nudge-${b.decision}">
       <div class="nudge-title">${b.decision === "revise" ? "✎" : "⛔"} ${esc(fb.title)}</div>
       <p>${esc(fb.message)}</p>
       ${cats ? `<div class="cats">${cats}</div>` : ""}
       ${issues.length ? `<div class="preview">${highlight(b.content, issues)}</div><ol class="issues">${list}</ol>` : ""}
-      ${b.decision === "revise" ? `<button class="primary" id="editPost">Edit post</button>` : ""}
+      ${issues.length ? `<button class="primary" id="editPost">Rewrite post</button>` : ""}
     </div>`;
 }
 
@@ -312,7 +374,9 @@ function showResult(b, roundTrip) {
   const gate = b.risk_score === null;   // model skipped (blocked by a rule)
   const risk = b.risk_score;
   const labels = b.label_scores ? Object.entries(b.label_scores).sort((a, c) => c[1] - a[1]) : [];
-  const colour = { safe: "var(--allow)", review: "var(--review)", reject: "var(--reject)" };
+  const colour = { safe: "var(--allow)", review: "var(--review)", reject: "var(--reject)", unsafe: "var(--reject)" };
+  const a = thresholds.allow_max * 100, r = thresholds.reject_min * 100;
+  const meterBg = `linear-gradient(to right, var(--allow) 0 ${a}%, var(--review) ${a}% ${r}%, var(--reject) ${r}% 100%)`;
   $("result").innerHTML = `
     <h2>Decision</h2>
     <div class="pipeline">
@@ -327,7 +391,7 @@ function showResult(b, roundTrip) {
     <div class="verdict"><span class="badge ${b.decision}">${b.decision}</span><span class="why">${reason(b)}</span></div>
     ${nudge(b)}
     ${gate ? "" : `
-      <div class="meter"><div class="pin ${risk < 0.15 ? "lo" : risk > 0.85 ? "hi" : ""}" style="left:${Math.min(100, risk * 100)}%"><span>risk ${fmt(risk)} · safety ${fmt(1 - risk)}</span></div></div>
+      <div class="meter" style="background:${meterBg}"><div class="pin ${risk < 0.15 ? "lo" : risk > 0.85 ? "hi" : ""}" style="left:${Math.min(100, risk * 100)}%"><span>risk ${fmt(risk)} · safety ${fmt(1 - risk)}</span></div></div>
       <div class="scale"><span style="left:0">0 · allow</span><span style="left:${thresholds.allow_max * 100}%">${thresholds.allow_max}</span><span style="left:${thresholds.reject_min * 100}%">${thresholds.reject_min}</span><span style="left:100%">reject · 1</span></div>`}
     <div class="grid2">
       <div>

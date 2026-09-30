@@ -3,9 +3,10 @@
     pip install playwright            # uses your installed Chrome; no browser download
     python scripts/e2e_articles.py --url http://127.0.0.1:8000 [--shots screenshots/]
 
-Start the server with DEMO_PAGE=1 first. It covers publish -> allow, revise with
-highlights (including across formatting), Show, stale feedback after edits,
-reopening "Needs changes", reject, link URLs, drafts (no moderation call), the
+Start the server with DEMO_PAGE=1 first. It covers publish -> allow, model reject
+(risk > 0.5) with the sentence and trigger words highlighted, Show, stale feedback
+after edits, reopening "Rejected" to rewrite, gate revise with highlights across
+formatting, gate reject, link URLs, drafts (no moderation call), the
 free-publish quota, fail-closed errors and phone width. It clears this page's
 localStorage in the test browser only.
 """
@@ -41,6 +42,10 @@ def highlights(page):
     return page.evaluate("() => CSS.highlights.has('mod-revise') ? [...CSS.highlights.get('mod-revise')].map(r => r.toString()) : []")
 
 
+def word_highlights(page):
+    return page.evaluate("() => CSS.highlights.has('mod-word') ? [...CSS.highlights.get('mod-word')].map(r => r.toString()) : []")
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch(channel="chrome", headless=True)
     page = browser.new_page(viewport={"width": 1280, "height": 900})
@@ -63,30 +68,32 @@ with sync_playwright() as p:
     check("allow: listed as published", "Cotton bedsheets for wholesale buyers" in page.inner_text("#list"))
     check("allow: quota now 1 of 2", "1 of 2" in page.inner_text("#quota"))
 
-    # 3. model revise -> only the bad sentence highlighted
+    # 3. model reject (risk > 0.5) -> only the bad sentence highlighted, trigger words marked, rewrite
     write(page, "PVC pipes for contractors", "<p>High quality PVC pipes, ISI marked, available in all sizes. Earn 50000 per week from home, no experience needed.</p>")
     page.click("#publish-btn")
-    page.wait_for_selector(".banner.revise")
+    page.wait_for_selector(".banner.reject")
     hl = highlights(page)
-    check("revise: banner shown", page.is_visible(".banner.revise"))
-    check("revise: highlight is the problem sentence", hl == ["Earn 50000 per week from home, no experience needed"], str(hl))
-    check("revise: modal stays open", page.is_visible("#modal"))
-    check("revise: not published, quota unchanged", "1 of 2" in page.inner_text("#quota"))
-    SHOTS and page.screenshot(path=f"{SHOTS}/a2_revise.png")
+    check("model reject: banner shown", page.is_visible(".banner.reject"))
+    check("model reject: highlight is the problem sentence", hl == ["Earn 50000 per week from home, no experience needed"], str(hl))
+    check("model reject: trigger words marked", len(word_highlights(page)) >= 1 and page.locator(".issues .trigger").count() >= 1,
+          str(word_highlights(page)))
+    check("model reject: modal stays open to rewrite", page.is_visible("#modal"))
+    check("model reject: not published, quota unchanged", "1 of 2" in page.inner_text("#quota"))
+    SHOTS and page.screenshot(path=f"{SHOTS}/a2_model_reject.png")
     page.locator(".issues li", has_text="Body").locator("[data-issue]").first.click()
     sel = page.evaluate("() => window.getSelection().toString()")
-    check("revise: Show selects the text", sel == "Earn 50000 per week from home, no experience needed", sel)
+    check("model reject: Show selects the text", sel == "Earn 50000 per week from home, no experience needed", sel)
     page.keyboard.press("End")
     page.keyboard.type(" Thanks.")
-    check("revise: editing marks feedback as stale", "Publish again to re-check" in page.inner_text("#banner") and highlights(page) == [])
+    check("model reject: editing marks feedback as stale", "Publish again to re-check" in page.inner_text("#banner") and highlights(page) == [])
     page.click("#close-btn")
-    page.click("[data-tab='needs_changes']")
-    check("revise: kept under Needs changes", "PVC pipes for contractors" in page.inner_text("#list"))
-    check("revise: row says how many parts need changes", "1 part needs changes" in page.inner_text("#list"), page.inner_text("#list")[:160])
+    page.click("[data-tab='rejected']")
+    check("model reject: kept under Rejected", "PVC pipes for contractors" in page.inner_text("#list"))
+    check("model reject: row says what to rewrite", "1 part to rewrite" in page.inner_text("#list"), page.inner_text("#list")[:160])
 
-    # 4. reopen needs-changes article -> feedback + highlight restored
+    # 4. reopen the rejected article -> feedback + highlight restored, ready to rewrite
     page.click("[data-action='edit']")
-    page.wait_for_selector(".banner.revise")
+    page.wait_for_selector(".banner.reject")
     check("reopen: feedback restored", highlights(page) == ["Earn 50000 per week from home, no experience needed"], str(highlights(page)))
     page.click("#close-btn")
 
@@ -100,12 +107,12 @@ with sync_playwright() as p:
     SHOTS and page.screenshot(path=f"{SHOTS}/a3_rule_revise.png")
     page.click("#close-btn")
 
-    # 6. reject (gate block) -> reason, no highlights
+    # 6. reject (gate block) -> reason, and the matched phrase highlighted to rewrite
     write(page, "Investment opportunity", "<p>Invest now and double your money in 7 days.</p>")
     page.click("#publish-btn")
     page.wait_for_selector(".banner.reject")
     check("reject: banner with policy area", "fraud and scams" in page.inner_text("#banner"))
-    check("reject: no highlights (anti-evasion)", highlights(page) == [])
+    check("reject: matched phrase highlighted to rewrite", highlights(page) == ["double your money"], str(highlights(page)))
     SHOTS and page.screenshot(path=f"{SHOTS}/a4_reject.png")
     page.click("#close-btn")
     page.click("[data-tab='rejected']")
