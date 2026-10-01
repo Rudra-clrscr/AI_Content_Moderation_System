@@ -6,9 +6,9 @@ mode: sync                 # sync  -> inference inline, final decision in the re
 
 model:
   backend: onnx            # onnx | stub   (stub = dev only, never deploy)
-  dir: models/v4           # live model. To roll back, put a v3 bundle next to it and set
-                           # dir: models/v3 (or MODEL_DIR=...) AND the v3 thresholds below.
-                           # v1 and v3 are no longer tracked in the repo (see flask_api/README.md);
+  dir: models/v5           # live model. To roll back, put a v4 bundle next to it and set
+                           # dir: models/v4 (or MODEL_DIR=...).
+                           # v1, v3 and v4 are no longer tracked in the repo;
                            # each bundle's model_meta.json carries its own label_weights.
   intra_op_threads: 4      # Keep workers x threads <= CPU cores. Measured on this 6-core host
                            # (p95 for one call): 2 threads 38 ms, 4 threads 30 ms, 6 threads 29 ms,

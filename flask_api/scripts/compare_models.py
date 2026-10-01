@@ -157,9 +157,12 @@ def wilson(k, n, z=1.96):
 
 def sigma_level(defect_rate):
     """Six Sigma convention: long-term yield -> z, plus the 1.5-sigma shift."""
-    if defect_rate <= 0:
-        return float("inf")
-    return NormalDist().inv_cdf(1 - defect_rate) + 1.5
+    if defect_rate <= 1e-12:
+        return 6.0
+    if defect_rate >= 1.0 - 1e-12:
+        return 0.0
+    p = min(max(1.0 - defect_rate, 1e-12), 1.0 - 1e-12)
+    return NormalDist().inv_cdf(p) + 1.5
 
 
 def six_sigma(results):
