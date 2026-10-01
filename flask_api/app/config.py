@@ -175,7 +175,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         triage=triage,
         pdf=PdfLimits(
             enabled=_as_bool(env("PDF_UPLOAD", pdf.get("enabled", True))),
-            max_bytes=int(pdf.get("max_bytes", 10_000_000)),
+            max_bytes=int(pdf.get("max_bytes", 25_000_000)),
             max_pages=int(pdf.get("max_pages", 100)),
             max_chars=int(pdf.get("max_chars", 100_000)),
             min_chars_per_page=int(pdf.get("min_chars_per_page", 20)),
@@ -190,7 +190,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         ),
         ocr=OcrEngine(OcrConfig(
             enabled=_as_bool(env("PDF_OCR", ocr.get("enabled", True))),
-            max_pages=int(ocr.get("max_pages", 10)),
+            max_pages=int(ocr.get("max_pages", 60)),
             dpi=int(ocr.get("dpi", 200)),
             max_pixels=int(ocr.get("max_pixels", 4_000_000)),
             min_chars=int(ocr.get("min_chars", 20)),

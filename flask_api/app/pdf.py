@@ -54,7 +54,7 @@ class PdfError(Exception):
 @dataclass(frozen=True)
 class PdfLimits:
     enabled: bool = True
-    max_bytes: int = 10_000_000          # 10 MB
+    max_bytes: int = 25_000_000          # 25 MB
     max_pages: int = 100
     max_chars: int = 100_000             # extracted text; longer documents are rejected, not truncated
     min_chars_per_page: int = 20         # below this, a page with images is treated as unreadable

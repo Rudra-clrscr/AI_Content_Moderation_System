@@ -65,7 +65,7 @@ media:                      # POST /v1/moderate/media: attachments on an article
 
 pdf:                        # POST /v1/moderate/pdf: extract the text, then moderate it normally
   enabled: true             # PDF_UPLOAD=0 turns the endpoint off
-  max_bytes: 10000000       # 10 MB upload
+  max_bytes: 25000000       # 25 MB upload
   max_pages: 100
   max_chars: 100000         # extracted text. Longer documents are rejected, never truncated:
                             # truncating would leave the tail unchecked but still say "allowed".
@@ -80,7 +80,7 @@ pdf:                        # POST /v1/moderate/pdf: extract the text, then mode
     enabled: true           # on onnxruntime). PDF_OCR=0 turns it off and those pages go back to
                             # being refused. It widens what can be ACCEPTED; it is not a security
                             # control, because a page it fails to read is still refused.
-    max_pages: 10           # per upload: ~0.5 s per page on CPU, so this bounds the request
+    max_pages: 60           # per upload: ~0.5 s per page on CPU, bounds long catalogs
     dpi: 200                # enough for body text; pages stay around 2 megapixels
     max_pixels: 4000000     # hard cap per page whatever the dpi implies (hostile page sizes)
     min_chars: 20           # OCR must recover at least this much, or the page stays unreadable

@@ -60,6 +60,17 @@ rules:
   spam.blacklisted_domain: Remove the link to a blocked website.
   spam.url_shortener: Use the full web address instead of a shortened link.
   contact.messenger_redirect: Buyers can contact you through BONC; you don't need to share a phone number.
+  evasion.off_platform_b2b: >-
+    Transactions must be conducted on BONC. Remove requests to bypass the portal,
+    avoid platform escrow, or settle off the books.
+  fraud.counterfeit_certification: >-
+    Offering counterfeit goods, replica products, or fake/tampered certifications
+    is strictly prohibited.
+  threat.property_sabotage: >-
+    Threats of arson, sabotage, property damage, or violence are strictly prohibited.
+  defamation.corporate_smear: >-
+    Defamatory statements, unverified insolvency claims, and smear campaigns against
+    businesses are prohibited.
 
 # Instructions for text highlighted by the model.
 model:

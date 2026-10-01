@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class OcrConfig:
     enabled: bool = True
-    max_pages: int = 10          # pages per upload; OCR is ~0.5 s each, so this bounds the request
+    max_pages: int = 60          # pages per upload; ~0.5 s each, bounds catalogs
     dpi: int = 200               # 200 dpi is enough for body text and keeps pages ~2 MP
     max_pixels: int = 4_000_000  # hard cap per page, whatever the dpi works out to
     min_chars: int = 20          # below this the page is still unreadable

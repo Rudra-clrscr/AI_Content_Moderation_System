@@ -207,10 +207,11 @@ def moderate_media():
                       "this file type cannot be checked. Attach an image, a video or a PDF.",
                       kind=kind)
 
-    if len(text) > svc.settings.max_chars:
+    char_limit = pdf_limits.max_chars if kind == "pdf" else svc.settings.max_chars
+    if len(text) > char_limit:
         return _error(413, "content_too_long",
                       f"the file's text is {len(text)} characters, over the "
-                      f"{svc.settings.max_chars} character limit")
+                      f"{char_limit} character limit")
 
     return _moderate(ModerationRequest(text, content_type, content_id), extra)
 
