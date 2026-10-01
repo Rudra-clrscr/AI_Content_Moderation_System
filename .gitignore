@@ -19,3 +19,6 @@ flask_api/models/ocr/
 # Test output directories
 flask_api/scripts/test_generated_pdfs/
 flask_api/scripts/test_stress_pdfs/
+flask_api/scripts/test_50_negatives_gen/
+flask_api/scripts/*.json
+flask_api/scripts/*.txt

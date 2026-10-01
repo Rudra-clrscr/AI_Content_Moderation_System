@@ -17,8 +17,8 @@ from app.feedback import Feedback, Issue
 from app.gate import Gate, GateResult
 from app.model import ModelRegistry, ScoreResult
 from app.routing import Decision, Thresholds, most_severe, route
-from app.targeted import (SentenceScan, TargetedAbuse, WordScan, deobfuscate, drop_word, scan_spans, word_spans,
-                          word_windows)
+from app.targeted import (SentenceScan, TargetedAbuse, WordScan, deobfuscate, drop_word,
+                          is_scannable_sentence, scan_spans, word_spans, word_windows)
 from app.triage import TriageFilter
 
 log = logging.getLogger(__name__)
@@ -315,14 +315,18 @@ class Pipeline:
     def _scan_units(self, content: str) -> list[tuple[int, int, str]]:
         """Spans to score on their own: every sentence (when there are 2+; fragments under 3 words
         merged into a neighbour), plus overlapping word windows over sentences too long to read
-        undiluted (when the word scan is on)."""
+        undiluted (when the word scan is on).
+
+        Non-sentential noise (pure comma-separated lists of proper nouns/logos, catalog headings,
+        or fragments lacking syntax) is filtered out: isolated tokens lack context and produce
+        erratic out-of-domain risk scores."""
         spans = scan_spans(content)
         units = [(s, e, "sentence") for s, e in spans] if len(spans) >= 2 else []
         if self.word_scan.enabled:
             ws = self.word_scan
             for s, e in spans:
                 units += [(a, b, "window") for a, b in word_windows(content, s, e, ws.window_words, ws.window_stride)]
-        return units
+        return [u for u in units if is_scannable_sentence(content[u[0]:u[1]])]
 
     def _shortlist(self, variants: list[tuple[int, int, str]], limit: int) -> list[tuple[int, int, str]]:
         """The words most worth spending a model call on, ranked by the linear pre-filter.

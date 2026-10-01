@@ -297,3 +297,44 @@ rules:
     description: WhatsApp/Telegram contact numbers. Recorded only; common in legitimate Indian B2B listings.
     patterns:
       - '\b(?:whatsapp|telegram|signal)\b.{0,20}\+?\d[\d\s-]{7,}'
+
+  - id: evasion.off_platform_b2b
+    category: fraud
+    action: block
+    description: B2B off-platform payment evasion, escrow bypass, and side-deal solicitations.
+    patterns:
+      - '\b(?:off\s+the\s+books|bypass\s+(?:escrow|platform|portal)|outside\s+the\s+portal|settle\s+(?:all\s+transactions\s+)?in\s+raw\s+cash)\b'
+      - '\b(?:skip\s+platform\s+checkout|do\s+not\s+(?:place\s+order|order)\s+on\s+(?:bonc|portal|platform)|do\s+not\s+generate\s+platform\s+purchase\s+order)\b'
+      - '\b(?:wire\s+funds\s+directly\s+to\s+director\s+account|side-deal\s+rate|route\s+this\s+shipment\s+outside\s+the\s+portal)\b'
+      - '\b(?:orders?\s+(?:on|through)\s+portal\s+will\s+be\s+cancelled|all\s+orders\s+on\s+portal\s+will\s+be\s+cancelled)\b'
+      - '\b(?:platform\s+pe\s+order\s+mat\s+karo|platform\s+ko\s+beech\s+mein\s+mat\s+laao)\b'
+      - '\btransfer\s+advance\s+token\s+to\s+(?:our\s+)?personal\s+paytm\b'
+      - '\bsave\s+commission\b.{0,30}\b(?:whatsapp|upi|direct)\b'
+
+  - id: fraud.counterfeit_certification
+    category: fraud
+    action: block
+    description: Counterfeit goods, duplicate industrial OEM parts, and fake/fabricated certifications.
+    patterns:
+      - '\b(?:counterfeit|cloned|fabricated|unauthorized|duplicated|stamped\s+with\s+counterfeit)\s+(?:isi|bis|hallmark|\d+\s+bis\s+hallmark|iso|test\s+reports?|blister\s+strips?|trademarks?|oem\s+blue\s+boxes|brand\s+blister|security\s+holographic\s+seals|castrol|mobil|rolex|omega|nike|adidas|louis\s+vuitton|gucci|skf|timken)\b'
+      - '\b(?:commercial\s+replica|high-grade\s+replica)\s+(?:skf|timken|bearings|louis|gucci)\b'
+      - '\b(?:replica|cloned)\s+(?:skf|timken)\s+bearings\b'
+      - '\b(?:counterfeit|replica)\s+branded\s+presentation\s+box\b'
+      - '\bphotoshop\s+modified\s+certificates\b'
+
+  - id: threat.property_sabotage
+    category: abuse
+    action: block
+    description: Threats of arson, sabotage, chemical damage, or industrial destruction.
+    patterns:
+      - '\b(?:catch(?:ing)?\s+fire|turned?\s+into\s+ash(?:es)?|burn\s+(?:down|to\s+ashes)|pour\s+(?:hydrochloric\s+)?acid)\b'
+      - '\b(?:destroy\s+the\s+entire\s+plant|smash\s+your\s+vehicles|bury\s+your\s+business|fumes\s+when\s+the\s+valves\s+open)\b'
+
+  - id: defamation.corporate_smear
+    category: abuse
+    action: block
+    description: Fabricated insolvency, extortion hoaxes, and malicious smear campaigns.
+    patterns:
+      - '\b(?:insolvency\s+bankruptcy\s+proceedings|recover\s+your\s+money\s+before\s+they\s+shut\s+down)\b'
+      - '\b(?:toxic\s+recycled\s+hospital\s+waste|post\s+defamatory\s+videos|delivered\s+to\s+enforcement\s+directorate)\b'
+      - '\bdefective\s+brake\s+cables\s+that\s+will\s+snap\b'

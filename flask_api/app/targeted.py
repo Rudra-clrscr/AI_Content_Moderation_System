@@ -107,6 +107,66 @@ def scan_spans(text: str, min_words: int = MIN_SPAN_WORDS) -> list[tuple[int, in
     return out
 
 
+_GRAMMATICAL_MARKERS = {
+    # Pronouns
+    "i", "me", "my", "myself", "you", "your", "yours", "yourself", "he", "him", "his", "himself",
+    "she", "her", "hers", "herself", "it", "its", "itself", "we", "us", "our", "ours", "ourselves",
+    "they", "them", "their", "theirs", "themselves", "who", "whom", "whose", "what", "which",
+    # Auxiliary & Modal Verbs
+    "is", "am", "are", "was", "were", "be", "been", "being", "have", "has", "had", "having",
+    "do", "does", "did", "done", "doing", "can", "could", "shall", "should", "will", "would",
+    "may", "might", "must",
+    # Common English Verbs (infinitives/stems)
+    "call", "contact", "pay", "send", "give", "get", "make", "take", "see", "know", "think",
+    "want", "look", "come", "go", "say", "tell", "find", "put", "keep", "let", "need", "help",
+    "try", "buy", "sell", "deliver", "order", "provide", "offer", "deal", "win", "deposit",
+    "claim", "earn", "invest", "charge", "refund", "cancel", "arrest", "kill", "die", "burn",
+    "cheat", "scam", "steal", "bypass", "settle", "wire", "click", "visit", "apply", "join",
+    "start", "stop", "ship", "manufacture", "supply", "require", "guarantee",
+    # Common Prepositions & Conjunctions
+    "and", "or", "but", "if", "because", "as", "until", "while", "of", "at", "by", "for", "with",
+    "about", "against", "between", "into", "through", "during", "before", "after", "above", "below",
+    "to", "from", "up", "down", "in", "out", "on", "off", "over", "under", "again", "further",
+    "then", "once", "here", "there", "when", "where", "why", "how", "all", "any", "both", "each",
+    "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same",
+    "so", "than", "too", "very",
+    # Hindi markers
+    "hai", "hain", "ho", "tha", "thi", "the", "karo", "karein", "kare", "kiya", "kijiye",
+    "de", "do", "dedo", "le", "lo", "lelo", "dekh", "dekho", "bhejo", "chahiye", "hoga",
+    "hogi", "honge", "mar", "marenge", "dunga", "denge", "nahi", "mat", "aur", "ya", "par"
+}
+
+
+def is_scannable_sentence(text: str) -> bool:
+    """Whether a span has sufficient grammatical substance to be evaluated by the model
+    as an independent sentence or word window.
+
+    A list of comma-separated startup logos, isolated product codes, or table columns
+    without verbs or syntax markers is excluded: isolated tokens lack linguistic context
+    and produce erratic out-of-domain risk scores without conveying a policy violation.
+    """
+    tokens = re.findall(r"[a-zA-Z\u0900-\u097F]+", text.lower())
+    if not tokens:
+        return False
+    # Comma-separated list check (e.g. 3+ comma-separated names with negligible grammar)
+    commas = text.count(",")
+    marker_count = sum(1 for t in tokens if t in _GRAMMATICAL_MARKERS)
+    if commas >= 3 and (commas / len(tokens)) > 0.20:
+        if (marker_count / len(tokens)) < 0.15:
+            return False
+    # Short phrases or sentences (< 10 tokens) are always scannable
+    if len(tokens) < 10:
+        return True
+    # Long text / word windows: check for grammatical structure
+    inflections = sum(1 for t in tokens if len(t) >= 5 and (t.endswith("ing") or t.endswith("ed") or t.endswith("ize") or t.endswith("ise")))
+    total_syntax = marker_count + inflections
+    if len(tokens) >= 15 and total_syntax < 2:
+        return False
+    if len(tokens) >= 25 and (marker_count / len(tokens)) < 0.10:
+        return False
+    return total_syntax >= 1
+
+
 @dataclass(frozen=True)
 class TargetedAbuse:
     enabled: bool = True
