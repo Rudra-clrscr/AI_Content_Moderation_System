@@ -1,0 +1,115 @@
+{
+  "version": "deberta-v3-small-bonc-v5",
+  "labels": [
+    "safe",
+    "unsafe"
+  ],
+  "safe_label": "safe",
+  "max_length": 256,
+  "activation": "softmax",
+  "pad_to_max_length": false,
+  "model_file": "model.onnx",
+  "label_weights": {
+    "safe": 0.0,
+    "unsafe": 1.0
+  },
+  "batch_invariant": true,
+  "recommended_thresholds": {
+    "allow_max": 0.5,
+    "reject_min": 0.5
+  },
+  "risk": "P(unsafe) after temperature scaling (baked into the graph): <= 0.5 allow, > 0.5 reject",
+  "temperature": 1.601157,
+  "quantization": "fp32_emb16",
+  "quantization_note": "Smallest candidate that agrees with FP32 on >= 99% of decisions AND is batch-invariant (needed to batch sentences/windows/word variants). fp32_emb16 = FP32 compute with only the word-embedding table stored as FP16. Dynamic INT8 drifts with batching; static INT8 loses accuracy on DeBERTa and is slower on CPU.",
+  "quantization_report": {
+    "fp32": {
+      "agreement": 1.0,
+      "max_abs_diff_vs_fp32": 0.0,
+      "batch_max_abs_diff": 0.0,
+      "latency_ms_single": 18.607022499782033,
+      "latency_ms_batch40": 1136.1799000005703,
+      "size_mb": 568.082797,
+      "accuracy_handwritten": 0.9605263157894737
+    },
+    "fp32_emb16": {
+      "agreement": 1.0,
+      "max_abs_diff_vs_fp32": 0.0006918907165527344,
+      "batch_max_abs_diff": 0.0,
+      "latency_ms_single": 16.752324999833945,
+      "latency_ms_batch40": 1098.1746999896131,
+      "size_mb": 371.321401,
+      "accuracy_handwritten": 0.9605263157894737
+    }
+  },
+  "preprocessing": "none: raw text -> tokenizer.json, truncated to max_length, no lowercasing",
+  "training": "microsoft/deberta-v3-small fine-tuned on res/ (relabelled, see training/prepare_data.py) + synthetic_v4 (training/synth_data.py); binary safe/unsafe",
+  "metrics": {
+    "temperature": 1.6011567020630344,
+    "test": {
+      "n": 56168,
+      "accuracy": 0.9952464036462042,
+      "precision": 0.9931543171190281,
+      "recall": 0.9939689279166265,
+      "f1": 0.993561455545106,
+      "auc": 0.9998491949501317,
+      "ece": 0.0015857321027988463,
+      "false_allow": 125,
+      "false_reject": 142,
+      "false_allow_rate": 0.006031072083373541,
+      "false_reject_rate": 0.004006545905987246
+    },
+    "handwritten": {
+      "n": 152,
+      "accuracy": 0.9605263157894737,
+      "precision": 1.0,
+      "recall": 0.90625,
+      "f1": 0.9508196721311475,
+      "auc": 0.9961825284090908,
+      "ece": 0.04531659062692932,
+      "false_allow": 6,
+      "false_reject": 0,
+      "false_allow_rate": 0.09375,
+      "false_reject_rate": 0.0
+    },
+    "eval_handwritten_2": {
+      "n": 55,
+      "accuracy": 0.9818181818181818,
+      "precision": 1.0,
+      "recall": 0.9545454545454546,
+      "f1": 0.9767441860465116,
+      "auc": 0.9986225895316804,
+      "ece": 0.022793561914427714,
+      "false_allow": 1,
+      "false_reject": 0,
+      "false_allow_rate": 0.045454545454545456,
+      "false_reject_rate": 0.0
+    },
+    "eval_dismissive": {
+      "n": 43,
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "auc": 1.0,
+      "ece": 0.0013163750964151914,
+      "false_allow": 0,
+      "false_reject": 0,
+      "false_allow_rate": 0.0,
+      "false_reject_rate": 0.0
+    },
+    "eval_articles": {
+      "n": 12,
+      "accuracy": 0.9166666666666666,
+      "precision": 1.0,
+      "recall": 0.8333333333333334,
+      "f1": 0.9090909090909091,
+      "auc": 0.8611111111111112,
+      "ece": 0.08498168334093255,
+      "false_allow": 1,
+      "false_reject": 0,
+      "false_allow_rate": 0.16666666666666666,
+      "false_reject_rate": 0.0
+    }
+  }
+}

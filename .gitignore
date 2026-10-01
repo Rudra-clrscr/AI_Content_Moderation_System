@@ -2,14 +2,20 @@
 # regenerated exactly by `python training/synth_data.py --seed 4`, so none of it belongs in git.
 res/
 
-# Superseded model bundles. Only the live bundle (models/v4) and the triage filter are tracked;
-# v1 and v3 are kept on the machines that need them for rollback or comparison. Their objects
+# Superseded model bundles. Only the live bundle (models/v5) and the triage filter are tracked;
+# v1, v3 and v4 are kept on the machines that need them for rollback or comparison. Their objects
 # are still in this repo's LFS history from earlier commits — removing them from tracking does
 # not reclaim that storage, which would need a history rewrite.
 flask_api/models/v1/
 flask_api/models/v3/
+flask_api/models/v4/
+flask_api/models/v4.backup_pre_v5/
 
 # OCR recognition models for scripts RapidOCR doesn't bundle. Third-party weights we don't
 # redistribute, fetched by `python scripts/fetch_ocr_langs.py <script>` and verified against
 # the SHA256 RapidOCR publishes.
 flask_api/models/ocr/
+
+# Test output directories
+flask_api/scripts/test_generated_pdfs/
+flask_api/scripts/test_stress_pdfs/

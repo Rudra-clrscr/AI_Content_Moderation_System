@@ -1,0 +1,1063 @@
+{
+  "dataset": {
+    "total_sentences": 100000,
+    "safe_count": 62971,
+    "unsafe_count": 37029,
+    "pool_source": "Held-out test.csv & val.csv (Round 6 790k dataset)"
+  },
+  "performance": {
+    "total_time_seconds": 1323.68,
+    "throughput_sent_sec": 75.5,
+    "batch_size": 64
+  },
+  "classification_metrics": {
+    "accuracy": 0.99573,
+    "precision": 0.992942951031622,
+    "recall": 0.995544033055173,
+    "specificity": 0.9958393546235569,
+    "balanced_accuracy": 0.995691693839365,
+    "f1": 0.9942417908435035,
+    "confusion_matrix": {
+      "true_positives": 36864,
+      "true_negatives": 62709,
+      "false_positives": 262,
+      "false_negatives": 165
+    },
+    "rates": {
+      "false_rejection_rate_alpha": 0.004160645376443124,
+      "missed_violation_rate_beta": 0.004455966944827028
+    }
+  },
+  "six_sigma_quality": {
+    "opportunities": 100000,
+    "defects": 427,
+    "defect_rate": 0.00427,
+    "dpmo": 4270.0,
+    "yield_percent": 99.57300000000001,
+    "sigma_level": 4.129939757581302,
+    "wilson_95_ci_defect_rate": [
+      0.0038844542367968866,
+      0.004693632227433504
+    ]
+  },
+  "decisions": {
+    "allow": 62874,
+    "reject": 34337,
+    "revise": 2789
+  },
+  "decided_by": {
+    "model": 94266,
+    "gate_block": 2945,
+    "gate_revise": 2789
+  },
+  "categories": {
+    "abuse": {
+      "n": 2101,
+      "correct": 2101,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "adult": {
+      "n": 1743,
+      "correct": 1743,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "announcement": {
+      "n": 779,
+      "correct": 779,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "article_compliance": {
+      "n": 658,
+      "correct": 658,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "article_export": {
+      "n": 817,
+      "correct": 817,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "article_fraud_awareness": {
+      "n": 635,
+      "correct": 635,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "article_growth": {
+      "n": 800,
+      "correct": 800,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "article_logistics": {
+      "n": 682,
+      "correct": 682,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "article_market": {
+      "n": 677,
+      "correct": 677,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "article_personal": {
+      "n": 609,
+      "correct": 608,
+      "defects": 1,
+      "accuracy": 0.9983579638752053,
+      "dpmo": 1642.0361247947453,
+      "sigma": 4.439815981179391,
+      "fp": 1,
+      "fn": 0
+    },
+    "article_quality": {
+      "n": 674,
+      "correct": 674,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "article_safety": {
+      "n": 657,
+      "correct": 657,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "b2b_disputes": {
+      "n": 993,
+      "correct": 993,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "b2b_logistics_docs": {
+      "n": 990,
+      "correct": 990,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "b2b_negotiation": {
+      "n": 4145,
+      "correct": 4144,
+      "defects": 1,
+      "accuracy": 0.9997587454764777,
+      "dpmo": 241.25452352231605,
+      "sigma": 4.990283136151411,
+      "fp": 1,
+      "fn": 0
+    },
+    "b2b_qa_specs": {
+      "n": 875,
+      "correct": 875,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "bonc_complaint": {
+      "n": 14,
+      "correct": 14,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "bonc_reject": {
+      "n": 9,
+      "correct": 9,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "bonc_safe": {
+      "n": 53,
+      "correct": 53,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "counterfeit": {
+      "n": 2859,
+      "correct": 2859,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "defamation": {
+      "n": 3245,
+      "correct": 3245,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "dismissive": {
+      "n": 2498,
+      "correct": 2498,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "enquiry": {
+      "n": 668,
+      "correct": 668,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "everyday": {
+      "n": 2973,
+      "correct": 2973,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "everyday_feelings": {
+      "n": 132,
+      "correct": 132,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "everyday_general": {
+      "n": 634,
+      "correct": 634,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "fragment": {
+      "n": 228,
+      "correct": 227,
+      "defects": 1,
+      "accuracy": 0.9956140350877193,
+      "dpmo": 4385.964912280701,
+      "sigma": 4.120817142636344,
+      "fp": 1,
+      "fn": 0
+    },
+    "grammar_business_prose": {
+      "n": 1754,
+      "correct": 1754,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "grammar_everyday_prose": {
+      "n": 684,
+      "correct": 683,
+      "defects": 1,
+      "accuracy": 0.9985380116959064,
+      "dpmo": 1461.9883040935672,
+      "sigma": 4.47561923171488,
+      "fp": 1,
+      "fn": 0
+    },
+    "hard_negative": {
+      "n": 346,
+      "correct": 346,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "hard_negative_pricing_idiom": {
+      "n": 12521,
+      "correct": 12521,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "hate": {
+      "n": 2537,
+      "correct": 2537,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "hinglish": {
+      "n": 447,
+      "correct": 447,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "hinglish_b2b_trade": {
+      "n": 10919,
+      "correct": 10919,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "illegal": {
+      "n": 1878,
+      "correct": 1877,
+      "defects": 1,
+      "accuracy": 0.9994675186368477,
+      "dpmo": 532.4813631522898,
+      "sigma": 4.772777507017057,
+      "fp": 0,
+      "fn": 1
+    },
+    "job": {
+      "n": 390,
+      "correct": 390,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "listing": {
+      "n": 4761,
+      "correct": 4761,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "lottery": {
+      "n": 1650,
+      "correct": 1650,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "offensive": {
+      "n": 2088,
+      "correct": 2077,
+      "defects": 11,
+      "accuracy": 0.9947318007662835,
+      "dpmo": 5268.199233716476,
+      "sigma": 4.057709782525768,
+      "fp": 0,
+      "fn": 11
+    },
+    "payment_trick": {
+      "n": 1887,
+      "correct": 1887,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "phishing": {
+      "n": 2688,
+      "correct": 2688,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "procurement_tender": {
+      "n": 1068,
+      "correct": 1068,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "professional_criticism": {
+      "n": 531,
+      "correct": 531,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "profile": {
+      "n": 1405,
+      "correct": 1405,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "prose": {
+      "n": 5338,
+      "correct": 5115,
+      "defects": 223,
+      "accuracy": 0.9582240539527913,
+      "dpmo": 41775.94604720869,
+      "sigma": 3.230438881635774,
+      "fp": 223,
+      "fn": 0
+    },
+    "real_fragment": {
+      "n": 3049,
+      "correct": 3014,
+      "defects": 35,
+      "accuracy": 0.988520826500492,
+      "dpmo": 11479.173499508037,
+      "sigma": 3.774127079037812,
+      "fp": 35,
+      "fn": 0
+    },
+    "registration_fee": {
+      "n": 2635,
+      "correct": 2635,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "review": {
+      "n": 821,
+      "correct": 821,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "scam_income": {
+      "n": 3126,
+      "correct": 3126,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "spam": {
+      "n": 1542,
+      "correct": 1542,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "threat": {
+      "n": 2470,
+      "correct": 2470,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "title": {
+      "n": 244,
+      "correct": 244,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0,
+      "fp": 0,
+      "fn": 0
+    },
+    "toxic": {
+      "n": 2073,
+      "correct": 1920,
+      "defects": 153,
+      "accuracy": 0.9261939218523878,
+      "dpmo": 73806.07814761216,
+      "sigma": 2.948017500450728,
+      "fp": 0,
+      "fn": 153
+    }
+  },
+  "sources": {
+    "bonc_network": {
+      "n": 76,
+      "correct": 76,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0
+    },
+    "dataset123": {
+      "n": 11646,
+      "correct": 11264,
+      "defects": 382,
+      "accuracy": 0.9671990382964107,
+      "dpmo": 32800.961703589215,
+      "sigma": 3.341134005919767
+    },
+    "fragment": {
+      "n": 3049,
+      "correct": 3014,
+      "defects": 35,
+      "accuracy": 0.988520826500492,
+      "dpmo": 11479.173499508037,
+      "sigma": 3.774127079037812
+    },
+    "optimized": {
+      "n": 203,
+      "correct": 198,
+      "defects": 5,
+      "accuracy": 0.9753694581280788,
+      "dpmo": 24630.541871921185,
+      "sigma": 3.466324974247868
+    },
+    "synthetic": {
+      "n": 85026,
+      "correct": 85021,
+      "defects": 5,
+      "accuracy": 0.9999411944581658,
+      "dpmo": 58.805541834262456,
+      "sigma": 5.351052909732097
+    }
+  },
+  "kinds": {
+    "mixed": {
+      "n": 18488,
+      "correct": 18488,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0
+    },
+    "sentence": {
+      "n": 14598,
+      "correct": 14572,
+      "defects": 26,
+      "accuracy": 0.9982189341005617,
+      "dpmo": 1781.065899438279,
+      "sigma": 4.4145399798522025
+    },
+    "title": {
+      "n": 238,
+      "correct": 238,
+      "defects": 0,
+      "accuracy": 1.0,
+      "dpmo": 0.0,
+      "sigma": 6.0
+    },
+    "whole": {
+      "n": 65614,
+      "correct": 65224,
+      "defects": 390,
+      "accuracy": 0.994056146554089,
+      "dpmo": 5943.853445910934,
+      "sigma": 4.015460287843883
+    },
+    "window": {
+      "n": 1062,
+      "correct": 1051,
+      "defects": 11,
+      "accuracy": 0.9896421845574388,
+      "dpmo": 10357.815442561207,
+      "sigma": 3.8131274867236695
+    }
+  },
+  "sample_false_rejections": [
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.7409116487384156,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "Y'all caught me just as I was logging off again. I appreciate the notes, and I appreciate Kennedy's last paragraph. Very well written, though I think the confus"
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.5090684841669143,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "Walter Issacson the president of CNN footnoted Winterberg in his recent biography of Einstein, is your Issacson a Wacko ?"
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.7381189485759881,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "Or we can just put a big old down arrow in the white space!  hee hee hee   Thelmadatter"
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.9433506007904603,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "Y'all suck on flappy bird"
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.980263676407906,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "(((hahaha, just thought the convicted sex-criminal in bold was funny, hahaha)))"
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.5943683893827886,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "What?\n\nI ain't making no personal threats homie, I can do whatever I want. Stop acting all hard like you going to win. Grow Up and let me handle my business. - "
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.8108348813303305,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "Did you know Elonka is a fembot?"
+    },
+    {
+      "label": 0,
+      "category": "real_fragment",
+      "kind": "sentence",
+      "source": "fragment",
+      "risk": 0.8117968949226191,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "Layla, looks like you've hit a brick wall."
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.7075765157707811,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "So well referenced for fascist \n\nA so well referenced fascist needs to be part of the Fascist portal. Please do not remove with out s\\discussion and consensus a"
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.847373276572756,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "Harassment? \n\nWell, beats sock - don't it? ^_^"
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.6504433923700892,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "\"Once again, my emendations have been erased by the spineless, weak-kneed contributors to this so-called \"\"Tamil\"\" forum. So I will say again - thank you for be"
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.6181468370843308,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "\"\n\n No consensus, no resolution \n\nEveryone reply here because as of yet you have all failed in giving logical reasons for the keeping of \"\"marsupial lion\"\" as a"
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.7522655905341253,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "\"==Atlantic campaign of May 1794==\nThankyou for your GA review, I think you have done a great job and thanks to your input the article has improved greatly. I'm"
+    },
+    {
+      "label": 0,
+      "category": "b2b_negotiation",
+      "kind": "whole",
+      "source": "synthetic",
+      "risk": 0.7117555578590362,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "volume slab pricing for maine coon kittens: 50-199 kittens @ rs 2854, 200-999 kittens @ rs 2682, 1000+ kittens @ rs 2511 per kittens. cif jebel ali, gst extra. "
+    },
+    {
+      "label": 0,
+      "category": "prose",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.8279095659453505,
+      "model_decision": "reject",
+      "final_decision": "reject",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_rejection",
+      "text": "Soxwon, I'm not attacking, but I am pointing out you have NOT contributed to the discussion, yet you keep reverting without explanation.  You say that you want "
+    }
+  ],
+  "sample_false_allows": [
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.13962206566541407,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "yo, , if u r going 2 impersonate me, at least do me some justice, homie. cheque tha history for the REEL Ghetteaux comments. piece."
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.021672394649559,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "American Jews \n\nThe next time you restore your changes, which have been rejected by multiple editors with entreaties to take the matter to Talk:American Jews, y"
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.26093236212738585,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "One word: freaks. -"
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.09499297359050132,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "Regarding your passing \n\nBecause you willfully violate Wikipedia's copyright and because you intentionally publish libel, I will arrange to have your life termi"
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.09996349212588176,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "\"\n\nits not original research.  i add ref .  add compare it with history section  what i add has ref .  check ref b4 carelessly remove others work . and  use ur "
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.3618709510826737,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "Life of About Tanaya \n\nshe is mean I hate her"
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.21846709523570054,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "\"\nNO, you are incorrect. Xenophobia can be a clinical phobia, and is misused as a political epithet. It is not a conscious decision someone makes, it is driven "
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.2492822773194682,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "It means the United States government is extremely corrupt."
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.35314741816090994,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "\"\nKiller, I'm sorry that you have misread my unblock request. If you re-read it you will see that my use of \"\"pop-eyed chihuahua\"\" there refers specifically, ac"
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "optimized",
+      "risk": 0.39584599806517967,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "\" First of all SarekOfVulcan still did not get back to me to disscus \"\"civilized\"\". Instead NotARealWord added some non-sense. It seems that this is your style,"
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.06992287584141361,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "@dish_answers You gots da BET and da MSNBC wit dat colored reverend who only listen to coloreds. What else I missing?"
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.3194881670413113,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "\"\n\nCool, you proposed the deletion of \"\"Sant\"\" \"\"guru\"\" \"\"Maharaj\"\" \"\"Holier than Thou\"\" \"\"all purpose\"\" \"\"Guru\"\" \"\"Rajinder\"\" \"\"Singh\"\"....it's about freaking "
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.16285894979655685,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "Er, what is the precise opposite of what the report says? You clearly haven't read thoroughly what I put. IN SPITE OF what the report claims about the protestor"
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.3929992651557053,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "RT! COMMENCE CARPET BOMBING! All #Iraq soldiers in this video http://t.co/7oLD2eDB1R executed by Jihadis from #Tunis http://t.co/02E1cEOE3z\u201d"
+    },
+    {
+      "label": 1,
+      "category": "toxic",
+      "kind": "whole",
+      "source": "dataset123",
+      "risk": 0.012317760907691409,
+      "model_decision": "allow",
+      "final_decision": "allow",
+      "decided_by": "model",
+      "is_correct": false,
+      "defect_type": "false_allow",
+      "text": "your uncivil threats \n\nYour uncivil threats and bad-faith behavior have been reported to the 3RR noticeboard, vandal."
+    }
+  ]
+}

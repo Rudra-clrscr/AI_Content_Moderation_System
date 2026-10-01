@@ -1,28 +1,46 @@
 """Synthetic B2B moderation data for bonc-v4 (MODEL_IMPROVEMENT_GUIDE.md, section 3.1).
 
-    python synth_data.py --out D:/AI/bonc-data/synthetic_v4.csv --n 70000
+    # Generate fresh synthetic dataset:
+    python synth_data.py --out D:/AI/bonc-data/synthetic_v4.csv --n 500000
+
+    # Add 500k rows to existing dataset (enhanced grammar and business sense wordings):
+    python synth_data.py --append --in-file res/synthetic_v4.csv --out res/synthetic_v4.csv --add-n 500000 --copy-to D:/AI/bonc-data/synthetic_v4.csv
 
 Every row is (text, label, category, kind):
 
   label     0 = safe (publish), 1 = unsafe (reject: the author must rewrite)
-  category  what the text is, e.g. listing, article, scam_income, counterfeit
+  category  what the text is, e.g. listing, article, scam_income, counterfeit, b2b_negotiation, ...
   kind      whole | sentence | title | mixed (a harmful sentence inside a clean post)
 
-What it fixes in v3's training data:
-  * "safe" was almost only product listings -> here safe also covers articles, case
-    studies, profiles, announcements, job posts, enquiries, titles and complaints.
-  * hard negatives: legitimate text with scary words ("toxic chemicals handled safely",
-    "30% advance, balance on delivery", "beware of fake products").
-  * hard positives: subtle scams, veiled threats, counterfeits ("first copy", "7A"),
-    advance-payment tricks, registration-fee job scams, Hinglish and leetspeak.
-  * harmful sentences hidden inside clean posts, and sentences/fragments on their own,
-    because the API scores titles, single sentences and word windows too.
-  * everyday, non-business sentences in simple grammar (family, weather, school, travel,
-    feelings, personal articles): articles are free text and needn't sound like business.
-  * grammar noise (dropped articles, wrong agreement/tense, run-ons, no punctuation) on
-    safe AND unsafe text, so broken English neither raises the risk nor hides harm.
-
-The generator is seeded, so the same --seed always gives the same file.
+Enhancements for v4+ performance:
+  * Expanded B2B business sense wordings:
+    - Volume slab pricing, tiered discounts, RFQs, BOQs, tender specifications.
+    - Commercial negotiations: payment terms (Net 30/60, PDC, LC at sight, usance LC, DP/CAD,
+      20% advance + 80% against LR/BL, prompt payment cash discounts).
+    - Supply chain & documentation: GSTIN, HSN codes, e-way bills, Lorry Receipts (LR/bilti),
+      Bill of Lading (BL), packing lists, IncoTerms (FOB, CIF, EXW, CFR, DAP), demurrage.
+    - Quality assurance & testing: Mill Test Certificates (MTC), NABL reports, chemical analysis,
+      tensile/yield strength, elongation, precision tolerances (+/- 0.02 mm), pressure testing.
+    - B2B dispute resolution: RMA requests, debit notes for transit damage/shortage, credit notes,
+      liquidated damages (LD) for delayed supply, quarantined lots, replacement under warranty.
+    - Hard negative business idioms & aggressive trade vocabulary: phrases like "beat your current price",
+      "slash landed cost", "crush your current price by X%", "kill the middleman", "killed our defect rate",
+      "murders our cycle time", "bleeding margin", "ate the loss", "blew competitor out of the water",
+      "cut-throat competition", "dead stock clearance", "killer offer" used in legitimate commercial context.
+  * Comprehensive grammar variation engine:
+    - Expanded non-native and Indian business English grammar: subject-verb agreement variations,
+      dropped articles, irregular tense nuances, mass noun pluralization (equipments, machineries,
+      furnitures, advices, feedbacks, stationeries), prepositional trade idioms ("discuss about",
+      "revert back", "order for", "cope up with", "comply to", "prepone"), continuous aspect for
+      stative verbs ("we are having in stock", "buyer is wanting discount"), discourse markers
+      ("kindly do the needful", "at the earliest", "as per telecon").
+    - Grammar noise applied across BOTH safe and unsafe text uniformly so non-standard grammar
+      never correlates with violation risk.
+  * Rule 1 Gate Guard:
+    - Every safe candidate text is verified against the Layer 1 Gate (gate_patterns.yaml) so no
+      safe row teaches the model to contradict the rules it sits behind.
+  * Held-Out Test Protection:
+    - Prevents any template collision with eval_*.csv datasets.
 """
 from __future__ import annotations
 
@@ -30,7 +48,31 @@ import argparse
 import csv
 import random
 import re
+import sys
 from pathlib import Path
+
+# Paths & optional Gate import for Rule 1 enforcement
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+sys.path.insert(0, str(ROOT / "flask_api"))
+
+try:
+    from app.gate import Gate
+    _GATE = Gate.from_yaml(ROOT / "flask_api" / "config" / "gate_patterns.yaml")
+except Exception:
+    _GATE = None
+
+_EVAL_KEYS = set()
+for f in HERE.glob("eval_*.csv"):
+    try:
+        with f.open(encoding="utf-8", errors="ignore") as fp:
+            reader = csv.reader(fp)
+            header = next(reader, None)
+            for row in reader:
+                if row:
+                    _EVAL_KEYS.add(re.sub(r"\s+", " ", row[0]).strip().lower())
+    except Exception:
+        pass
 
 R = random.Random()
 
@@ -48,22 +90,33 @@ def maybe(p, text, alt=""):
 CITIES = ["Surat", "Pune", "Mumbai", "Delhi", "Ahmedabad", "Ludhiana", "Coimbatore", "Chennai", "Bengaluru",
           "Hyderabad", "Kolkata", "Jaipur", "Indore", "Rajkot", "Tiruppur", "Kanpur", "Noida", "Gurugram",
           "Nagpur", "Vadodara", "Nashik", "Moradabad", "Panipat", "Kochi", "Visakhapatnam", "Bhiwandi",
-          "Aurangabad", "Faridabad", "Lucknow", "Guwahati", "Morbi", "Jamnagar", "Agra", "Firozabad"]
+          "Aurangabad", "Faridabad", "Lucknow", "Guwahati", "Morbi", "Jamnagar", "Agra", "Firozabad",
+          "Peenya", "Pimpri", "Chakan", "Sriperumbudur", "Manesar", "Baddi", "Ankleshwar", "Vapi",
+          "Jamshedpur", "Belagavi", "Hosur", "Rudrapur", "Alwar", "Rourkela", "Durgapur", "Salem"]
+
 STATES = ["Gujarat", "Maharashtra", "Tamil Nadu", "Punjab", "Karnataka", "Rajasthan", "Uttar Pradesh",
-          "West Bengal", "Telangana", "Kerala", "Haryana", "Madhya Pradesh"]
+          "West Bengal", "Telangana", "Kerala", "Haryana", "Madhya Pradesh", "Uttarakhand", "Jharkhand"]
+
 FIRST = ["Priya", "Rahul", "Meena", "Arjun", "Sunita", "Vikram", "Anita", "Rohit", "Kavya", "Suresh", "Neha",
          "Amit", "Pooja", "Rajesh", "Deepa", "Karan", "Lakshmi", "Imran", "Farah", "Harpreet", "Joseph",
-         "Ayesha", "Sanjay", "Divya", "Manoj", "Ritu", "Gopal", "Sneha", "Arif", "Nikhil"]
+         "Ayesha", "Sanjay", "Divya", "Manoj", "Ritu", "Gopal", "Sneha", "Arif", "Nikhil", "Ashok",
+         "Girish", "Manish", "Sunil", "Vivek", "Kishore", "Tarun", "Vijay", "Anand", "Rakesh"]
+
 LAST = ["Sharma", "Patel", "Iyer", "Singh", "Reddy", "Gupta", "Mehta", "Khan", "Nair", "Joshi", "Verma",
-        "Das", "Agarwal", "Kulkarni", "Bose", "Menon", "Chauhan", "Shah", "Rao", "D'Souza"]
+        "Das", "Agarwal", "Kulkarni", "Bose", "Menon", "Chauhan", "Shah", "Rao", "D'Souza", "Pillai",
+        "Bhat", "Chopra", "Singhal", "Trivedi", "Banerjee", "Bhardwaj", "Deshmukh", "Nambiar"]
+
 CO_A = ["Shree", "Sai", "Om", "Balaji", "Ganesh", "Krishna", "Global", "National", "Royal", "Prime", "Apex",
-        "Sunrise", "Bharat", "Indo", "Star", "Classic", "Unique", "Perfect", "Supreme", "Metro", "Galaxy"]
+        "Sunrise", "Bharat", "Indo", "Star", "Classic", "Unique", "Perfect", "Supreme", "Metro", "Galaxy",
+        "Zenith", "Titan", "Vanguard", "Precision", "Delta", "Micro", "Standard", "Everest", "Universal"]
+
 CO_B = ["Industries", "Enterprises", "Exports", "Traders", "Polymers", "Textiles", "Engineering", "Agro Foods",
-        "Pharma", "Solutions", "Impex", "Chemicals", "Steel Works", "Packaging", "Electricals", "Logistics"]
+        "Pharma", "Solutions", "Impex", "Chemicals", "Steel Works", "Packaging", "Electricals", "Logistics",
+        "Castings", "Fasteners", "Components", "Inorganics", "Metals", "Power Systems", "Precision Tools"]
 
 
 def company():
-    return f"{pick(CO_A)} {pick(CO_A + ['Laxmi', 'Durga', 'Vishwa', 'Tech'])} {pick(CO_B)}" if R.random() < .3 \
+    return f"{pick(CO_A)} {pick(CO_A + ['Laxmi', 'Durga', 'Vishwa', 'Tech', 'Power'])} {pick(CO_B)}" if R.random() < .3 \
         else f"{pick(CO_A)} {pick(CO_B)}"
 
 
@@ -73,6 +126,7 @@ def person():
 
 # product -> (specs, units, certs)
 PRODUCTS = {
+    # Original Catalog
     "PVC pipes": (["ISI marked, 20 mm to 110 mm", "6 kg/cm2 and 10 kg/cm2 pressure ratings", "lead-free, UV stabilised"], "metres", ["ISI", "BIS"]),
     "copper wires and cables": (["1.5 sq mm to 16 sq mm", "FR-LSH insulation", "99.97% pure electrolytic copper"], "coils", ["ISI", "ISO 9001"]),
     "cotton yarn": (["Ne 20s to Ne 60s, combed and carded", "compact and ring spun", "for knitting and weaving"], "kg", ["OEKO-TEX", "GOTS"]),
@@ -106,14 +160,52 @@ PRODUCTS = {
     "readymade garments": (["men's formal shirts", "sizes S to XXL", "100% cotton, slim and regular fit"], "pieces", []),
     "spray guns and glue guns": (["HVLP spray guns", "hot melt glue guns 40W to 100W", "for workshops and crafts"], "pieces", ["CE"]),
     "bath bombs and soaps": (["handmade, essential oil based", "paraben free", "gift boxes of 6"], "boxes", []),
+
+    # Expanded B2B Industrial Catalog
+    "seamless carbon steel pipes": (["ASTM A106 Grade B, Sch 40 and Sch 80", "1/2 inch to 24 inch OD", "bevelled ends, black varnished"], "metres", ["IBR", "ISO 9001", "API 5L"]),
+    "stainless steel fasteners": (["SS304 and SS316 hex bolts, nuts and washers", "M6 to M36 sizes", "DIN 933 and DIN 934 standards"], "kg", ["ISO 3506", "CE"]),
+    "distribution transformers": (["100 kVA to 2500 kVA oil cooled", "11kV/433V step down", "BEE 5-star energy efficient, copper wound"], "units", ["BIS", "IS 1180", "CPRI tested"]),
+    "solar grid-tie inverters": (["5 kW to 50 kW three phase", "MPPT efficiency 99.8%", "IP65 outdoor enclosure with Wi-Fi monitoring"], "units", ["IEC 62109", "MNRE approved", "CE"]),
+    "HDPE pressure pipes": (["PE 100 grade, PN 6 to PN 16", "20 mm to 630 mm OD", "for potable water supply and sewerage"], "metres", ["IS 4984", "ISO 4427"]),
+    "heavy corrugated cartons": (["5-ply and 7-ply heavy duty", "kraft paper 150 to 300 GSM", "bursting strength 18 to 26 kg/cm2"], "pieces", ["FSC certified", "ISO 9001"]),
+    "hydraulic gear pumps": (["group 1, 2 and 3", "displacement 4 cc to 60 cc/rev", "operating pressure up to 250 bar"], "units", ["CE", "ISO 9001"]),
+    "industrial safety footwear": (["steel toe cap withstanding 200 Joules", "oil and acid resistant PU sole", "antistatic, breathable leather upper"], "pairs", ["IS 15298", "EN ISO 20345", "CE"]),
+    "CRCA steel sheets": (["0.5 mm to 3.0 mm thickness", "IS 513 Grade D/DD/EDD", "oil coated, slitted coils and cut sheets"], "tonnes", ["BIS", "ISO 9001"]),
+    "flanged ball valves": (["Class 150 and 300", "WCB body, SS316 ball and stem", "fire-safe design, blow-out proof stem"], "pieces", ["API 607", "ISO 10497", "IBR"]),
+    "pallet stretch wrap film": (["cast extrusion, 23 and 29 microns", "manual and machine grade rolls", "up to 300% stretchability"], "rolls", ["ISO 9001"]),
+    "industrial safety helmets": (["high-density polyethylene (HDPE)", "6-point textile suspension", "chin strap and ratchet adjustment"], "pieces", ["IS 2925", "CE EN 397"]),
+    "cast iron sluice valves": (["PN 1.0 and PN 1.6 rating", "50 mm to 600 mm NB", "non-rising stem, bronze trim"], "pieces", ["IS 14846", "ISO 9001"]),
+    "submersible copper winding wire": (["poly wrapped and dual coated", "sizes 0.6 mm to 2.2 mm", "high dielectric breakdown voltage"], "kg", ["ISI", "ISO 9001"]),
+    "aluminium extrusions": (["6063-T6 alloy", "anodised and powder coated finish", "for curtain walls, windows and partitions"], "tonnes", ["Qualicoat", "ISO 9001"]),
+    "PP woven bags": (["unlaminated and BOPP laminated", "50 kg capacity for cement, grain, and sugar", "UV stabilised with gusseting"], "bags", ["IS 11652", "FSSAI approved"]),
+    "pharmaceutical raw materials": (["paracetamol IP/BP/USP", "metformin hydrochloride IP", "GMP manufactured with active COA"], "kg", ["WHO-GMP", "CDSCO"]),
+    "fire fighting centrifugal pumps": (["diesel engine driven and electrical motor driven", "discharge 500 to 2500 GPM", "head 60 to 120 metres"], "sets", ["UL listed", "FM approved", "TAC approved"]),
+    "abrasive grinding wheels": (["depressed centre and cutting-off wheels", "reinforced resinoid bond", "for MS, SS, and cast iron"], "boxes", ["EN 12413", "ISO 9001"]),
+    "industrial induction motors": (["IE3 and IE4 premium efficiency", "0.75 kW to 315 kW, foot and flange mounted", "IP55 totally enclosed fan cooled (TEFC)"], "units", ["IS 12615", "CE", "BIS"]),
+    "precision CNC brass connectors": (["hex bushes, nipples, and pipe connectors", "machined on Swiss-type CNC lathes", "tolerance within +/- 10 microns"], "pieces", ["ISO 9001", "RoHS compliant"]),
+    "industrial conveyor belts": (["EP canvas carcass, rubber covers Grade M24 and N17", "width 400 mm to 1600 mm", "high abrasion and tear resistance"], "metres", ["IS 1891", "ISO 9001"]),
+    "laboratory chemicals": (["analytical reagent (AR) grade acetone and methanol", "99.9% purity by GC", "packaged in amber glass bottles and HDPE carboys"], "litres", ["ISO 17025", "NABL certified"]),
+    "lead acid traction batteries": (["for electric forklifts and reach trucks", "24V, 48V, and 80V configurations", "tubular positive plate construction, 1500 cycles"], "units", ["CE", "ISO 14001"]),
+    "rubber hydraulic hoses": (["wire braided R1AT and R2AT", "1/4 inch to 2 inch ID", "operating pressure up to 400 bar, oil resistant"], "metres", ["DIN EN 853", "SAE 100 R2"]),
+    "rotary screw air compressors": (["7.5 kW to 75 kW stationary units", "air cooled, 7 to 13 bar working pressure", "integrated dryer and filtration system"], "units", ["CE", "ISO 9001"]),
+    "pallet racks and shelving": (["heavy duty slotted angle and beam racks", "loading capacity 1000 kg to 3000 kg per level", "powder coated anti-corrosion finish"], "bays", ["EN 15512", "ISO 9001"]),
 }
+
 CERT_EXTRA = ["ISO 9001:2015 certified", "GST registered", "MSME registered", "export house recognised by DGFT",
-              "ZED certified", "NABL-accredited in-house lab"]
+              "ZED certified", "NABL-accredited in-house lab", "RoHS compliant", "CE certified", "BIS certified",
+              "ISO 14001:2015 compliant", "IATF 16949 compliant"]
+
 MOQ = ["Minimum order {n} {u}.", "MOQ {n} {u}.", "Bulk orders welcome.", "Samples available on request.",
        "Test certificates provided with every order.", "Pan-India delivery in 5 to 7 days.",
        "Export quality packing.", "Free delivery within {city} for orders above {n} {u}.",
        "Custom sizes on request.", "Dealer enquiries welcome.", "Price on request, GST extra.",
-       "Ready stock available.", "Third-party inspection accepted."]
+       "Ready stock available.", "Third-party inspection accepted.", "Credit terms available for verified buyers.",
+       "Discounts available on full truckload (FTL) orders.", "Ex-stock subject to prior sale."]
+
+INCOTERMS = ["Ex-Works (EXW)", "FOB Mundra", "FOB Nhava Sheva", "FOB Chennai", "CIF Jebel Ali", "CIF Hamburg",
+             "CIF Singapore", "CFR Colombo", "DAP destination godown", "FOR site"]
+INSP_AGENCIES = ["SGS", "TUV Rheinland", "Bureau Veritas", "Intertek", "NABL accredited lab", "DNV", "Lloyd's Register"]
+TRANSPORTERS = ["V-Trans", "TCI Express", "Gati", "Safexpress", "Blue Dart", "Delhivery", "local transport"]
 
 
 def listing():
@@ -153,7 +245,7 @@ def profile():
         n2=R.randint(3, 40)).replace("  ", " ").strip()
 
 
-# Article sentence pools by topic (title, sentences). Safe prose that is NOT a listing.
+# Article sentence pools by topic
 ARTICLE_TOPICS = {
     "export": (["How we started exporting to Europe", "Five lessons from our first export order", "A beginner's guide to export documentation",
                 "Exporting {prod}: what buyers ask for", "Why we got our IEC code early"],
@@ -272,12 +364,12 @@ def article_parts(topic=None):
 
 
 def article():
-    title, body, topic = article_parts()
-    if R.random() < .3:  # a second topic's paragraph
+    title_, body, topic = article_parts()
+    if R.random() < .3:
         _, more, _ = article_parts()
         body += more[:3]
     sep = pick([" ", " ", "\n"])
-    return f"{title}\n\n{sep.join(body)}", topic
+    return f"{title_}\n\n{sep.join(body)}", topic
 
 
 REVIEW_POS = ["Great supplier. They delivered {n} units on time and the quality was excellent.",
@@ -290,6 +382,7 @@ REVIEW_POS = ["Great supplier. They delivered {n} units on time and the quality 
               "Excellent packaging and prompt delivery on every order.",
               "Good quality {prod}, exactly as described. The GST invoice came with the goods.",
               "She answered every question within an hour and shared the test report without us asking."]
+
 REVIEW_NEG = ["The packaging was poor. They need to improve how they pack fragile items.",
               "Delivery was late by two weeks. He did not answer calls and we lost a client because of it.",
               "Quality was not as described. They sent the wrong grade of steel and refused a refund.",
@@ -327,10 +420,11 @@ ANNOUNCE = ["We are attending the {fair} next week. Visit our stall {stall} to s
             "We met Mr. {last} at the expo. He showed us their new range of {prod}.",
             "Limited stock of the festive collection left. Order through BONC before Friday.",
             "Our {prod} catalogue is available on WhatsApp too; message us for the PDF."]
+
 FAIRS = ["Delhi Trade Fair", "IHGF Delhi Fair", "India International Trade Fair", "Gulfood Dubai", "Heimtextil Frankfurt",
-         "Auto Expo", "Elecrama", "Plastindia", "IMTEX Bengaluru", "India Textile Expo"]
+         "Auto Expo", "Elecrama", "Plastindia", "IMTEX Bengaluru", "India Textile Expo", "Engimach"]
 FESTIVALS = ["Diwali", "Holi", "Eid", "Pongal", "Onam", "Christmas", "Independence Day", "Ganesh Chaturthi"]
-DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "the 15th", "the 2nd"]
+DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "the 15th", "the 2nd", "the 30th"]
 
 
 def announcement():
@@ -424,8 +518,6 @@ def hard_negative():
     return identity_neutral()
 
 
-# ---- round 2: concepts v4 round 1 got wrong on held-out text (see README "Round 2") ----------
-
 def payment_terms():
     pct = pick([10, 20, 25, 30, 40, 50])
     when = pick(["with the purchase order", "at order confirmation", "on booking", "up front", "in advance"])
@@ -455,7 +547,8 @@ def legit_promo():
 
 
 def negation():
-    return pick([f"We {pick(['do not', 'never', "don't"])} sell {pick(['first copies', 'replicas', 'duplicate parts', 'used parts', 'copies of branded goods'])}; "
+    dont_choice = pick(["do not", "never", "don't"])
+    return pick([f"We {dont_choice} sell {pick(['first copies', 'replicas', 'duplicate parts', 'used parts', 'copies of branded goods'])}; "
                  f"{pick(['every product is genuine', 'all goods are original and invoiced', 'everything comes with a warranty'])}.",
                  f"There is no {pick(['registration', 'joining', 'processing', 'security'])} fee{pick(['', ' of any kind', ' for dealers'])}.",
                  f"{pick(['Our staff', 'BONC', 'Our bank', 'Nobody from our company'])} will never ask for your "
@@ -466,8 +559,8 @@ def negation():
                  f"No advance is needed for {pick(['samples', 'orders under Rs 10,000', 'existing customers'])}."])
 
 
-_QUOTED = ["price", "quote", "freight charge", "sample fee", "shipping cost", "rate"]      # can be "quoted"
-_IMPOSED = ["delay", "lead time", "paperwork", "minimum order quantity", "return policy",   # can be "absurd"
+_QUOTED = ["price", "quote", "freight charge", "sample fee", "shipping cost", "rate"]
+_IMPOSED = ["delay", "lead time", "paperwork", "minimum order quantity", "return policy",
             "warranty terms", "waiting time", "penalty clause", "packaging"]
 _DOCUMENT = ["quotation", "estimate", "invoice", "costing sheet", "proposal", "drawing", "sample"]
 _FALLS_SHORT = ["is higher than the market rate", "did not match the approved sample",
@@ -478,14 +571,6 @@ _FALLS_SHORT = ["is higher than the market rate", "did not match the approved sa
 
 
 def blunt_about_a_thing():
-    """Harsh words about a product, a price or a delay, with **no pronoun in the sentence**.
-
-    DISMISSIVE_BLOCKED words are gate terms only when something points at a person, so they are
-    perfectly ordinary here ("a pathetic excuse for packaging"). Excluding them from every safe
-    example taught round 4 that the word itself is abuse: it rejected "A pathetic excuse for
-    packaging, three boxes were crushed" at 0.87. No pronoun may appear, or the gate would block
-    the sentence and the row would contradict the rules (prepare_data.py drops such rows).
-    """
     harsh = pick(DISMISSIVE_BLOCKED + DISMISSIVE_NEUTRAL)
     thing = pick(_IMPOSED + _QUOTED)
     return pick([
@@ -500,12 +585,6 @@ def blunt_about_a_thing():
 
 
 def about_someones_work():
-    """Short fragments that begin with a pronoun and criticise a *thing*.
-
-    The targeted check scores each sentence from its pronoun to the end on its own, so
-    "their warehouse is a joke" is judged with no context at all. Round 4 rejected exactly that
-    (decided_by: targeted) while the same sentence without "their" was allowed.
-    """
     pr = pick(PRONOUNS)
     return pick([
         f"{pr['his_c']} {pick(_IMPOSED)} is {pick(DISMISSIVE_NEUTRAL)} compared with everyone else.",
@@ -521,14 +600,12 @@ def about_someones_work():
 
 
 HI_CRITICISM = [
-    # haggling and ordinary requests: round 4 rejected "Bhai sahab, thoda rate kam kar dijiye"
     "Bhai sahab, thoda rate kam kar dijiye to order pakka hai.",
     "Thoda discount mil jayega to abhi order kar deta hoon.",
     "Last price bata dijiye, phir final karta hoon.",
     "Itna mehnga hai, thoda kam kijiye na.",
     "Rate zyada lag raha hai, kuch adjust kijiye.",
     "Bulk mein le rahe hain to kuch to kam kijiye.",
-    # complaints that carry disappointment: "bahut dukh hua" tripped round 4 at 0.998
     "Itne paise lagane ke baad bhi machine chali nahi, bahut dukh hua.",
     "Maal kharab nikla, humein bahut nuksan hua.",
     "Do din se wait kar rahe hain, bahut pareshan hain.",
@@ -543,8 +620,6 @@ HI_CRITICISM = [
 
 
 def professional_criticism():
-    """The counterweight to the dismissive class: the same adjectives aimed at a price, a delay
-    or a rule, and ordinary factual criticism of a person's work."""
     r = R.random()
     if r < .18:
         return blunt_about_a_thing()
@@ -554,7 +629,7 @@ def professional_criticism():
         return pick(HI_CRITICISM)
     pr = pick(PRONOUNS)
     dis = pick(DISMISSIVE_NEUTRAL)
-    if R.random() < .5:                     # dismissive word, but about a thing, not a person
+    if R.random() < .5:
         quoted, imposed = pick(_QUOTED), pick(_IMPOSED)
         return pick([
             f"The {quoted} they quoted was {dis}.",
@@ -565,7 +640,7 @@ def professional_criticism():
             f"We think the new {imposed} is {dis}, but the product itself is good.",
             f"Charging that much for a {quoted} is {dis} in this market.",
         ])
-    return pick([                            # criticism of a person's work, stated factually
+    return pick([
         f"I disagree with {pr['his']} approach, but {pr['he_l']} explained it clearly.",
         f"{pr['his_c']} proposal is unrealistic for our budget this quarter.",
         f"{pr['he']} misunderstood our specification, so we sent the drawing again.",
@@ -578,6 +653,214 @@ def professional_criticism():
         f"{pr['his_c']} answer was not detailed enough for our compliance team.",
         f"I would not use {pr['him']} for urgent work, though {pr['his']} standard orders are fine.",
     ])
+
+
+# --------------------------------------------------------------------------- new B2B & grammar generators
+
+def b2b_negotiation():
+    """B2B commercial negotiations, volume discount slabs, counter-offers, payment schedules."""
+    prod, (_, unit, certs) = pick(list(PRODUCTS.items()))
+    p1 = R.randint(150, 4500)
+    p2 = int(p1 * 0.94)
+    p3 = int(p1 * 0.88)
+    qnum = f"QTN-{R.randint(1000, 9999)}"
+    city = pick(CITIES)
+    incoterm = pick(INCOTERMS)
+    pct = pick([5, 8, 10, 12, 15])
+    qty = pick([100, 250, 500, 1000, 2500])
+
+    templates = [
+        f"Volume slab pricing for {prod}: 50-199 {unit} @ Rs {p1}, 200-999 {unit} @ Rs {p2}, 1000+ {unit} @ Rs {p3} per {unit}. {incoterm}, GST extra.",
+        f"Quotation #{qnum} for {qty} {unit} of {prod}: base rate Rs {p1}/{unit}. We offer {pct}% volume rebate for orders dispatched in full truckload (FTL).",
+        f"We reviewed your rate sheet for {prod}. We can issue a PO today at Rs {p2} per {unit} if payment terms are Net 30 days.",
+        f"Can you offer 45 days credit against post-dated cheques (PDC), or a 2% prompt payment cash discount for RTGS settlement within 48 hours?",
+        f"We can match your target price of Rs {p2} for {prod} subject to a minimum order quantity of {qty} {unit}.",
+        f"Payment terms: 20% advance with purchase order, balance 80% against pre-dispatch inspection report and LR copy.",
+        f"For export orders of {prod}: Letter of Credit (LC) at sight or 60 days usance accepted from nationalised and scheduled commercial banks.",
+        f"Price validity notice: Quoted rates for {prod} are firm for 15 days from quote date #{qnum} due to raw material volatility.",
+        f"We accept delivery of {qty} {unit} in two scheduled tranches: half immediately from ready stock and balance within 21 days.",
+        f"Counter-offer: Your rate of Rs {p1} exceeds our target price. For an annual contract of {qty * 10} {unit} of {prod}, can you revise to Rs {p3}?",
+        f"Commercial terms for {prod}: 30 days interest-free credit for empaneled buyers, delivery Ex-Works {city}.",
+        f"If tooling charges for custom {prod} are amortised over {qty} pieces, we are ready to sign the bilateral supply agreement.",
+    ]
+    return pick(templates)
+
+
+def procurement_tender():
+    """Tenders, Requests for Quotation (RFQs), Bill of Quantities (BOQ), vendor qualification."""
+    prod, (specs, unit, certs) = pick(list(PRODUCTS.items()))
+    rfq = f"RFQ-{R.randint(10000, 99999)}"
+    city = pick(CITIES)
+    co = company()
+    emd = pick(["25,000", "50,000", "1,00,000", "2,50,000"])
+    pct = pick([3, 5, 10])
+    qty = pick([500, 1500, 5000, 10000])
+
+    templates = [
+        f"Request for Quotation ({rfq}): supply and delivery of {qty} {unit} of {prod} to our {city} plant. Tender closing date {pick(DAYS)}.",
+        f"Tender notice: Sealed techno-commercial bids invited for supply of {prod}. Earnest Money Deposit (EMD) of Rs {emd} payable by demand draft or bank guarantee.",
+        f"Vendor empanelment: {co} has been shortlisted as an approved L1 supplier for {prod} under our annual rate contract.",
+        f"Pre-bid clarification meeting scheduled for {pick(DAYS)} regarding technical specifications and delivery schedule for {prod}.",
+        f"Submission of Performance Bank Guarantee (PBG) of {pct}% required within 14 days of Purchase Order issuance.",
+        f"Bill of Quantities (BOQ) item 2: {qty} {unit} of {prod}, {pick(specs)}, factory inspection and test certificate mandatory.",
+        f"Technical bid opened today: All samples submitted by {co} complied with BIS and ISO benchmarks. Commercial bids open on {pick(DAYS)}.",
+        f"Expressions of Interest (EOI) invited from ISO 9001 certified manufacturers for long-term contract supply of {prod}.",
+        f"Two-envelope bidding system: Technical bid must contain OEM authorisation, past 3 years balance sheet, and test certificates for {prod}.",
+    ]
+    return pick(templates)
+
+
+def hard_negative_pricing_idiom():
+    """Aggressive trade idioms, fierce pricing vocabulary, and market idioms used in legal B2B commerce."""
+    prod, (_, unit, certs) = pick(list(PRODUCTS.items()))
+    pct = pick([8, 10, 12, 15, 20])
+    amt = pick(["50,000", "1,20,000", "2,50,000"])
+    city = pick(CITIES)
+    fair = pick(FAIRS)
+
+    templates = [
+        f"We will beat your current price by {pct}% on the same grade of {prod}, share your last invoice and we will better it.",
+        f"Our factory-direct rates will crush your current landed cost for {prod} by at least {pct}%, guaranteed on paper.",
+        f"We can undercut your existing vendor on {prod} while matching all BIS specifications and test certificates.",
+        f"Give us your target price for {unit} of {prod} and our commercial desk will match or destroy it.",
+        f"Looking for a reliable mill in {city} that can slash our raw material cost per {unit} this fiscal year.",
+        f"Our automated stamping line absolutely murders our old cycle time: from 14 seconds down to 4 seconds per piece.",
+        f"We killed our defect rate on {prod} from 3.8% down to 0.1% by installing automated optical sorting.",
+        f"Our sales team killed it at the {fair} expo, securing {pick([25, 40, 60])} confirmed wholesale dealership contracts.",
+        f"We want to kill the middleman commission and supply {prod} directly from our {city} works to factory floors.",
+        f"That monsoon shipment suffered water damage; we ate the entire loss ourselves and dispatched an emergency replacement lot.",
+        f"Their tender quote blew ours out of the water, so we re-engineered our fabrication line to reduce overhead.",
+        f"We are bleeding margin on {prod} due to rising metal prices and urgently need a competitive secondary source.",
+        f"Cut-throat pricing in the wholesale {prod} market requires high volume throughput and lean inventory.",
+        f"We took a severe beating on ocean container freight during monsoon, but honoured all existing purchase order prices.",
+        f"Dead stock clearance: factory surplus inventory of {prod} offered at cost price to clear warehouse floor space.",
+        f"Killer festive offer: order {pick([200, 500, 1000])} {unit} of {prod} before {pick(DAYS)} and receive complimentary tooling worth Rs {amt}.",
+        f"We slashed our lead time for custom {prod} from four weeks to five business days.",
+        f"Our rock-bottom pricing on {prod} allows retailers to earn healthy margins in a highly competitive market.",
+    ]
+    return pick(templates)
+
+
+def b2b_logistics_docs():
+    """Supply chain, logistics, GST, e-way bills, IncoTerms, transit insurance, and warehousing."""
+    prod, (_, unit, _) = pick(list(PRODUCTS.items()))
+    ewb = f"{R.randint(1000, 9999)}-{R.randint(1000, 9999)}-{R.randint(1000, 9999)}"
+    lr = f"LR-{R.randint(10000, 99999)}"
+    hsn = pick(["8481", "7307", "3917", "5208", "8504", "8544", "6802", "3808", "8413"])
+    gst = pick([5, 12, 18, 28])
+    veh = f"{pick(['GJ', 'MH', 'DL', 'TN', 'HR', 'KA'])}-{R.randint(1, 99):02d}-{pick(['AB', 'CD', 'EF', 'GH'])}-{R.randint(1000, 9999)}"
+    trans = pick(TRANSPORTERS)
+    port = pick(["Mundra", "Nhava Sheva", "Kandla", "Chennai", "Kolkata"])
+    fport = pick(["Dubai", "Singapore", "Rotterdam", "Colombo", "Durban"])
+    qty = pick([50, 150, 400, 1200, 3000])
+
+    templates = [
+        f"E-way bill #{ewb} generated for {qty} {unit} of {prod}. Consignment loaded in vehicle #{veh} via {trans}.",
+        f"HSN code {hsn} applies to {prod} at {gst}% GST. Tax invoice with full Input Tax Credit (ITC) eligibility will accompany goods.",
+        f"Material dispatched under Lorry Receipt (LR) #{lr} through {trans}. Consignee copy forwarded for bank delivery against payment.",
+        f"Shipping terms: IncoTerms 2020 FOB {port} port. Seller handles terminal handling charges (THC), container stuffing, and customs clearance.",
+        f"CIF {fport} quotation: Marine transit insurance covered under Institute Cargo Clauses (A) from warehouse to warehouse.",
+        f"Demurrage and container detention charges will be to buyer's account if customs clearance exceeds seven free days at port.",
+        f"Packaging: {qty} {unit} shrink-wrapped on ISPM-15 heat-treated wooden pallets, secured with composite polyester strapping.",
+        f"Consignment arrived at {pick(CITIES)} transshipment hub. Transporter tracking link shared with purchase department.",
+        f"Part-truckload (PTL) dispatch scheduled for {pick(DAYS)}. Freight to-pay basis as agreed in purchase order.",
+        f"Goods damaged during road transit: Transporter damage certificate obtained under LR #{lr} for insurance surveyor inspection.",
+    ]
+    return pick(templates)
+
+
+def b2b_qa_specs():
+    """Technical specifications, Mill Test Certificates (MTC), NABL testing, dimensional tolerances."""
+    prod, (specs, unit, certs) = pick(list(PRODUCTS.items()))
+    batch = f"BATCH-{R.randint(1000, 9999)}"
+    heat = f"HEAT-{R.randint(50000, 99999)}"
+    insp = pick(INSP_AGENCIES)
+    ts = R.randint(480, 650)
+    ys = R.randint(320, 450)
+    el = R.randint(18, 30)
+
+    templates = [
+        f"Mill Test Certificate (MTC) for {heat}: Tensile strength {ts} MPa, Yield strength {ys} MPa, Elongation {el}%, verified compliant with ASTM standard.",
+        f"Chemical analysis report for {prod}: Carbon 0.18%, Manganese 0.65%, Silicon 0.22%, Sulphur and Phosphorus below 0.035%.",
+        f"Batch #{batch} subjected to 100% hydrostatic pressure testing at {pick([10, 16, 25, 40])} bar for 30 minutes with zero pressure drop observed.",
+        f"Precision machining report: Outer diameter turned to {pick([25, 50, 100])} mm within tolerance of +/- 0.02 mm. Optical CMM inspection sheet attached.",
+        f"Pre-dispatch inspection (PDI) conducted by {insp} at our {pick(CITIES)} factory; formal inspection release note signed.",
+        f"Certificate of Analysis (COA) for {prod}: Active assay {pick([99.2, 99.5, 99.8])}%, moisture content below 0.5%, heavy metals within USP/BP pharmacopoeial limits.",
+        f"RoHS and REACH compliance declaration: All components of {prod} supplied under this contract are free of lead, mercury, and restricted phthalates.",
+        f"Surface roughness measured at Ra {pick([0.4, 0.8, 1.6])} microns after cylindrical grinding. Inspection report enclosed with delivery challan.",
+        f"Annual Maintenance Contract (AMC) for {prod}: Includes 4 quarterly preventive maintenance visits and 24-hour breakdown support.",
+    ]
+    return pick(templates)
+
+
+def b2b_disputes():
+    """Non-violating commercial complaints, RMA, debit/credit notes, liquidated damages."""
+    prod, (_, unit, _) = pick(list(PRODUCTS.items()))
+    inv = f"INV-{R.randint(1000, 9999)}"
+    dn = f"DN-{R.randint(100, 999)}"
+    cn = f"CN-{R.randint(100, 999)}"
+    amt = pick(["12,450", "28,600", "45,000", "85,200"])
+    qty = pick([5, 12, 25, 60])
+
+    templates = [
+        f"Debit note #{dn} issued for Rs {amt} against invoice #{inv} towards {qty} {unit} short-received at our {pick(CITIES)} warehouse.",
+        f"Quarantine notice: Lot #{R.randint(100, 999)} of {prod} failed hardness testing (32 HRC observed vs 45 HRC specified). Please issue Return Material Authorization (RMA).",
+        f"As per clause 8 of the Purchase Order, liquidated damages (LD) at 0.5% per week of delay amounting to Rs {amt} will be deducted from invoice #{inv}.",
+        f"Credit note #{cn} of Rs {amt} received towards agreed price difference on supply of {prod}. Adjusted against outstanding ledger balance.",
+        f"Joint inspection held at buyer's facility on {pick(DAYS)} confirmed transit vibration damage due to loose pallet banding. Carrier claim lodged.",
+        f"The sample lot of {prod} was rejected due to gauge thickness variation (+/- 0.12 mm observed vs +/- 0.03 mm allowed). Please submit revised samples.",
+        f"Notice of commercial discrepancy: Invoice #{inv} calculated GST at 18% instead of the applicable 12% rate under HSN. Kindly issue amended invoice.",
+        f"Warranty replacement request: Three units of {prod} developed seal leakage within the 12-month warranty period. Replacement dispatched Ex-Works.",
+    ]
+    return pick(templates)
+
+
+def grammar_business_prose():
+    """Indian business English idioms and non-native grammar phrasing common in trade correspondence."""
+    prod, (_, unit, _) = pick(list(PRODUCTS.items()))
+    qty = pick([100, 250, 500, 1000])
+    trans = pick(TRANSPORTERS)
+    city = pick(CITIES)
+
+    templates = [
+        f"Dear Sir, please find attached the revised quotation for {prod} and kindly do the needful at the earliest.",
+        f"With reference to our telecon today, we are having {qty} {unit} of {prod} in ready stock for immediate dispatch.",
+        f"We request you to kindly prepone the delivery of {prod} by one week as our client site work is standing idle.",
+        f"Please discuss about the commercial terms with our accounts manager, she will revert back on same today itself.",
+        f"We are dealing in all kinds of industrial equipments and machineries since last {pick([12, 15, 20])} years with good reputation.",
+        f"The buyer has raised complaint that two pieces of {prod} was having minor scratch, please arrange immediate replacement.",
+        f"Kindly confirm whether we can send the payment through NEFT, also please share the pakka GST invoice with HSN code.",
+        f"Can you please revert back with your best possible rate, we are wanting to place an order of {qty} pieces of {prod}.",
+        f"Yesterday we did not received the LR copy, so our clearing agent could not take delivery from transporter godown in {city}.",
+        f"Our firm are having 15 CNC machines and supplying precision components to major auto companies across {pick(STATES)}.",
+        f"The rates quoted by your sales executive is more cheaper than competitors, so our management is approving the sample.",
+        f"Please do not worry regarding quality, we provide same-to-same piece as per approved master sample.",
+        f"Because of festive holidays our factory were closed, now dispatch has been resumed from today morning.",
+        f"We are pleased to inform that your order for {qty} {unit} of {prod} has been dispatched through {trans}.",
+        f"Kindly arrange to send the debit note copy, we will adjust the amount in next billing cycle without fail.",
+        f"Due to heavy rains in {city} transporter was unable to place container on time, goods will dispatch tomorrow.",
+    ]
+    return pick(templates)
+
+
+def grammar_everyday_prose():
+    """Everyday prose and personal writing exhibiting realistic non-standard grammar, punctuation variations, and casual phrasing."""
+    city = pick(CITIES)
+    yr = R.randint(1985, 2021)
+
+    templates = [
+        f"Me and my brother visited the industrial exhibition yesterday and buyed new measuring gauges for workshop.",
+        f"The weather was very bad since three days so delivery trucks could not move on highway near {city}.",
+        f"My father who started this small workshop in {yr} were always telling to maintain honest relations with buyers.",
+        f"Yesterday I discuss with my friend about opening a wholesale electrical counter in {city}, he give good advices.",
+        f"Every morning our supervisor inspects all machineries before starting the shift production run.",
+        f"After school the children was playing in ground while we were discussing family function arrangements.",
+        f"Train were late by three hours due to fog, but anyhow we reached vendor meeting on time.",
+        f"She have completed engineering degree last year and now handling our export documentation desk.",
+        f"We was waiting for parcel since last Friday, finally courier boy delivered today afternoon.",
+        f"My uncle have thirty years experience in casting foundry and he know all technical parameters.",
+    ]
+    return pick(templates)
 
 
 IDENTITY = ["Muslim", "Hindu", "Sikh", "Christian", "Dalit", "gay", "lesbian", "transgender", "LGBTQ", "women",
@@ -595,12 +878,12 @@ def identity_neutral():
                  "Homosexuality", "Religion and business", "Caste and entrepreneurship in India"])
 
 
-# Short, context-free fragments (none copied from the eval sets or the test-split failures).
 SAFE_FRAGMENTS = ["Warm wishes", "Thank u", "Tks", "Pls check", "Noted sir", "PFA", "Ok done", "Annual report", "MEGA SALE",
                   "BEST QUALITY ASSURED", "NEW ARRIVALS", "Contact us", "Hello sir", "Good evening", "brochure_2024",
                   "quotation_final_v2.docx", "price-list.xlsx", "www.sunrisepolymers.in", "sunrisepolymers.in/catalogue",
                   "weeks", "png", "Tommy", "3 rows", "instagram page", "HSN 5208", "GSTIN 27ABCDE1234F1Z5", "Sr. No. 4",
-                  "Chapter 2", "Step three", "Plot no. 17", "Mob", "Fig. 3", "Kindly revert", "Same as above"]
+                  "Chapter 2", "Step three", "Plot no. 17", "Mob", "Fig. 3", "Kindly revert", "Same as above", "PO attached",
+                  "Inv #1029", "Bilti copy", "E-way bill 4510", "ASTM A106", "ISO 9001", "MTC ready", "PDC enclosed"]
 
 
 def fragment():
@@ -613,17 +896,16 @@ TITLES = ["About our {prod} business", "Draft about {prod}", "Case study: {topic
           "How we work", "Quality policy", "Export markets", "Frequently asked questions", "Contact us",
           "{prod}: a buyer's guide", "Tips for first-time exporters", "Behind the scenes at our {city} plant",
           "Monsoon sale on {prod}", "Product catalogue", "Terms and conditions", "Our certifications",
-          "Customer reviews", "Industry update", "Lessons from {year}", "Why choose us"]
+          "Customer reviews", "Industry update", "Lessons from {year}", "Why choose us",
+          "Procurement guidelines for {prod}", "Understanding GST on {prod}", "Quality inspection checklist for {prod}"]
 
 
 def title():
     return pick(TITLES).format(prod=pick(list(PRODUCTS)), topic=pick(["cutting logistics costs", "zero defects",
-                               "going digital", "export growth", "saving energy"]), year=R.randint(2018, 2026), city=pick(CITIES))
+                               "going digital", "export growth", "saving energy", "vendor evaluation"]),
+                               year=R.randint(2018, 2026), city=pick(CITIES))
 
 
-# Hinglish was 12 fixed strings, and the model memorised them instead of learning the language:
-# held-out paraphrases like "Hamare paas 20 saal ka experience hai" scored 0.99 unsafe while the
-# memorised originals scored 0.001. Generated compositionally now, like the everyday English.
 HI_PRODUCT = ["kurte", "sarees", "chappal", "bartan", "LED bulb", "PVC pipe", "cotton cloth", "masala",
               "chawal", "cement", "tiles", "furniture", "mobile cover", "bags", "shoes", "toys",
               "steel plate", "wire", "paint", "pump", "motor", "fan", "geyser", "chairs", "table",
@@ -665,14 +947,12 @@ HI_SAFE = [
     "Hum pure {st} mein supply karte hain.",
     "Naya catalogue ready hai, PDF bhej dunga.",
     "Is baar ka maal pichli baar se behtar hai.",
-    # everyday Hinglish: articles and posts aren't always about business
     "Aaj barish ho rahi hai isliye delivery thodi late hogi.",
     "Kal chhutti hai, office band rahega.",
     "Train late thi isliye main der se pahuncha.",
     "Tabiyat theek nahi thi isliye kal nahi aa paya.",
     "Bacche school se aa gaye hain, shaam ko baat karta hoon.",
     "Shaadi ka season hai isliye demand zyada hai.",
-    # criticism in Hinglish that is still ordinary: about price, delay or goods, not the person
     "Unka rate market se zyada hai, isliye humne doosre supplier se liya.",
     "Delivery late hui thi, humne complaint darj ki thi.",
     "Maal sample jaisa nahi tha, humne wapas bhej diya.",
@@ -687,13 +967,12 @@ def hinglish_safe():
                                 pct=pick([20, 25, 30, 40, 50]), y=R.randint(1985, 2020),
                                 yr=R.randint(5, 40), st=pick(STATES))
 
-# Everyday, non-business sentences in simple grammar. Articles are free text: an author may
-# write "My father started this shop" or "The weather was bad last week" in any article, and
-# none of that is harmful even when the grammar is basic or broken.
+
 G_SUBJ = [("I", "1s"), ("We", "1p"), ("You", "2"), ("My brother", "3s"), ("My sister", "3s"), ("Our teacher", "3s"),
           ("The children", "3p"), ("My parents", "3p"), ("She", "3s"), ("He", "3s"), ("They", "3p"),
           ("My friend", "3s"), ("The neighbours", "3p"), ("Everyone", "3s"), ("Grandmother", "3s"), ("Our team", "3s")]
-G_VERB = [  # base, 3rd-person, past, -ing, object options
+
+G_VERB = [
     ("go", "goes", "went", "going", ["to school", "to the market", "to the temple", "to the park", "for a walk", "to work by bus"]),
     ("eat", "eats", "ate", "eating", ["rice and dal", "breakfast at eight", "too many sweets", "dinner together", "fresh fruit"]),
     ("read", "reads", "read", "reading", ["the newspaper", "a story book", "the news on the phone", "a long novel"]),
@@ -712,6 +991,7 @@ G_VERB = [  # base, 3rd-person, past, -ing, object options
 G_TIME_PAST = ["yesterday", "last week", "last year", "in the morning", "two days ago", "during the holidays", "when I was young"]
 G_TIME_NOW = ["every day", "on Sundays", "in the evening", "usually", "sometimes", "after school", "every morning"]
 G_TIME_FUT = ["tomorrow", "next week", "this weekend", "after the exams", "next year", "soon"]
+
 FEELINGS = ["I was very angry when the train was late.", "She felt sad after her friend moved away.",
             "Our dog died last winter and we all cried.", "He was scared of the dark as a child.",
             "I hate waiting in long queues.", "We were tired after the long journey.",
@@ -722,6 +1002,7 @@ FEELINGS = ["I was very angry when the train was late.", "She felt sad after her
             "The accident on the highway blocked traffic for hours.", "The villain in the story is cruel and selfish.",
             "The war in the history book killed thousands of people.", "He fought with his brother over the remote.",
             "The storm destroyed many houses near the coast.", "I could not stop laughing at the silly joke."]
+
 GENERAL = ["The weather is pleasant today.", "It rained heavily all night.", "The sun rises in the east.",
            "Water boils at one hundred degrees.", "Mumbai is a busy city.", "The Himalayas are very tall mountains.",
            "Trees give us oxygen and shade.", "Please close the door when you leave.", "Drink plenty of water in summer.",
@@ -734,6 +1015,7 @@ GENERAL = ["The weather is pleasant today.", "It rained heavily all night.", "Th
            "Happy birthday to my dear friend!", "Thank you for your kind words.", "Good morning, have a nice day.",
            "Wash your hands before eating.", "Walking is good for health.", "The train was crowded but comfortable.",
            "My favourite colour is blue.", "The baby is sleeping, please be quiet.", "We planted a mango tree in the garden."]
+
 PERSONAL_ARTICLES = {
     "My first job": ["I got my first job at the age of twenty.", "The office was far from my home.",
                      "I woke up at six every day to catch the bus.", "My manager was strict but kind.",
@@ -763,25 +1045,25 @@ PERSONAL_ARTICLES = {
 
 
 def simple_sentence():
-    subj, person = pick(G_SUBJ)
+    subj, person_label = pick(G_SUBJ)
     base, third, past, ing, objs = pick(G_VERB)
     obj = pick(objs)
     r = R.random()
     if r < .25:
         return f"{subj} {past} {obj} {pick(G_TIME_PAST)}."
     if r < .45:
-        v = third if person == "3s" else base
+        v = third if person_label == "3s" else base
         return f"{subj} {v} {obj} {pick(G_TIME_NOW)}."
     if r < .6:
         return f"{subj} will {base} {obj} {pick(G_TIME_FUT)}."
     if r < .7:
-        be = {"1s": "am", "3s": "is"}.get(person, "are")
+        be = {"1s": "am", "3s": "is"}.get(person_label, "are")
         return f"{subj} {be} {ing} {obj} now."
     if r < .78:
-        aux = "does" if person == "3s" else "do"
+        aux = "does" if person_label == "3s" else "do"
         return f"{aux.capitalize()} {subj.lower() if subj != 'I' else subj} {base} {obj}?"
     if r < .86:
-        aux = "doesn't" if person == "3s" else "don't"
+        aux = "doesn't" if person_label == "3s" else "don't"
         return f"{subj} {aux} {base} {obj} {pick(G_TIME_NOW)}."
     if r < .92:
         return f"{_sentence_case(base)} {obj} {pick(G_TIME_FUT)}, please."
@@ -804,29 +1086,71 @@ def everyday():
     return f"{title_}\n\n{' '.join(body)}", "article_personal"
 
 
-# Non-native / careless grammar. Applied to safe AND unsafe text so grammar never moves the label.
-_GRAMMAR_SWAPS = [(r"\b(is|are)\b", {"is": "are", "are": "is"}), (r"\b(was|were)\b", {"was": "were", "were": "was"}),
-                  (r"\b(has|have)\b", {"has": "have", "have": "has"}), (r"\b(goes)\b", {"goes": "go"}),
-                  (r"\b(went)\b", {"went": "go"}), (r"\b(does)\b", {"does": "do"}), (r"\b(bought)\b", {"bought": "buyed"}),
-                  (r"\b(doesn't)\b", {"doesn't": "don't"}), (r"\b(children)\b", {"children": "childs"}),
-                  (r"\b(an)\b", {"an": "a"})]
+# Non-native / careless grammar swaps. Applied to safe AND unsafe text so grammar never moves the label.
+_GRAMMAR_SWAPS = [
+    (r"\b(is|are)\b", {"is": "are", "are": "is"}),
+    (r"\b(was|were)\b", {"was": "were", "were": "was"}),
+    (r"\b(has|have)\b", {"has": "have", "have": "has"}),
+    (r"\b(goes)\b", {"goes": "go"}),
+    (r"\b(went)\b", {"went": "go"}),
+    (r"\b(does)\b", {"does": "do"}),
+    (r"\b(bought)\b", {"bought": "buyed"}),
+    (r"\b(doesn't)\b", {"doesn't": "don't"}),
+    (r"\b(children)\b", {"children": "childs"}),
+    (r"\b(an)\b", {"an": "a"}),
+    (r"\b(sent)\b", {"sent": "send"}),
+    (r"\b(paid)\b", {"paid": "payed"}),
+    (r"\b(received)\b", {"received": "receive"}),
+    (r"\b(dispatched)\b", {"dispatched": "dispatch"}),
+    (r"\b(quoted)\b", {"quoted": "quote"}),
+    (r"\b(verified)\b", {"verified": "verify"}),
+    (r"\b(equipment)\b", {"equipment": "equipments"}),
+    (r"\b(machinery)\b", {"machinery": "machineries"}),
+    (r"\b(furniture)\b", {"furniture": "furnitures"}),
+    (r"\b(advice)\b", {"advice": "advices"}),
+    (r"\b(feedback)\b", {"feedback": "feedbacks"}),
+    (r"\b(stationery)\b", {"stationery": "stationeries"}),
+    (r"\b(information)\b", {"information": "informations"}),
+    (r"\b(infrastructure)\b", {"infrastructure": "infrastructures"}),
+    (r"\b(scrap)\b", {"scrap": "scraps"}),
+    (r"\b(revert)\b", {"revert": "revert back"}),
+    (r"\b(discuss)\b", {"discuss": "discuss about"}),
+    (r"\b(comply with)\b", {"comply with": "comply to"}),
+    (r"\b(demanded)\b", {"demanded": "demanded for"}),
+    (r"\b(cope with)\b", {"cope with": "cope up with"}),
+    (r"\b(better)\b", {"better": "more better"}),
+    (r"\b(cheaper)\b", {"cheaper": "more cheaper"}),
+    (r"\b(faster)\b", {"faster": "more faster"}),
+    (r"\b(didn't receive|did not receive)\b", {"didn't receive": "didn't received", "did not receive": "did not received"}),
+    (r"\b(we have)\b", {"we have": "we are having"}),
+    (r"\b(they have)\b", {"they have": "they are having"}),
+    (r"\b(we know)\b", {"we know": "we are knowing"}),
+    (r"\b(we want)\b", {"we want": "we are wanting"}),
+    (r"\b(the goods are)\b", {"the goods are": "the goods is"}),
+    (r"\b(supplier has)\b", {"supplier has": "supplier have"}),
+    (r"\b(firm has)\b", {"firm has": "firm have"}),
+    (r"\b(don't)\b", {"don't": "dont"}),
+    (r"\b(can't)\b", {"can't": "cant"}),
+    (r"\b(won't)\b", {"won't": "wont"}),
+    (r"\b(it's)\b", {"it's": "its"}),
+]
 
 
 def bad_grammar(text):
     out = text
     for _ in range(R.randint(1, 3)):
         r = R.random()
-        if r < .35:   # drop articles
+        if r < .30:   # drop articles
             out = re.sub(r"\b(the|a|an|The|A|An) ", "", out, count=R.randint(1, 3))
-        elif r < .75:
+        elif r < .70:
             pat, table = pick(_GRAMMAR_SWAPS)
             out = re.sub(pat, lambda m: table.get(m.group(1), m.group(1)), out, count=1)
-        elif r < .85:  # no final punctuation / no capital
+        elif r < .80:  # no final punctuation / lowercased initial
             out = out.rstrip(".!?")
             out = out[:1].lower() + out[1:]
-        elif r < .93:  # run-on: commas instead of full stops
+        elif r < .90:  # run-on: commas instead of full stops
             out = re.sub(r"\.\s+(\w)", lambda m: ", " + m.group(1).lower(), out, count=2)
-        else:          # doubled word
+        else:          # doubled word for emphasis or typo
             words = out.split(" ")
             if len(words) > 3:
                 i = R.randrange(len(words))
@@ -835,11 +1159,24 @@ def bad_grammar(text):
     return out
 
 
-SAFE_GEN = [(listing, "listing", 16), (profile, "profile", 8), (review, "review", 10), (announcement, "announcement", 7),
-            (job, "job", 4), (enquiry, "enquiry", 6), (hard_negative, "hard_negative", 10),
-            # The counterweight to the "dismissive" class: without these the model would learn
-            # that any criticism near a pronoun is abuse.
-            (professional_criticism, "professional_criticism", 7)]
+SAFE_GEN = [
+    (listing, "listing", 12),
+    (profile, "profile", 6),
+    (review, "review", 8),
+    (announcement, "announcement", 6),
+    (job, "job", 3),
+    (enquiry, "enquiry", 5),
+    (hard_negative, "hard_negative", 8),
+    (professional_criticism, "professional_criticism", 6),
+    (b2b_negotiation, "b2b_negotiation", 14),
+    (procurement_tender, "procurement_tender", 10),
+    (hard_negative_pricing_idiom, "hard_negative_pricing_idiom", 12),
+    (b2b_logistics_docs, "b2b_logistics_docs", 10),
+    (b2b_qa_specs, "b2b_qa_specs", 10),
+    (b2b_disputes, "b2b_disputes", 8),
+    (grammar_business_prose, "grammar_business_prose", 16),
+    (grammar_everyday_prose, "grammar_everyday_prose", 12),
+]
 
 # --------------------------------------------------------------------------- unsafe
 
@@ -935,7 +1272,6 @@ UNSAFE = {
         "You will die soon, I promise.",
         "I will find you and hurt you.",
         "wait and see what i do to you and your family",
-        # veiled threats (round 2)
         "{pick_bad} tends to happen to people who {pick_why}.",
         "Your {pick_asset} {pick_fate} if you {pick_why2}.",
         "We know where your {pick_family} {pick_live}. {pick_warn}",
@@ -959,7 +1295,6 @@ UNSAFE = {
         "She is so ugly and dumb, nobody like her.",
         "Get lost, you dirty dog.",
         "This man is a donkey, he have no brain.",
-        # insult before the pronoun: still aimed at a person (senior-review policy)
         "What a shameless liar {he_l} is.",
         "Idiots like {him} should not be allowed to run a business.",
         "Pathetic cheats, every one of {him}.",
@@ -978,11 +1313,6 @@ UNSAFE = {
         "{group} should not be allowed to {pick_allowed}.",
         "People from that {pick_community} should {pick_exclude}.",
     ],
-    # Contempt for a person's mind or competence. Policy (senior review): abuse pointed at an
-    # individual, even without a slur. The line is the target and the tone, not the adjective:
-    # "the price was absurd" and "I disagree with his approach" are safe and are generated as
-    # hard negatives in professional_criticism(), so the model has to learn the contrast rather
-    # than the word. The gate can't make this distinction — it only sees pronoun + term.
     "dismissive": [
         "{his_c} way of thinking is {dis}.",
         "{his_c} whole approach is {dis}, {he_l} clearly has no idea what {he_l} is doing.",
@@ -1039,6 +1369,7 @@ UNSAFE = {
         "Online betting app, win daily, use my referral code for a bonus.",
     ],
 }
+
 BRANDS = ["Rolex", "Gucci", "Nike", "Adidas", "Louis Vuitton", "Apple", "Samsung", "Ray-Ban", "Bosch", "Philips",
           "Chanel", "Titan", "Puma", "Boat", "Havells"]
 GROUPS = ["Biharis", "Marwaris", "Muslims", "Hindus", "Christians", "Dalits", "South Indians", "northerners",
@@ -1062,7 +1393,6 @@ HINGLISH_UNSAFE = [
     ("abuse", "Yeh supplier ek number ka chor aur dhokebaaz hai, bewakoof log."),
     ("abuse", "Tum log bilkul nikamme aur gadhe ho."),
     ("hate", "{group} se kabhi maal mat lena, sab chor hote hain."),
-    # the dismissive class in Hinglish too, so the safe/unsafe line isn't English-only
     ("dismissive", "Usko kuch nahi pata, bekar aadmi hai."),
     ("dismissive", "Unki soch hi galat hai, unhe kuch samajh nahi aata."),
     ("dismissive", "Isse baat karna time waste hai, kuch akal nahi hai."),
@@ -1070,17 +1400,13 @@ HINGLISH_UNSAFE = [
     ("illegal", "Fake GST bill chahiye to contact karo, koi bhi amount."),
     ("adult", "Hot ladkiyan available hain, raat ki service, call karo."),
 ]
+
 PRONOUNS = [dict(he="He", he_l="he", his="his", his_c="His", him="him"),
             dict(he="She", he_l="she", his="her", his_c="Her", him="her"),
             dict(he="They", he_l="they", his="their", his_c="Their", him="them")]
 
-# Dismissive adjectives that are ordinary when they describe a price, a delay or a rule, so
-# only the model can judge who they are aimed at. Deliberately NOT on the gate's blocklist,
-# and safe to use in the hard negatives below.
 DISMISSIVE_NEUTRAL = ["absurd", "ridiculous", "laughable", "nonsense", "a joke", "utter rubbish",
                       "complete nonsense", "embarrassing", "hopeless", "a waste of time"]
-# Already gate-block terms (abuse.targeted). Fine in the unsafe templates — belt and braces —
-# but they must never appear in a safe example, or the data contradicts the gate.
 DISMISSIVE_BLOCKED = ["pathetic", "worthless", "beyond stupid"]
 DISMISSIVE = DISMISSIVE_NEUTRAL + DISMISSIVE_BLOCKED
 
@@ -1099,7 +1425,7 @@ def unsafe_sentence(cat=None):
                       **_slots())
     text = _sentence_case(text)
     if cat in ("scam_income", "counterfeit", "phishing", "registration_fee") and R.random() < .15:
-        text = leetspeak(text, rate=.6)          # round 2: leetspeak on the categories that use it most
+        text = leetspeak(text, rate=.6)
     return text, cat
 
 
@@ -1154,16 +1480,16 @@ def spaced(text):
 
 def noise(text):
     """Surface variation that must NOT change the label (applied to safe and unsafe alike)."""
-    if R.random() < .18:
+    if R.random() < .25:
         text = bad_grammar(text)
     r = R.random()
-    if r < .08:
+    if r < .06:
         return text.upper()
-    if r < .16:
+    if r < .12:
         return text.lower()
-    if r < .22:
-        return text.rstrip(".") + pick(["!!", "!!!", " :)", " 🙏", " 👍"])
-    if r < .26:  # typo
+    if r < .18:
+        return text.rstrip(".") + pick(["!!", "!!!", " :)", " 🙏", " 👍", "."])
+    if r < .22:  # typo
         i = R.randrange(max(1, len(text) - 1))
         return text[:i] + text[i + 1:]
     return text
@@ -1186,51 +1512,87 @@ SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 def safe_post():
     """A safe text of any kind; returns (text, category)."""
     r = R.random()
-    if r < .03:
+    if r < .02:
         return fragment(), "fragment"
-    if r < .20:
+    if r < .12:
         return everyday()
-    if r < .38:
+    if r < .22:
         text, topic = article()
-        if R.random() < .3:                 # business articles also contain everyday sentences
+        if R.random() < .3:
             text += " " + " ".join(simple_sentence() for _ in range(R.randint(1, 2)))
         return text, f"article_{topic}"
-    if r < .43:
+    if r < .26:
         return title(), "title"
-    if r < .52:                              # raised from 5%: Hinglish was too thin to generalise
+    if r < .32:
         return hinglish_safe(), "hinglish"
-    fn, cat, _ = R.choices(SAFE_GEN, weights=[w for *_, w in SAFE_GEN])[0]
+    if r < .42:
+        return grammar_business_prose(), "grammar_business_prose"
+    if r < .50:
+        return b2b_negotiation(), "b2b_negotiation"
+    if r < .58:
+        return hard_negative_pricing_idiom(), "hard_negative_pricing_idiom"
+    fn, cat = R.choices([(f, c) for f, c, _ in SAFE_GEN], weights=[w for *_, w in SAFE_GEN])[0]
     text = fn()
-    if R.random() < .35 and cat != "hard_negative":   # multi-part posts
-        more, _, _ = R.choices(SAFE_GEN, weights=[w for *_, w in SAFE_GEN])[0]
-        text = f"{text} {more()}"
+    if R.random() < .35 and cat != "hard_negative":
+        more_fn, _ = R.choices([(f, c) for f, c, _ in SAFE_GEN], weights=[w for *_, w in SAFE_GEN])[0]
+        text = f"{text} {more_fn()}"
     return text, cat
 
 
-def generate(n: int, seed: int):
+def _is_safe_clean(text: str) -> bool:
+    """Ensure safe text does not contradict Layer 1 Gate or collide with held-out eval sets."""
+    if not text or len(text.strip()) < 3:
+        return False
+    norm = re.sub(r"\s+", " ", text).strip().lower()
+    if norm in _EVAL_KEYS:
+        return False
+    if _GATE is not None:
+        try:
+            res = _GATE.check(text)
+            if res.blocked or res.needs_revision:
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def generate(n: int, seed: int, existing_rows: list[dict] | None = None):
     R.seed(seed)
     rows, seen = [], set()
+
+    if existing_rows:
+        for r in existing_rows:
+            key = (r["text"].strip().lower(), int(r["label"]))
+            seen.add(key)
 
     def add(text, label, cat, kind):
         text = re.sub(r"[ \t]+", " ", text).strip()
         key = (text.lower(), label)
         if text and key not in seen:
+            if label == 0 and not _is_safe_clean(text):
+                return False
             seen.add(key)
             rows.append({"text": text, "label": label, "category": cat, "kind": kind})
+            return True
+        return False
 
-    while len(rows) < n:
+    target_count = n
+    attempts = 0
+    max_attempts = n * 4
+
+    while len(rows) < target_count and attempts < max_attempts:
+        attempts += 1
         r = R.random()
-        if r < .42:                                    # safe, whole text
+        if r < .46:                                    # safe, whole text (augmented with business & grammar)
             text, cat = safe_post()
-            # Occasional leetspeak/spacing on safe text too, so "digits in words" isn't a shortcut to unsafe.
             if R.random() < .05:
                 text = leetspeak(text) if R.random() < .7 else spaced(text)
             add(noise(text), 0, cat, "title" if cat == "title" else "whole")
-            if R.random() < .35:                       # and its sentences on their own (the API scores those)
+            if R.random() < .35:                       # individual sentences scored alone
                 for s in SENT_SPLIT.split(text.replace("\n", " "))[:4]:
                     if len(s.split()) >= 2:
                         add(s, 0, cat, "sentence")
-        elif r < .67:                                  # unsafe sentence on its own
+        elif r < .68:                                  # unsafe sentence on its own
             s, cat = unsafe_sentence()
             add(noise(obfuscate(s)), 1, cat, "sentence")
         elif r < .87:                                  # unsafe sentence hidden in a clean post
@@ -1240,12 +1602,13 @@ def generate(n: int, seed: int):
             parts = SENT_SPLIT.split(clean)
             parts.insert(R.randint(0, len(parts)), s)
             mixed = " ".join(parts)
-            add(bad_grammar(mixed) if R.random() < .15 else mixed, 1, cat, "mixed")
+            add(bad_grammar(mixed) if R.random() < .20 else mixed, 1, cat, "mixed")
         else:                                          # several unsafe sentences together
             cat = pick(list(UNSAFE))
             s1, _ = unsafe_sentence(cat)
             s2, _ = unsafe_sentence(cat)
             add(noise(f"{s1} {s2}" if s1 != s2 else s1), 1, cat, "whole")
+
     R.shuffle(rows)
     return rows
 
@@ -1253,21 +1616,56 @@ def generate(n: int, seed: int):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default="D:/AI/bonc-data/synthetic_v4.csv")
-    ap.add_argument("--n", type=int, default=70_000)
+    ap.add_argument("--in-file", default=None, help="existing CSV file to load when appending")
+    ap.add_argument("--n", type=int, default=70_000, help="target rows to generate (if not appending)")
+    ap.add_argument("--add-n", type=int, default=None, help="number of new rows to add when appending")
+    ap.add_argument("--append", action="store_true", help="append generated rows to existing dataset")
+    ap.add_argument("--copy-to", default=None, help="optional additional destination path to copy the CSV to")
     ap.add_argument("--seed", type=int, default=4)
     args = ap.parse_args()
-    rows = generate(args.n, args.seed)
+
     out = Path(args.out)
+    existing_rows = []
+
+    if args.append:
+        in_path = Path(args.in_file if args.in_file else args.out)
+        if in_path.exists():
+            print(f"Loading existing rows from {in_path}...")
+            with in_path.open(encoding="utf-8", errors="ignore") as f:
+                reader = csv.DictReader(f)
+                existing_rows = list(reader)
+            print(f"Loaded {len(existing_rows)} existing rows.")
+        else:
+            print(f"Input file {in_path} not found, generating from scratch.")
+        num_to_generate = args.add_n if args.add_n is not None else args.n
+        print(f"Generating {num_to_generate} new unique rows (grammar & business sense wordings)...")
+        new_rows = generate(num_to_generate, args.seed, existing_rows=existing_rows)
+        rows = existing_rows + new_rows
+        random.Random(args.seed).shuffle(rows)
+    else:
+        print(f"Generating {args.n} rows from scratch with seed {args.seed}...")
+        rows = generate(args.n, args.seed)
+
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["text", "label", "category", "kind"])
         w.writeheader()
         w.writerows(rows)
+    print(f"Wrote {len(rows)} rows to {out}")
+
+    if args.copy_to:
+        copy_dest = Path(args.copy_to)
+        copy_dest.parent.mkdir(parents=True, exist_ok=True)
+        with copy_dest.open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=["text", "label", "category", "kind"])
+            w.writeheader()
+            w.writerows(rows)
+        print(f"Also copied {len(rows)} rows to {copy_dest}")
+
     from collections import Counter
-    print(f"wrote {len(rows)} rows to {out}")
-    print("labels:", Counter(r["label"] for r in rows))
-    print("kinds:", Counter(r["kind"] for r in rows))
-    print("categories:", Counter(r["category"] for r in rows).most_common())
+    print("Labels distribution:", Counter(r["label"] for r in rows))
+    print("Kinds distribution:", Counter(r["kind"] for r in rows))
+    print("Top 15 categories:", Counter(r["category"] for r in rows).most_common(15))
 
 
 if __name__ == "__main__":
