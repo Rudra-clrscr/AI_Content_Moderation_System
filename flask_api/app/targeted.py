@@ -317,7 +317,15 @@ class SentenceScan:
     """
 
     enabled: bool = True
-    max_sentences: int = 400   # covers a full 25,000-character article; each is ~10 ms
+    # Spans scored on their own. This has to cover the LONGEST text that can reach the pipeline,
+    # which is a PDF's extracted text (pdf.max_chars), not limits.max_chars: anything past the cap
+    # is scored by nothing, because the model's 256-token window cannot see that far either.
+    # 100,000 chars / ~62 chars per span = ~1,613, so 1,700. The pre-filter clears most clean spans
+    # without a model call, so a long clean document stays cheap.
+    max_sentences: int = 1700
+    # A span the syntax check calls noise (a row of logos, a catalogue heading) scores erratically,
+    # so it may only reject when the score leaves no doubt. Below this it is recorded and ignored.
+    low_syntax_reject_min: float = 0.90
     # A middle-band sentence in an otherwise allowed post asks for a revision (that sentence
     # highlighted). Only meaningful when the model's "unsure" output isn't the default for
     # ordinary text, i.e. with calibrated label_weights (see settings.yaml).
@@ -326,3 +334,5 @@ class SentenceScan:
     def __post_init__(self) -> None:
         if self.max_sentences < 1:
             raise ValueError("sentence_scan.max_sentences must be at least 1")
+        if not 0.0 < self.low_syntax_reject_min <= 1.0:
+            raise ValueError("sentence_scan.low_syntax_reject_min must be in (0, 1]")

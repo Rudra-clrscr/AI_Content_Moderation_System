@@ -249,10 +249,18 @@ class Pipeline:
                 entry = {"start": start, "end": end, "risk_score": round(r.risk_score, 6)}
                 if kind != "sentence":
                     entry["kind"] = kind
+                # A span with no grammatical substance (a row of logos, a catalogue heading)
+                # scores erratically, so it is not allowed to escalate on a middling score.
+                # It is still scored and can still reject when the score leaves no doubt.
+                if not is_scannable_sentence(req.content[start:end]):
+                    entry["low_syntax"] = True
                 sentence_scores.append(entry)
             sentence_scores.sort(key=lambda x: (x["start"], x["end"]))
             by_model = [x for x in sentence_scores if x.get("by") != "prefilter"]
-            rejecting = [x for x in by_model if route(x["risk_score"], self.thresholds) is Decision.REJECT]
+            floor = self.sentence_scan.low_syntax_reject_min
+            rejecting = [x for x in by_model
+                         if route(x["risk_score"], self.thresholds) is Decision.REJECT
+                         and (not x.get("low_syntax") or x["risk_score"] >= floor)]
             if rejecting:
                 if not whole_rejected:
                     decision, stage = Decision.REJECT, Stage.SENTENCE
@@ -260,7 +268,8 @@ class Pipeline:
                                       risk_score=x["risk_score"]) for x in _non_overlapping(rejecting)]
                 highlighted_by_scan = True
             elif self.sentence_scan.revise_on_middle and decision is Decision.ALLOW:
-                risky = [x for x in by_model if x["risk_score"] > self.thresholds.allow_max]
+                risky = [x for x in by_model
+                         if x["risk_score"] > self.thresholds.allow_max and not x.get("low_syntax")]
                 if risky:
                     decision, stage = Decision.REVISE, Stage.SENTENCE
                     model_issues += [Issue(x["start"], x["end"], "model", self.feedback.model_sentence,
@@ -317,16 +326,18 @@ class Pipeline:
         merged into a neighbour), plus overlapping word windows over sentences too long to read
         undiluted (when the word scan is on).
 
-        Non-sentential noise (pure comma-separated lists of proper nouns/logos, catalog headings,
-        or fragments lacking syntax) is filtered out: isolated tokens lack context and produce
-        erratic out-of-domain risk scores."""
+        Every span is returned. Non-sentential noise (comma-separated lists of logos, catalogue
+        headings, fragments with no syntax) still gets scored, but is marked `low_syntax` so it
+        cannot escalate on a middling score — see `moderate`. Dropping those spans outright left
+        them checked by nothing at all: past the model's 256-token window the whole-text score
+        cannot see them, so a counterfeit list at the end of a long article published clean."""
         spans = scan_spans(content)
         units = [(s, e, "sentence") for s, e in spans] if len(spans) >= 2 else []
         if self.word_scan.enabled:
             ws = self.word_scan
             for s, e in spans:
                 units += [(a, b, "window") for a, b in word_windows(content, s, e, ws.window_words, ws.window_stride)]
-        return [u for u in units if is_scannable_sentence(content[u[0]:u[1]])]
+        return units
 
     def _shortlist(self, variants: list[tuple[int, int, str]], limit: int) -> list[tuple[int, int, str]]:
         """The words most worth spending a model call on, ranked by the linear pre-filter.

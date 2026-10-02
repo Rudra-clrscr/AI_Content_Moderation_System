@@ -7,7 +7,7 @@ Start the server with DEMO_PAGE=1 first. It covers publish -> allow, model rejec
 (risk > 0.5) with the sentence and trigger words highlighted, Show, stale feedback
 after edits, reopening "Rejected" to rewrite, gate revise with highlights across
 formatting, gate reject, link URLs, drafts (no moderation call), the
-free-publish quota, fail-closed errors, phone width, attachments, and the other
+unlimited publishing, fail-closed errors, phone width, attachments, and the other
 dashboard tabs (Videos, Business Proposals) each on their own content_type.
 It clears this page's localStorage in the test browser only.
 """
@@ -30,6 +30,17 @@ results = []
 def check(name, cond, detail=""):
     results.append((name, bool(cond), detail))
     print(("PASS " if cond else "FAIL ") + name + (f"  [{detail}]" if detail else ""))
+
+
+def published_titles(page) -> str:
+    """Titles of the articles that actually went live. Replaces the old quota counter as the
+    way to tell whether something published. Read from stored state rather than the list, so
+    it works while the modal is open (a rejected publish keeps the modal up)."""
+    return page.evaluate("""() => {
+        const s = JSON.parse(localStorage.getItem('bonc-articles-demo-v1') || '{}');
+        return (s.articles || []).filter(a => a.status === 'published')
+                                 .map(a => a.title).join(' | ');
+    }""")
 
 
 def write(page, title, body_html):
@@ -112,9 +123,8 @@ with sync_playwright() as p:
     page.evaluate("localStorage.clear()")
     page.reload()
 
-    # 1. empty state + quota
+    # 1. empty state
     check("empty state shown", "No articles yet" in page.inner_text("#list"))
-    check("quota 2 of 2", "2 of 2 free article publishes left" in page.inner_text("#quota"))
     SHOTS and page.screenshot(path=f"{SHOTS}/a1_empty.png")
 
     # 2. allow -> published
@@ -123,7 +133,6 @@ with sync_playwright() as p:
     page.wait_for_selector("#modal", state="hidden")
     check("allow: modal closed", page.is_hidden("#modal"))
     check("allow: listed as published", "Cotton bedsheets for wholesale buyers" in page.inner_text("#list"))
-    check("allow: quota now 1 of 2", "1 of 2" in page.inner_text("#quota"))
 
     # 3. model reject (risk > 0.5) -> only the bad sentence highlighted, trigger words marked, rewrite
     write(page, "PVC pipes for contractors", "<p>High quality PVC pipes, ISI marked, available in all sizes. Earn 50000 per week from home, no experience needed.</p>")
@@ -135,7 +144,7 @@ with sync_playwright() as p:
     check("model reject: trigger words marked", len(word_highlights(page)) >= 1 and page.locator(".issues .trigger").count() >= 1,
           str(word_highlights(page)))
     check("model reject: modal stays open to rewrite", page.is_visible("#modal"))
-    check("model reject: not published, quota unchanged", "1 of 2" in page.inner_text("#quota"))
+    check("model reject: not published", "PVC pipes for contractors" not in published_titles(page))
     SHOTS and page.screenshot(path=f"{SHOTS}/a2_model_reject.png")
     page.locator(".issues li", has_text="Body").locator("[data-issue]").first.click()
     sel = page.evaluate("() => window.getSelection().toString()")
@@ -191,17 +200,21 @@ with sync_playwright() as p:
     check("draft: no moderation call", len(calls) == before, f"{len(calls) - before} calls")
     check("draft: listed under Drafts", "Draft about solar panels" in page.inner_text("#list"))
 
-    # 9. publish the draft (allowed), then quota exhausted
+    # 9. publish the draft, then keep publishing: there is no cap on how many articles a
+    # member may publish. What may be published is the moderator's decision, not a counter.
     page.click("[data-action='edit']")
     page.click("#publish-btn")
     page.wait_for_selector("#modal", state="hidden")
-    check("quota: 0 of 2 after second publish", "0 of 2" in page.inner_text("#quota"))
-    write(page, "Office chairs", "<p>Office chairs with lumbar support. They are available in mesh and leather.</p>")
-    before = len(calls)
-    page.click("#publish-btn")
-    check("quota: third publish blocked before calling the API",
-          "No free article publishes left" in page.inner_text("#banner") and len(calls) == before)
-    page.click("#close-btn")
+    check("draft publishes", "Draft about solar panels" in published_titles(page))
+    for n in (3, 4, 5):
+        write(page, f"Office chairs batch {n}",
+              "<p>Office chairs with lumbar support. They are available in mesh and leather.</p>")
+        check(f"publish {n}: button is available", not page.is_disabled("#publish-btn"))
+        page.click("#publish-btn")
+        page.wait_for_selector("#modal", state="hidden")
+    titles = published_titles(page)
+    check("no publish cap: every article published",
+          all(f"Office chairs batch {n}" in titles for n in (3, 4, 5)), titles[:120])
 
     # 10. service down -> fail closed
     page.evaluate("localStorage.clear()"); page.reload()
@@ -223,8 +236,7 @@ with sync_playwright() as p:
     SHOTS and page.screenshot(path=f"{SHOTS}/a5_mobile_modal.png")
     page.click("#close-btn")
 
-    # 12. article media. Last, on a reset page: it publishes, and the quota checks above
-    # assume they own the two free publishes.
+    # 12. article media. Last, on a reset page.
     media = _media_files()
     if not media:
         print("SKIP media checks (Pillow not installed)")
@@ -250,7 +262,8 @@ with sync_playwright() as p:
         page.wait_for_selector(".banner.error", timeout=30_000)
         banner = page.inner_text("#banner")
         check("media: publish blocked, naming the file", "scam_flyer.png" in banner, banner[:120])
-        check("media: nothing published while an attachment is blocked", "2 of 2" in page.inner_text("#quota"))
+        check("media: nothing published while an attachment is blocked",
+              "Bedsheet range with media" not in published_titles(page))
         i = page.eval_on_selector_all(".attachments li",      # drop the blocked one; the rest publish
             "els => els.findIndex(e => e.querySelector('.att-state').textContent.trim()==='blocked')")
         page.click(f".attachments li:nth-child({i + 1}) .att-remove")
