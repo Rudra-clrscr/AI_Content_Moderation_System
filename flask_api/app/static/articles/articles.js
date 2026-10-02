@@ -10,13 +10,11 @@
  *               the author can reopen it, rewrite and publish again.
  *   Save as Draft -> no moderation (drafts aren't public).
  *
- * Only successful publishes use up the free quota. Articles are stored in this
  * browser (localStorage) because this is a front-end reference, not the platform.
  */
 (function () {
   "use strict";
   const M = window.BoncModeration;
-  const FREE_PUBLISHES = 2;
   const MAX_BODY = 20000;
   const STORE_KEY = "bonc-articles-demo-v1";
   const TABS = [
@@ -38,8 +36,8 @@
 
   // ---------------- storage ----------------
   function load() {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || { articles: [], used: 0 }; }
-    catch { return { articles: [], used: 0 }; }
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || { articles: [] }; }
+    catch { return { articles: [] }; }
   }
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch { /* storage unavailable: keep in memory */ }
@@ -55,8 +53,6 @@
 
   // ---------------- list ----------------
   function render() {
-    const left = Math.max(0, FREE_PUBLISHES - state.used);
-    $("quota").innerHTML = `<b>${left}</b> of ${FREE_PUBLISHES} free article publishes left`;
     $("pills").innerHTML = TABS.map((t) => {
       const n = state.articles.filter((a) => a.status === t.id).length;
       return `<button class="pill ${t.id === tab ? "active" : ""}" role="tab" aria-selected="${t.id === tab}" data-tab="${t.id}">` +
@@ -340,10 +336,6 @@
   async function publish() {
     if (!validate()) return;
     const alreadyPublished = editing?.status === "published";
-    if (!alreadyPublished && state.used >= FREE_PUBLISHES) {
-      showError("No free article publishes left", "You've used your free publishes. Save this article as a draft for now.");
-      return;
-    }
     const btn = $("publish-btn");
     const label = btn.textContent;
     btn.disabled = true; $("draft-btn").disabled = true;
@@ -369,7 +361,6 @@
       if (result.status === "pending") {
         showError("Still checking", "Your article is being checked. Please try publishing again in a moment.");
       } else if (result.decision === "allow") {
-        if (!alreadyPublished) state.used += 1;
         snapshot("published", { moderation, publishedAt: Date.now(), attachments: storedAttachments() });
         closeModal(); tab = "published"; render();
         toast(alreadyPublished ? "Article updated" : "Article published");

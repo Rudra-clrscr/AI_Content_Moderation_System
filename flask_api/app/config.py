@@ -157,8 +157,9 @@ def load_settings(path: str | Path | None = None) -> Settings:
         ),
         sentence_scan=SentenceScan(
             enabled=_as_bool(env("SENTENCE_SCAN", sc.get("enabled", True))),
-            max_sentences=int(sc.get("max_sentences", 400)),
+            max_sentences=int(sc.get("max_sentences", 1700)),
             revise_on_middle=_as_bool(sc.get("revise_on_middle", True)),
+            low_syntax_reject_min=float(sc.get("low_syntax_reject_min", 0.90)),
         ),
         word_scan=WordScan(
             enabled=_as_bool(env("WORD_SCAN", ws.get("enabled", True))),

@@ -58,8 +58,6 @@ h1 { font-size: 20px; font-weight: 700; color: var(--heading); margin: 8px 0 2px
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
 .card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .card-head h2 { font-size: 18px; margin: 0; color: var(--heading); }
-.quota { color: var(--muted); font-size: 14px; margin: 4px 0 0; }
-.quota b { color: var(--primary); }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .pill .count { opacity: .75; margin-left: 4px; }
 
@@ -186,4 +184,12 @@ textarea.input { resize: vertical; min-height: 96px; }
   .modal-body, .modal-head, .modal-foot { padding-left: 16px; padding-right: 16px; }
   .row { flex-direction: column; }
   .modal-foot .btn { flex: 1; }
+}
+
+/* Buttons disabled while a submission is being checked. */
+.btn.is-disabled,
+.btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  filter: grayscale(.35);
 }

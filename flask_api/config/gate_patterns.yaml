@@ -303,7 +303,9 @@ rules:
     action: block
     description: B2B off-platform payment evasion, escrow bypass, and side-deal solicitations.
     patterns:
-      - '\b(?:off\s+the\s+books|bypass\s+(?:escrow|platform|portal)|outside\s+the\s+portal|settle\s+(?:all\s+transactions\s+)?in\s+raw\s+cash)\b'
+      - '\b(?:off\s+the\s+books|bypass\s+(?:escrow|platform|portal)|outside\s+the\s+portal)\b'
+      # "we/I settle in raw cash", not "we cannot settle in raw cash".
+      - '\b(?:we|i)\s+(?:will\s+|shall\s+|only\s+)*settle\s+(?:all\s+transactions\s+)?in\s+raw\s+cash\b'
       - '\b(?:skip\s+platform\s+checkout|do\s+not\s+(?:place\s+order|order)\s+on\s+(?:bonc|portal|platform)|do\s+not\s+generate\s+platform\s+purchase\s+order)\b'
       - '\b(?:wire\s+funds\s+directly\s+to\s+director\s+account|side-deal\s+rate|route\s+this\s+shipment\s+outside\s+the\s+portal)\b'
       - '\b(?:orders?\s+(?:on|through)\s+portal\s+will\s+be\s+cancelled|all\s+orders\s+on\s+portal\s+will\s+be\s+cancelled)\b'
@@ -314,9 +316,21 @@ rules:
   - id: fraud.counterfeit_certification
     category: fraud
     action: block
-    description: Counterfeit goods, duplicate industrial OEM parts, and fake/fabricated certifications.
+    description: >-
+      Counterfeit goods, duplicate industrial OEM parts, and forged certifications.
+      "fabricated" and "unauthorized" were removed from the adjective list in front of a
+      standard: they are ordinary trade words ("fabricated ISI marked angles" is metalwork,
+      "report sellers using unauthorized trademarks" is compliance writing), and they blocked
+      six honest sentences. "fabricated" is kept in front of DOCUMENTS, where it does mean
+      forged. KNOWN TRADE-OFF: a fraud-awareness article naming "counterfeit BIS hallmark
+      stickers" is still blocked. That is deliberate - measured on v5, the model alone catches
+      only 2 of 5 counterfeit OFFERS ("we can supply counterfeit BIS hallmark stickers" scores
+      0.0016), so this rule is load-bearing and cannot be handed to the model the way
+      abuse.targeted handed it "you idiot".
     patterns:
-      - '\b(?:counterfeit|cloned|fabricated|unauthorized|duplicated|stamped\s+with\s+counterfeit)\s+(?:isi|bis|hallmark|\d+\s+bis\s+hallmark|iso|test\s+reports?|blister\s+strips?|trademarks?|oem\s+blue\s+boxes|brand\s+blister|security\s+holographic\s+seals|castrol|mobil|rolex|omega|nike|adidas|louis\s+vuitton|gucci|skf|timken)\b'
+      - '\b(?:counterfeit|cloned|stamped\s+with\s+counterfeit)\s+(?:isi|bis|hallmark|\d+\s+bis\s+hallmark|iso|blister\s+strips?|oem\s+blue\s+boxes|brand\s+blister|security\s+holographic\s+seals|castrol|mobil|rolex|omega|nike|adidas|louis\s+vuitton|gucci|skf|timken)\b'
+      # Forged paperwork: here "fabricated" and "fake" really do mean forged.
+      - '\b(?:counterfeit|fabricated|forged|fake)\s+(?:test\s+reports?|mill\s+test\s+certificates?|certificates?|invoices?)\b'
       - '\b(?:commercial\s+replica|high-grade\s+replica)\s+(?:skf|timken|bearings|louis|gucci)\b'
       - '\b(?:replica|cloned)\s+(?:skf|timken)\s+bearings\b'
       - '\b(?:counterfeit|replica)\s+branded\s+presentation\s+box\b'
@@ -327,14 +341,19 @@ rules:
     action: block
     description: Threats of arson, sabotage, chemical damage, or industrial destruction.
     patterns:
-      - '\b(?:catch(?:ing)?\s+fire|turned?\s+into\s+ash(?:es)?|burn\s+(?:down|to\s+ashes)|pour\s+(?:hydrochloric\s+)?acid)\b'
-      - '\b(?:destroy\s+the\s+entire\s+plant|smash\s+your\s+vehicles|bury\s+your\s+business|fumes\s+when\s+the\s+valves\s+open)\b'
+      - '\byour\s+(?:shop|godown|factory|warehouse|office|unit|plant|business|stock)\b[^.!?]{0,40}\b(?:catch(?:es|ing)?\s+fire|will\s+burn|turned?\s+into\s+ash(?:es)?)\b'
+      - '\b(?:i|we)\s+(?:will|shall|am\s+going\s+to|are\s+going\s+to)\s+(?:burn|torch|set\s+fire\s+to)\b'
+      - '\bburn\s+(?:down\s+)?your\b'
+      - '\bpour\s+(?:hydrochloric\s+)?acid\s+(?:on|over)\s+(?:you|your|him|her|them)\b'
+      - '\b(?:i|we)\s+(?:will|shall)\s+(?:destroy\s+the\s+entire\s+plant|smash\s+your\s+vehicles)\b'
+      - '\b(?:bury\s+your\s+business|fumes\s+when\s+the\s+valves\s+open)\b'
 
   - id: defamation.corporate_smear
     category: abuse
     action: block
     description: Fabricated insolvency, extortion hoaxes, and malicious smear campaigns.
     patterns:
-      - '\b(?:insolvency\s+bankruptcy\s+proceedings|recover\s+your\s+money\s+before\s+they\s+shut\s+down)\b'
+      - '\b(?:fake|false|fabricated|bogus)\s+insolvency\b'
+      - '\brecover\s+your\s+money\s+before\s+they\s+shut\s+down\b'
       - '\b(?:toxic\s+recycled\s+hospital\s+waste|post\s+defamatory\s+videos|delivered\s+to\s+enforcement\s+directorate)\b'
       - '\bdefective\s+brake\s+cables\s+that\s+will\s+snap\b'

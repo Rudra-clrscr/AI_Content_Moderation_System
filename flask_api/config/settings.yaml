@@ -119,9 +119,19 @@ targeted_abuse:            # per-sentence model check for abuse aimed at a perso
 
 sentence_scan:             # score every sentence on its own: one reject-level sentence rejects the post
   enabled: true            # catches a scam tacked onto a clean listing (whole text can score ~0)
-  max_sentences: 400       # sentences + word windows scored on their own. v4 is batch-invariant, so they
-                           # are scored in batches of 32 (one ONNX call each) instead of one by one.
-                           # 400 covers a full 25,000-character article.
+  max_sentences: 1700      # sentences + word windows scored on their own, batched 32 at a time.
+                           # This must cover the LONGEST text that can reach the pipeline, which is
+                           # a PDF's extracted text (pdf.max_chars, 100,000), not limits.max_chars:
+                           # a span past the cap is scored by nothing, because the model's 256-token
+                           # window cannot see that far either. 100,000 / ~62 chars per span = 1,613, so 1,700.
+                           # tests/test_scan_coverage.py fails if pdf.max_chars outgrows this again.
+  low_syntax_reject_min: 0.90
+                           # A span with no grammatical substance (a row of logos, a catalogue
+                           # heading) scores erratically, so it may only reject when the score
+                           # leaves no doubt. Below this it is recorded and ignored. Dropping such
+                           # spans from the scan entirely - as the first version of the syntax
+                           # filter did - left them checked by nothing, and a counterfeit list at
+                           # the end of a long article published clean.
 
 triage:                    # Layer 1.5: a linear pre-filter in front of the sentence scan (app/triage.py).
   enabled: true            # Logistic regression over hashed n-grams, ~0.1 ms per span, distilled from the
