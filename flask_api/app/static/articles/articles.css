@@ -193,3 +193,20 @@ textarea.input { resize: vertical; min-height: 96px; }
   cursor: not-allowed;
   filter: grayscale(.35);
 }
+
+/* Hashtags, LinkedIn style: committed tags become chips, the input sits on the same line. */
+.tag-box { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border: 1px solid var(--line-strong);
+           border-radius: 6px; padding: 8px 10px; background: #fff; }
+.tag-box:focus-within { outline: 2px solid rgba(31,93,172,.35); border-color: var(--primary); }
+.tag-box.has-issue { border-color: var(--warn-line); background: var(--warn-bg); }
+.tag-list { display: contents; list-style: none; margin: 0; padding: 0; }
+.tag { display: inline-flex; align-items: center; gap: 6px; background: #eef3fb; color: var(--primary);
+       border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 14px; max-width: 100%; }
+.tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 15px;
+              line-height: 1; padding: 2px 4px; border-radius: 999px; }
+.tag button:hover { background: rgba(31,93,172,.15); }
+.tag-input { flex: 1 1 12ch; min-width: 12ch; border: 0; outline: none; padding: 4px 0; font: inherit;
+             color: var(--ink); background: transparent; }
+.row-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.row-tags span { color: var(--primary); font-size: 13px; }

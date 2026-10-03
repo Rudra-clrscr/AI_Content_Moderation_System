@@ -16,6 +16,7 @@
   "use strict";
   const M = window.BoncModeration;
   const MAX_BODY = 20000;
+  const MAX_TAGS = 10;
   const STORE_KEY = "bonc-articles-demo-v1";
   const TABS = [
     { id: "published", label: "Published" },
@@ -50,6 +51,7 @@
   // "new" | "checking" | "ok" | "unchecked" | "bad" — publishing needs every one of them
   // past the moderator, or the article's media becomes the way round it.
   let attachments = [];
+  let hashtags = [];
 
   // ---------------- list ----------------
   function render() {
@@ -89,6 +91,7 @@
         <div class="row-main">
           <p class="row-title">${esc(a.title || "Untitled")}</p>
           <div class="row-meta"><span class="badge ${a.status}">${label}</span>${esc(a.type)} · ${esc(a.visibility)} · ${date}</div>
+          ${(a.hashtags || []).length ? `<div class="row-tags">${a.hashtags.map((t) => `<span>#${esc(t)}</span>`).join("")}</div>` : ""}
           ${reason}
         </div>
         <div class="row-actions">
@@ -125,6 +128,9 @@
     $("modal-title").textContent = article ? "Edit article" : "Write article";
     $("title").value = article?.title || "";
     body.innerHTML = article?.bodyHtml || "";
+    hashtags = [...(article?.hashtags || [])];
+    renderTags();
+    tagInput.value = "";
     $("type").value = article?.type || "Case Study";
     $("visibility").value = article?.visibility || "Short Description";
     $("publish-btn").textContent = article?.status === "published" ? "Update" : "Publish";
@@ -220,7 +226,7 @@
     const a = editing || { id: uid(), createdAt: now };
     Object.assign(a, {
       title: $("title").value.trim(), bodyHtml: body.innerHTML, type: $("type").value,
-      visibility: $("visibility").value, status, updatedAt: now, ...extra,
+      visibility: $("visibility").value, hashtags: [...hashtags], status, updatedAt: now, ...extra,
     });
     if (!state.articles.includes(a)) state.articles.push(a);
     editing = a;
@@ -232,6 +238,61 @@
     if (!$("title").value.trim() && !bodyLength()) { closeModal(); return; }
     snapshot("draft", { moderation: null });
     closeModal(); tab = "draft"; render(); toast("Saved as draft");
+  });
+
+
+  // ---------------- hashtags ----------------
+  // LinkedIn-style: what you type is committed on Enter, comma or space, normalised to a single
+  // word and shown as a removable chip. The tags go to the moderator with the rest of the
+  // article (moderation-client.js buildArticleContent), so a scam tag stops a publish.
+  const tagInput = $("hashtag-input");
+
+  function renderTags() {
+    $("tag-list").innerHTML = hashtags.map((t, i) => `<li class="tag">
+        <span>#${esc(t)}</span>
+        <button type="button" data-tag="${i}" aria-label="Remove #${esc(t)}">\u00d7</button>
+      </li>`).join("");
+    tagInput.placeholder = hashtags.length >= MAX_TAGS ? "Tag limit reached" : "Add a hashtag and press Enter";
+    tagInput.disabled = hashtags.length >= MAX_TAGS;
+  }
+
+  function addTag(raw) {
+    const tag = M.normalizeHashtag(raw);
+    if (!tag) return false;
+    // Case-insensitive duplicates, the way a reader would see them.
+    if (hashtags.some((t) => t.toLowerCase() === tag.toLowerCase())) return false;
+    if (hashtags.length >= MAX_TAGS) return false;
+    hashtags.push(tag);
+    renderTags();
+    return true;
+  }
+
+  tagInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === "," || e.key === " ") {
+      e.preventDefault();
+      if (tagInput.value.trim()) { addTag(tagInput.value); tagInput.value = ""; }
+    } else if (e.key === "Backspace" && !tagInput.value && hashtags.length) {
+      hashtags.pop(); renderTags();
+    }
+  });
+  // Committing on blur too, so a tag typed and left behind is not silently dropped on publish.
+  tagInput.addEventListener("blur", () => {
+    if (tagInput.value.trim()) { addTag(tagInput.value); tagInput.value = ""; }
+  });
+  // Pasting "a, b, c" adds three tags.
+  tagInput.addEventListener("paste", (e) => {
+    const text = (e.clipboardData || window.clipboardData).getData("text");
+    if (!/[,\s]/.test(text)) return;
+    e.preventDefault();
+    text.split(/[,\s]+/).forEach(addTag);
+    tagInput.value = "";
+  });
+  $("tag-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tag]");
+    if (!b) return;
+    hashtags.splice(Number(b.dataset.tag), 1);
+    renderTags();
+    tagInput.focus();
   });
 
   // ---------------- article media ----------------
@@ -355,7 +416,8 @@
       }
 
       const { result, parts, content } = await M.moderateArticle({
-        title: $("title").value, bodyText: serialized.text, links: M.editorLinks(body), contentId: editing?.id,
+        title: $("title").value, bodyText: serialized.text, hashtags,
+        links: M.editorLinks(body), contentId: editing?.id,
       });
       const moderation = { result, parts, content, decidedAt: result.decided_at };
       if (result.status === "pending") {
@@ -386,6 +448,8 @@
     if (window.CSS && CSS.highlights) { ["mod-revise", "mod-focus", "mod-word"].forEach((h) => CSS.highlights.delete(h)); }
     $("title").classList.remove("has-issue");
     $("title-msg").innerHTML = "";
+    $("tag-box").classList.remove("has-issue");
+    $("hashtags-msg").innerHTML = "";
   }
   function clearFeedback() {
     feedbackState = null;
@@ -409,7 +473,7 @@
     const fb = result.feedback || {};
     const issues = M.mapIssues(fb, parts, content);
     feedbackState = { issues, serialized, stale: false };
-    const where = { title: "Title", body: "Body", link: "Link" };
+    const where = { title: "Title", body: "Body", link: "Link", hashtags: "Hashtags" };
 
     if (result.decision === "reject") {
       $("banner").innerHTML = `<div class="banner reject" role="alert">
@@ -439,11 +503,19 @@
       $("title").classList.add("has-issue");
       $("title-msg").innerHTML = titleIssues.map((i) => `<div class="field-hint">${esc(i.message)}</div>`).join("");
     }
+    // Hashtags are marked at the field, not character by character: what the moderator read is
+    // the words the tags spell, which is not the text in the box (see hashtagWords).
+    const tagIssues = issues.filter((i) => i.field === "hashtags");
+    if (tagIssues.length) {
+      $("tag-box").classList.add("has-issue");
+      $("hashtags-msg").innerHTML = tagIssues.map((i) => `<div class="field-hint">${esc(i.message)}</div>`).join("");
+    }
     $("banner").scrollIntoView({ block: "nearest" });
   }
 
   function issueHtml(i, k, where) {
-    const show = i.field === "link" ? "" : ` <button class="btn-link" data-issue="${k}">Show</button>`;
+    const noSelection = i.field === "link" || i.field === "hashtags";
+    const show = noSelection ? "" : ` <button class="btn-link" data-issue="${k}">Show</button>`;
     let quote = i.field === "link" ? esc(i.url) : esc(i.text);
     if (i.field !== "link" && i.words && i.words.length) {
       // Bold the trigger words inside the quoted sentence (offsets are relative to the field).

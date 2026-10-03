@@ -7,7 +7,7 @@ Start the server with DEMO_PAGE=1 first. It covers publish -> allow, model rejec
 (risk > 0.5) with the sentence and trigger words highlighted, Show, stale feedback
 after edits, reopening "Rejected" to rewrite, gate revise with highlights across
 formatting, gate reject, link URLs, drafts (no moderation call), the
-unlimited publishing, fail-closed errors, phone width, attachments, and the other
+unlimited publishing, hashtags, fail-closed errors, phone width, attachments, and the other
 dashboard tabs (Videos, Business Proposals) each on their own content_type.
 It clears this page's localStorage in the test browser only.
 """
@@ -29,7 +29,11 @@ results = []
 
 def check(name, cond, detail=""):
     results.append((name, bool(cond), detail))
-    print(("PASS " if cond else "FAIL ") + name + (f"  [{detail}]" if detail else ""))
+    line = ("PASS " if cond else "FAIL ") + name + (f"  [{detail}]" if detail else "")
+    # The page text this quotes contains emoji (the reject banner leads with a no-entry sign),
+    # and a cp1252 console raises on them. A check must never fail because of its own printing.
+    enc = sys.stdout.encoding or "utf-8"
+    print(line.encode(enc, "replace").decode(enc, "replace"))
 
 
 def published_titles(page) -> str:
@@ -119,6 +123,11 @@ with sync_playwright() as p:
     page = browser.new_page(viewport={"width": 1280, "height": 900})
     calls = []
     page.on("request", lambda r: calls.append(r.url) if "/v1/moderate" in r.url else None)
+    # Request bodies too, so a check can assert WHAT was sent for moderation, not just that
+    # something was.
+    posts = []
+    page.on("request", lambda r: posts.append(r.post_data or "")
+            if "/v1/moderate" in r.url and r.method == "POST" else None)
     page.goto(URL)
     page.evaluate("localStorage.clear()")
     page.reload()
@@ -215,6 +224,47 @@ with sync_playwright() as p:
     titles = published_titles(page)
     check("no publish cap: every article published",
           all(f"Office chairs batch {n}" in titles for n in (3, 4, 5)), titles[:120])
+
+
+    # 9b. hashtags. Typed like LinkedIn (Enter/comma/space commits a chip) and moderated with the
+    # rest of the article: a scam tag has to stop a publish even when title and body are clean.
+    page.evaluate("localStorage.clear()"); page.reload()
+    write(page, "Cotton sari sourcing in Surat",
+          "<p>We weave cotton saris for wholesalers across Gujarat and ship within three days.</p>")
+    for tag in ("cotton saris", "Wholesale", "#Surat", "Wholesale"):
+        page.fill("#hashtag-input", tag)
+        page.press("#hashtag-input", "Enter")
+    chips = page.eval_on_selector_all(".tag span", "els => els.map(e => e.textContent)")
+    # "cotton saris" becomes one camelCase tag, "#Surat" loses its hash, the repeat is dropped.
+    check("hashtags: typed text becomes normalised chips",
+          chips == ["#cottonSaris", "#Wholesale", "#Surat"], str(chips))
+    page.click("#publish-btn")
+    page.wait_for_selector("#modal", state="hidden")
+    check("hashtags: a clean article with tags publishes",
+          "Cotton sari sourcing in Surat" in published_titles(page))
+    sent = posts[-1] if posts else ""
+    check("hashtags: sent to the moderator as the words they spell",
+          "cotton Saris Wholesale Surat" in sent, sent[-160:])
+
+    # A scam tag on an otherwise clean article.
+    page.evaluate("localStorage.clear()"); page.reload()
+    write(page, "Cotton sari sourcing in Surat",
+          "<p>We weave cotton saris for wholesalers across Gujarat and ship within three days.</p>")
+    for tag in ("Earn50000Weekly", "WorkFromHomeJob", "RegistrationFee"):
+        page.fill("#hashtag-input", tag)
+        page.press("#hashtag-input", "Enter")
+    page.click("#publish-btn")
+    page.wait_for_selector(".banner.reject, .banner.revise", timeout=60_000)
+    check("hashtags: a scam tag stops the publish", page.is_visible("#modal"))
+    check("hashtags: nothing published", "Cotton sari sourcing in Surat" not in published_titles(page))
+    check("hashtags: the field is marked",
+          "has-issue" in (page.get_attribute("#tag-box", "class") or ""),
+          page.get_attribute("#tag-box", "class") or "")
+    # Read the label element, not inner_text: .where is uppercased by CSS, which is styling.
+    wheres = page.eval_on_selector_all("#banner .where", "els => els.map(e => e.textContent)")
+    check("hashtags: the issue names the field", "Hashtags" in wheres, str(wheres))
+    SHOTS and page.screenshot(path=f"{SHOTS}/a5_hashtags.png")
+    page.click("#close-btn")
 
     # 10. service down -> fail closed
     page.evaluate("localStorage.clear()"); page.reload()

@@ -105,11 +105,54 @@
     return { content, parts };
   }
 
+  /**
+   * A hashtag as the words it is made of: "#FirstCopyRolex" -> "First Copy Rolex".
+   *
+   * Tags run words together, and the moderator reads sentences, so the joined form is close to
+   * invisible to it. Measured on v5 with a clean article plus three tags:
+   *
+   *   tags                                  as typed        split into words
+   *   #FirstCopyRolex #ReplicaWatches       allow 0.000     reject 1.000
+   *   #EscortService #CallGirls             allow 0.001     reject 0.999
+   *   #CottonSaris #Wholesale #Surat        allow 0.000     allow 0.000
+   *
+   * Leaving the "#" on is actively worse than dropping it (the counterfeit set scores 0.000
+   * with the hashes kept, against 1.000 without), so what goes to the moderator is the words.
+   * Only camelCase, digit and underscore boundaries can be split - "#firstcopyrolex" typed all
+   * in lower case stays one word and is still weak. The title and body remain the main defence.
+   */
+  function hashtagWords(tag) {
+    return String(tag).replace(/^#/, "")
+      .replace(/_+/g, " ")
+      .replace(/(?<=[a-z0-9])(?=[A-Z])/g, " ")
+      .replace(/(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  /**
+   * "#first_copy rolex!" -> "firstCopyRolex". Letters and digits only, like LinkedIn.
+   *
+   * Separators become camelCase humps instead of vanishing. Deleting them would collapse the tag
+   * to "firstcopyrolex", and hashtagWords could no longer recover the words - which is the
+   * difference between the moderator scoring that tag 1.000 and scoring it 0.000.
+   */
+  function normalizeHashtag(raw, maxLength = 60) {
+    const words = String(raw).replace(/^#/, "").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    if (!words.length) return "";
+    const joined = words.map((w, i) => (i ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join("");
+    return joined.slice(0, maxLength);
+  }
+
   /** Build the single moderation text for an article. Thin wrapper over buildContent that also
    *  exposes the original `parts.title` / `parts.body` shape (contracts/moderation_result.md). */
-  function buildArticleContent({ title, bodyText, links = [] }) {
+  function buildArticleContent({ title, bodyText, hashtags = [], links = [] }) {
+    // Hashtags are member-written text and are moderated with everything else, as the words they
+    // spell rather than as the joined tags (see hashtagWords).
+    const tagText = hashtags.map(hashtagWords).filter(Boolean).join(" ");
     const { content, parts } = buildContent(
-      [{ name: "title", text: title }, { name: "body", text: bodyText }], links);
+      [{ name: "title", text: title }, { name: "body", text: bodyText },
+       { name: "hashtags", text: tagText }], links);
     // The article editor highlights inside the body even when the title is empty, so these two
     // always exist, unlike the generic `fields` map which omits empty inputs.
     const t = (title || "").trim();
@@ -164,8 +207,8 @@
    * Moderate an article. Resolves to {result, parts, content}.
    * Throws an Error with .code on HTTP/API errors (e.g. "model_not_ready", "network").
    */
-  async function moderateArticle({ title, bodyText, links = [], contentId, endpoint = "/v1/moderate" }) {
-    const { content, parts } = buildArticleContent({ title, bodyText, links });
+  async function moderateArticle({ title, bodyText, hashtags = [], links = [], contentId, endpoint = "/v1/moderate" }) {
+    const { content, parts } = buildArticleContent({ title, bodyText, hashtags, links });
     let resp;
     try {
       resp = await fetch(endpoint, {
@@ -247,5 +290,6 @@
   }
 
   global.BoncModeration = { serializeEditor, editorLinks, buildContent, buildArticleContent, mapIssues,
-                            rangeFor, moderateArticle, moderateFields, moderateFile };
+                            rangeFor, moderateArticle, moderateFields, moderateFile,
+                            hashtagWords, normalizeHashtag };
 })(window);
