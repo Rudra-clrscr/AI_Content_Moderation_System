@@ -267,9 +267,25 @@ part so feedback can be mapped back to the fields:
 
 <body as plain text>[
 
+<hashtags as the words they spell>][
+
 <link URL 1>
 <link URL 2>...]
 ```
+
+**Hashtags go as the words they spell, not as the tags.** `#FirstCopyRolex #ReplicaWatches`
+is sent as `First Copy Rolex Replica Watches`. A tag runs its words together and the model
+reads sentences, so the joined form is close to invisible to it - measured on v5 with a clean
+article plus three tags, the counterfeit set scores **0.000 as typed and 1.000 split**, and the
+adult set 0.001 against 0.999. Keeping the `#` on is worse than dropping it. Only camelCase,
+digit and underscore boundaries can be recovered, so a tag typed all in lower case
+(`#firstcopyrolex`) stays one word and remains weak; the title and body are still the main
+defence. `normalizeHashtag` turns separators into camelCase humps rather than deleting them, so
+those boundaries survive to be split again.
+
+Because the moderated text is not the text in the input box, a hashtag issue is reported
+against the field rather than highlighted character by character - the same treatment a link
+issue gets.
 
 Link URLs must be included, because a scam domain hidden behind "click here"
 isn't part of the visible text. `flask_api/app/static/articles/moderation-client.js`

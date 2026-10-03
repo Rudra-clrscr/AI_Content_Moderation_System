@@ -116,6 +116,18 @@
       </div>
 
       <div class="field">
+        <label for="hashtag-input">Hashtags</label>
+        <div class="tag-box" id="tag-box">
+          <ul class="tag-list" id="tag-list"></ul>
+          <input class="tag-input" id="hashtag-input" type="text" autocomplete="off"
+                 aria-describedby="hashtag-hint" placeholder="Add a hashtag and press Enter">
+        </div>
+        <p class="hint" id="hashtag-hint">Up to <b id="tag-max">10</b> tags. Press Enter, comma or
+          space to add one. Hashtags are checked by the moderator along with the title and body.</p>
+        <div id="hashtags-msg"></div>
+      </div>
+
+      <div class="field">
         <label id="media-label">Article media</label>
         <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-labelledby="media-label"
              aria-describedby="media-hint">
