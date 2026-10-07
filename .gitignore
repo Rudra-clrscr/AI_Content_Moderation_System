@@ -16,9 +16,21 @@ flask_api/models/v4.backup_pre_v5/
 # the SHA256 RapidOCR publishes.
 flask_api/models/ocr/
 
+# The image model (app/clip.py). A separate bundle from the text model in models/v5 - CLIP
+# weights we don't redistribute, fetched and SHA256-verified by `python scripts/fetch_clip.py`.
+# prompts.npz and model_meta.json are built from config/visual_policy.yaml, which IS tracked,
+# so the policy is reviewable in git while the 352 MB encoder is not.
+flask_api/models/img_v1/
+
 # Test output directories
 flask_api/scripts/test_generated_pdfs/
 flask_api/scripts/test_stress_pdfs/
 flask_api/scripts/test_50_negatives_gen/
 flask_api/scripts/*.json
 flask_api/scripts/*.txt
+
+# Image datasets for the visual check (app/clip.py). Third-party photographs under their own
+# licences, some of it graphic by design, plus BONC's own listing pictures — inputs we don't
+# redistribute, exactly like res/ above. `python flask_api/scripts/eval_clip_images.py` reads
+# them from here; images/labels.csv records where each one came from.
+images/

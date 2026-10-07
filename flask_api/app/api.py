@@ -8,7 +8,8 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
-from app.media import MediaError, detect_kind, image_text
+from app.gate import GateMatch, GateResult
+from app.media import MediaError, detect_kind, read_image
 from app.model import ModelNotReady
 from app.pdf import PdfError
 from app.pdf import extract as pdf_extract
@@ -115,9 +116,11 @@ def moderate_media():
 
       * **PDF** — text, with OCR for scanned pages. A page that can't be read is refused, and
         the result carries a `pdf` block mapping offsets to page numbers.
-      * **Image** — OCR only, which catches the real bypass of putting the scam in a
-        screenshot. The picture itself is not classified, so an image with no text is allowed
-        and the result says `visual_content_checked: false`.
+      * **Image** — two passes over the same picture. OCR reads any writing, which catches
+        the bypass of putting the scam in a screenshot; the CLIP visual check (app/clip.py)
+        scores the picture itself against `config/visual_policy.yaml`, which catches a weapon
+        or gore photograph carrying no words at all. With the visual check off or its model
+        missing, the result says `visual_content_checked: false` and behaves as it used to.
       * **Video** — nothing can be read. The shipped config sets `media.allow_unchecked_video`,
         so it is allowed with `checked: false`; turn the flag off to refuse video instead.
 
@@ -164,15 +167,29 @@ def moderate_media():
             return _error(413, "media_too_large", f"the file is larger than {media.max_bytes} bytes",
                           limit=media.max_bytes)
         try:
-            read = image_text(data, svc.settings.ocr, media)
+            seen = read_image(data, svc.settings.ocr, media, svc.settings.visual)
         except MediaError as exc:
             return _error(413 if exc.code == "media_too_large" else 422, exc.code, exc.message, **exc.extra)
+        read, looked = seen.text, seen.visual
         text = read.text
-        # A photograph with no writing on it is ordinary, so no text is not a refusal here —
-        # but the picture itself was never inspected and the caller must be able to see that.
+        # A photograph with no writing on it is ordinary, so no text is not a refusal here.
+        # `visual_content_checked` then carries the weight: true means the picture itself was
+        # scored, false means nobody looked at it and the caller must not read it as clean.
         block.update(text_found=read.has_text, ocr_confidence=round(read.confidence, 4),
-                     text_readable=read.readable, visual_content_checked=False)
+                     text_readable=read.readable, **looked.as_dict())
         extra = {"media": block}
+        if looked.failed:
+            # The visual model is present and threw. Same rule as OCR falling over: refuse,
+            # because publishing a picture nothing looked at is the hole this check exists to
+            # close, and the author did nothing wrong so offer a retry.
+            return _error(503, "media_not_checkable",
+                          "this image could not be checked just now. Please try again in a "
+                          "moment.", kind=kind)
+        if svc.settings.visual.decides_reject(looked):
+            # The picture itself breaks policy, whatever the words say. This is a decision about
+            # content, not an upload error, so it goes through the pipeline as a gate block:
+            # same feedback wording, same audit row, same sink as a blocked sentence.
+            return _visual_reject(upload.filename, looked, content_type, content_id, extra)
         if read.failed:
             # The checker broke, which is ours to fix and nothing the author did. Still refused:
             # an image nothing looked at must not publish as clean.
@@ -214,6 +231,24 @@ def moderate_media():
                       f"{char_limit} character limit")
 
     return _moderate(ModerationRequest(text, content_type, content_id), extra)
+
+
+def _visual_reject(filename: str, looked, content_type: ContentType,
+                   content_id: str | None, extra: dict):
+    """A refusal decided by the picture rather than by any text.
+
+    Built as a gate block so it is indistinguishable downstream from a blocked phrase: it gets
+    the configured feedback wording for its category, an audit row through the usual sink, and
+    the same shape of result a caller already handles. The "content" is the filename, because
+    there is no text to quote - what was wrong is in `media.visual`.
+    """
+    svc = _svc()
+    req = ModerationRequest(f"[{filename}]", content_type, content_id)
+    match = GateMatch(rule_id=f"visual.{looked.label}", category=looked.category,
+                      action="block", spans=())
+    result = svc.pipeline.gate_only_result(req, GateResult((match,)), 0.0)
+    svc.sink.emit(result)
+    return jsonify({**result, **extra}), 200
 
 
 def _allowed_without_text(filename: str, content_type: ContentType, content_id: str | None) -> dict:
@@ -271,6 +306,10 @@ def ready():
         "gate_version": svc.pipeline.gate.version,
         "gate_rules": len(svc.pipeline.gate.rules),
         "thresholds": svc.settings.thresholds.as_dict(),
+        # Whether pictures are actually being looked at. An operator should be able to read
+        # this here rather than infer it from a published result - the visual check turns
+        # itself off when its model is missing, and that is exactly when you want to know.
+        "visual": svc.settings.visual.status,
     }
     if svc.settings.mode == "sync":
         body.update(model_ready=svc.models.ready, model_version=svc.models.version,

@@ -52,6 +52,53 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # PICTURE is never classified - there is no nudity/violence/
                             # counterfeit detector in this service, so an image with no text is
                             # allowed and the result says visual_content_checked: false.
+  visual:                   # LOOK AT THE PICTURE, not just the words in it (app/clip.py).
+    enabled: true           # CLIP scores the image against the written descriptions in
+                            # config/visual_policy.yaml, so the policy is that file and adding
+                            # a category needs no retraining. VISUAL_CHECK=0 turns it off, and
+                            # so does a missing model: results then say
+                            # visual_content_checked: false exactly as they did before this
+                            # existed. It is never a hard dependency for the Articles tab.
+                            #
+                            # Set up (once, offline - nothing is fetched while serving):
+                            #   python scripts/fetch_clip.py
+                            #   python scripts/build_clip_prompts.py
+    model_dir: models/img_v1
+                            # the image bundle, separate from the text model in models/v5:
+                            # vision_model.onnx (352 MB) + prompts.npz. The TEXT encoder is not
+                            # needed to serve: build_clip_prompts.py runs it offline and bakes
+                            # the prompt embeddings into prompts.npz.
+    reject_min: 0.90        # an unsafe label this confident refuses the upload. MEASURED on
+                            # 1063 sample images with scripts/eval_clip_images.py:
+                            #
+                            #   reject_min   weapons   gore   false positives
+                            #        0.50      98%     99%    5/200 objects, 0/63 BONC uploads
+                            #        0.70      94%     98%    2/200 objects, 0/63 BONC uploads
+                            #        0.90      83%     95%    0/200 objects, 0/63 BONC uploads
+                            #        0.99      62%     76%    0/200 objects, 0/63 BONC uploads
+                            #
+                            # 0.90 is the loosest setting with no false positive anywhere in the
+                            # clean sets. Lower it to catch more and accept refusing the
+                            # occasional product photo; re-run the script after any change to
+                            # visual_policy.yaml, because the thresholds move with the prompts.
+    max_pixels: 40000000    # decoded size, against decompression bombs (as media.max_pixels)
+    device: auto            # auto | cuda | directml | cpu. "auto" takes the best execution
+                            # provider onnxruntime actually offers, so a host with the stock
+                            # CPU-only wheel keeps working unchanged. For a GPU, install the
+                            # matching build - they replace `onnxruntime`, never sit beside it:
+                            #   NVIDIA:  pip install onnxruntime-gpu   (needs CUDA 12 + cuDNN 9)
+                            #   any DX12 GPU on Windows: pip install onnxruntime-directml
+                            # A named device that isn't installed falls back to CPU with a
+                            # warning rather than refusing to start: no GPU must ever mean no
+                            # Articles tab. GET /ready reports the provider actually in use.
+                            # Measured on an RTX 4050 laptop: 14.8 images/s on 6 CPU cores,
+                            # 60.5 on CUDA (4.1x faster, ~17 ms an image). The decisions are
+                            # the same either way - 273 images scored on both gave the same
+                            # label and the same verdict for all of them, with scores differing
+                            # by at most 8.5e-03 - so the thresholds below do not change with
+                            # the device.
+    intra_op_threads: 4     # CPU only; ignored on a GPU provider
+    inter_op_threads: 1
   allow_unreadable_image: false
                             # An image OCR found writing in but could NOT read (a script the
                             # recognition model doesn't cover, or a picture too poor to read).

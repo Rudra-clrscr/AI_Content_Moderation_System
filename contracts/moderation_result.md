@@ -40,16 +40,18 @@ title with the scam in the description is still a scam. `moderation-client.js`'s
 Every one of these is clickable at `/articles` with `DEMO_PAGE=1`: the tab bar is live, each
 tab opens its own form, and the `content_type` it sends is printed above that form.
 
-**Pictures and footage are not inspected.** This service reads text. There is no visual model
-here — no nudity, violence or counterfeit detector, and no frame or audio analysis — so a
-video's title and description are moderated while the footage is not, and an image is OCR'd
-for words while the picture is not classified.
+**Still pictures are now inspected; footage still is not.** *Changed in 1.7.* An uploaded
+image gets two passes: OCR reads any writing in it, and the CLIP visual check
+(`flask_api/app/clip.py`) scores the picture itself against the written policy in
+`flask_api/config/visual_policy.yaml` — see "The visual check" below. **Video is still not
+analysed at all**: no frame or audio decoding, so a video's title and description are moderated
+while the footage is not.
 
-The platform's current policy is to publish anyway rather than close those tabs:
+The platform's current policy is to publish unwatched footage rather than close the tab:
 `media.allow_unchecked_video` is **on**, and such a result says so in the record
 (`checked: false`, `visual_content_checked: false`) instead of passing the file off as clean.
-Turn the flag off the day footage must not go out unwatched. Until a visual model exists,
-uploaded pictures and video are covered by human reporting, not by this service.
+Turn the flag off the day footage must not go out unwatched. Video remains covered by human
+reporting, not by this service.
 
 ## Request: `POST /v1/moderate/media` (and `/v1/moderate/pdf`)
 
@@ -64,7 +66,7 @@ Anything published with a post has to be checked, or the scam simply moves into 
 | Kind | What is read | Rule |
 |---|---|---|
 | `pdf` | Text, with OCR for scanned pages | A page that can't be read is **refused** |
-| `image` | OCR only | Text is moderated. **The picture itself is never classified** — there is no nudity/violence/counterfeit detector here — so an image with no text is **allowed**, and the result says `visual_content_checked: false`. An image with writing OCR **could not read** is a third case: it is **refused** (`422 media_unreadable`), because nothing in it has been checked |
+| `image` | OCR **and** the visual check | Both run on the same decoded picture. Text is moderated as usual; the picture itself is scored against the visual policy and a confident unsafe label **rejects** the upload (*1.7*). An image with no text and nothing the visual check objects to is **allowed**. An image with writing OCR **could not read** is still **refused** (`422 media_unreadable`), because its words have not been checked even though its picture has. With the visual check off or its model missing, this row behaves exactly as it did in 1.6 and the result says `visual_content_checked: false` |
 | `video` | Nothing | **Allowed unchecked** (`checked: false`) while `media.allow_unchecked_video` is on, as it is in the shipped config; **refused** when it is off |
 | anything else | — | `422 media_unsupported` |
 
@@ -75,8 +77,16 @@ Every response carries a `media` block:
 
 ```json
 "media": {"filename": "flyer.png", "kind": "image", "text_found": true,
-          "text_readable": true, "ocr_confidence": 0.9937, "visual_content_checked": false}
+          "text_readable": true, "ocr_confidence": 0.9937,
+          "visual_content_checked": true,
+          "visual": {"label": "safe", "score": 0.9912, "unsafe_score": 0.0088,
+                     "scores": {"gore": 0.0012, "safe": 0.9912, "sexual": 0.0034, "weapon": 0.0042}}}
 ```
+
+`visual_content_checked` means what it says: `true` only when the picture itself was scored.
+It is `false` wherever the check is off, its model is missing, or the file is a video — and a
+client **must not** read that as clean. `visual` is present only when it is `true`, and carries
+`category` only when the best-matching label is an unsafe one.
 
 `text_found` is whether there is writing in the file at all; `text_readable` (*added in 1.6*)
 is whether OCR actually read it. The three states are distinct, and a client must not collapse
@@ -175,7 +185,7 @@ Layer 1 gate blocks the content:
 
 ```json
 {
-  "schema_version": "1.6",
+  "schema_version": "1.7",
   "request_id": "5b0c7e0e-…",
   "status": "completed",
   "content_id": "LST-10293",
@@ -230,6 +240,69 @@ job failed.
 | 413 | `content_too_long` |
 | 503 | `model_not_ready` (sync), `queue_unavailable` (async) |
 | 500 | `inference_failed` |
+
+## The visual check (*added in 1.7*)
+
+Everything else in this service reads text. That left a hole this contract was always explicit
+about: an image was OCR'd for words and the *picture* was never judged, so a photograph of
+anything at all published as long as it carried no harmful words. `app/clip.py` closes it for
+still images.
+
+**How it decides.** CLIP (Contrastive Language-Image Pre-training) embeds pictures and
+sentences into one space, so a picture can be scored against a written description rather than
+against trained classes. The policy is therefore a config file — a handful of phrasings per
+label in `flask_api/config/visual_policy.yaml` — and adding a category needs no retraining, no
+labelled pictures and no code change. Scores are a softmax across every phrasing, which is why
+the file carries a long list of *safe* phrasings too: they are what the unsafe labels are judged
+against, and a thin safe list makes ordinary product photos look suspicious.
+
+An unsafe label at or above `media.visual.reject_min` **rejects the upload**, as a `decision:
+"reject"` with `decided_by: "gate"` and a synthetic gate match (`rule_id: "visual.weapon"`,
+`category: "weapons"`). It is deliberately shaped like a blocked phrase: same feedback wording,
+same audit row, same sink, so a caller that already handles a text rejection handles this one
+with no new code. The `content` is the filename, because there is no text to quote — what was
+wrong is in `media.visual`.
+
+**It is a separate model from the text moderator.** `models/img_v1`
+(`clip-vit-b32-bonc-img-v1`) scores pictures; `models/v5` (`deberta-v3-small-bonc-v5`) scores
+words. They version apart, roll back independently, and neither stands in for the other. Only
+the 352 MB vision encoder is loaded at serving time: the text encoder runs once offline in
+`scripts/build_clip_prompts.py`, which bakes the prompt embeddings into `prompts.npz`.
+
+**What it is measured at.** 1,063 sample images, `scripts/eval_clip_images.py`:
+
+| `reject_min` | weapons caught | gore caught | false positives |
+|---|---|---|---|
+| 0.50 | 98% | 99% | 5/200 objects, 0/63 real BONC uploads |
+| 0.70 | 94% | 98% | 2/200 objects, 0/63 real BONC uploads |
+| **0.90** (shipped) | **83%** | **95%** | **0/200 objects, 0/63 real BONC uploads** |
+| 0.99 | 62% | 76% | 0/200 objects, 0/63 real BONC uploads |
+
+0.90 is the loosest setting with no false positive anywhere in the clean sets. **Re-run the
+script after any change to `visual_policy.yaml`** — the thresholds move with the prompts, and
+one careless phrasing moved weapon recall 8 points on its own.
+
+**What it does not do.** It is zero-shot: nothing here is learned from BONC's own uploads, so a
+label is only as good as its wordings. The `sexual` label in the shipped policy has **no sample
+images behind it at all** and is therefore unmeasured — it is present because the policy needs
+it, not because it has been shown to work. There is still no counterfeit detector, and video is
+still not looked at.
+
+**Failure behaviour differs by cause, on purpose.** Missing model or `enabled: false` →
+the check is simply off, results say `visual_content_checked: false`, and the service behaves
+exactly as it did in 1.6. It is never a hard dependency. But a model that is present and
+*throws* → `503 media_not_checkable`, refusing the upload: publishing a picture nothing looked
+at is the hole this exists to close.
+
+**Where it runs.** `media.visual.device` is `auto` | `cuda` | `directml` | `cpu`. `auto` takes
+the best execution provider onnxruntime actually offers, and a GPU that is named but not
+installed falls back to CPU with a warning rather than refusing to start. Measured on an RTX
+4050 laptop: 14.8 images/s on 6 CPU cores against 60.5 on CUDA, a 4.1x speed-up with **identical
+decisions** — 273 images scored both ways gave the same label and the same verdict for every
+one, with scores differing by at most 8.5e-03. The GPU build of onnxruntime replaces the CPU
+one rather than sitting beside it; `flask_api/requirements.txt` has the two commands.
+`GET /ready` reports the provider actually in use, so whether pictures are being looked at is
+visible without reading a published result.
 
 ## Who writes to SQL Server
 

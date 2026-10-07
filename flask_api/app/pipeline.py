@@ -23,11 +23,14 @@ from app.triage import TriageFilter
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "1.6"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3: sentence_scores, decided_by "sentence"
+SCHEMA_VERSION = "1.7"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3: sentence_scores, decided_by "sentence"
                         # 1.4: word windows in sentence_scores ("kind"), word_scores, issues[].words
                         # 1.5: sentence_scores[].by ("prefilter" = scored by the linear pre-filter, not the model)
                         # 1.6: media.text_readable - whether OCR read an attachment's writing, as
                         #      opposed to there being none (media.text_found); see app/ocr.py
+                        # 1.7: media.visual - the CLIP visual check's verdict on the PICTURE
+                        #      itself, and visual_content_checked now true for images that
+                        #      were actually looked at; see app/clip.py
 
 
 class ContentType(str, Enum):
