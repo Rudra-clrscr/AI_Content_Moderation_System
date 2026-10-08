@@ -230,9 +230,39 @@ Layer 1 gate blocks the content:
 | `gate_matches` | A list of `{rule_id, category, action, spans}`. `spans` are `[start, end]` character offsets into `content` (added in 1.2). `block` rejects, `revise` sends the content back to its author, and `flag` is recorded only. |
 | `sentence_scores` | *Added in 1.3.* For posts with 2 or more sentences: every sentence scored on its own, up to `sentence_scan.max_sentences`, as `{start, end, risk_score}` (offsets into `content`). *1.5:* an entry with `"by": "prefilter"` was scored by the linear triage filter instead of the model (`app/triage.py`) — its `risk_score` comes from that filter, is far below `allow_max`, and never contributes to the decision. Entries without `by` are model scores, as before. Any sentence in the reject band (v4: risk > 0.5) rejects the post (`decided_by: "sentence"`). *1.4:* sentences longer than `word_scan.window_words` words are also scored in overlapping word windows, listed here with `"kind": "window"` (so a long run-on sentence can't dilute a harmful phrase); these can appear even for a single-sentence post. Empty for short single-sentence posts, gate blocks, posts already rejected, or when the scan is off. |
 | `word_scores` | *Added in 1.4.* The word-by-word scan, for each span the model flagged (risk above `allow_max`): every word as `{start, end, contribution}`, where `contribution` = risk of the span minus risk of the span with that word removed. The *trigger words* (in `feedback.issues[].words`) are the words with `contribution >= word_scan.min_contribution` (default 0.10). When no single word reaches that (the harm is spread over several words, or the score is saturated at 0.999), they are the smallest set, found greedily and at most `max_triggers`, whose removal brings the span back to ≤ `allow_max`. Long spans are analysed in their riskiest word window. Empty when nothing was flagged. |
-| `feedback` | *Added in 1.2.* Author-facing guidance, and `null` when allowed. `{title, message, issues, categories?}`. Each issue is `{start, end, source, message, rule_id?, category?, risk_score?, words?}`, where `start`/`end` are offsets into `content` for the client to highlight, `source` is `rule` or `model`, and `message` is the instruction to show. *1.4:* `words` lists the trigger words inside a model issue as `[start, end]` offsets; show them emphasised inside the highlighted sentence. For `reject`, `categories` names the policy areas. Since 1.4 the shipped config sets `highlight_on_reject: true`: with v4 there is no revise band, so a rejected author rewrites and needs to see what to change. Set it to `false` to show only the policy area. Wording lives in `flask_api/config/feedback_messages.yaml`. |
+| `feedback` | *Added in 1.2.* Author-facing guidance, and `null` when allowed. `{title, message, severity, issues, categories?}`. *1.7:* `severity` is the **moderation rating** shown to the author — see "The moderation rating" below. Each issue is `{start, end, source, message, rule_id?, category?, risk_score?, words?}`, where `start`/`end` are offsets into `content` for the client to highlight, `source` is `rule` or `model`, and `message` is the instruction to show. *1.4:* `words` lists the trigger words inside a model issue as `[start, end]` offsets; show them emphasised inside the highlighted sentence. For `reject`, `categories` names the policy areas. Since 1.4 the shipped config sets `highlight_on_reject: true`: with v4 there is no revise band, so a rejected author rewrites and needs to see what to change. Set it to `false` to show only the policy area. Wording lives in `flask_api/config/feedback_messages.yaml`. |
 | `targeted_segments` | *Added in 1.1.* Sentences that mention someone (he, she, they, their…), scored separately: a list of `{start, end, risk_score, predicted_label}`, where `start`/`end` are character offsets into `content`. The text itself isn't repeated, so logs stay free of content. Empty when the check didn't run: gate block, whole text already rejected, no such sentence, or the check disabled. Not stored by the current SQL table; the Data team can add an `NVARCHAR(MAX)` JSON column if they want it. |
 | `thresholds`, `model_version`, `gate_version` | These are included so every logged decision can be reproduced and audited after thresholds or models change. |
+
+### The moderation rating (*added in 1.7*)
+
+A member who is told only "this can't be published" has no sense of how far off they were.
+`feedback.severity` is a **moderation rating** — `low`, `medium` or `high` — so the author
+knows whether they are a word away or nowhere near.
+
+Words, not the probability: a member reads "high" and understands it, while a number only
+invites nudging the text until it drops under the line. For the same reason the exact
+`risk_score` stays out of what the author is shown, though it remains in the result for audit.
+
+**The rating is a label, not a licence.** It does not change the decision and it is not a way
+round it: content the moderator objects to is not published, whatever it is rated. There is no
+"publish anyway" in this API, and a client must not build one.
+
+**What the rating is read off.** Whatever actually decided, which is not always the whole-text
+score:
+
+| Decided by | Rating |
+|---|---|
+| the model (whole text, a targeted segment, or one sentence from the scan) | the **highest** risk of the whole text and of the spans in `issues` — a paragraph scoring 0.1 that holds one sentence at 0.99 is rated `high`, not `low` |
+| a gate `block` rule | `high`. Nothing was scored: the rule decided on its own, and `risk_score` is `null` |
+| a gate `revise` rule on text the model was happy with | `medium`. The model's own score would read as `low` and understate a deterministic policy hit |
+
+Bands: `high` at risk ≥ 0.80, `medium` at ≥ 0.50, `low` below that (`app/feedback.py`
+`SEVERITY_BANDS`). They are deliberately coarser than the 0.5 decision boundary, so `medium`
+covers a borderline reject and `high` means the model was not in two minds.
+
+Nothing else about the result changes, and a caller that ignores `severity` behaves exactly as
+it did under 1.6.
 
 **`202` pending.** This comes back in async mode when the gate didn't block:
 
@@ -421,12 +451,26 @@ fields; it just no longer happens for model issues.
 
 ## Showing feedback to the author (platform front end)
 
-When `decision` is `revise`, show `feedback.title` and `feedback.message`, then
-render `content` with each `feedback.issues[i]` range (`start` to `end`)
-highlighted, and list each issue's `message`. Keep the author's text editable,
-and resubmit it to `/v1/moderate` as a new request. The demo page
-(`/demo`, `flask_api/app/static/demo.html`, function `nudge`) is a working
-reference.
+When `decision` is not `allow`, mark the author's own inputs first: render `content` with each
+`feedback.issues[i]` range (`start` to `end`) highlighted, with the issue's `words` emphasised
+inside it, and show each issue's `message` next to the input it belongs to.
+
+Then show the **"before you post" popup** over it:
+
+* `feedback.severity` as the moderation rating, in words — not the probability.
+* `feedback.title` and `feedback.message`, and the issues quoted.
+* One way forward: *change the content*. Dismissing the popup — the button, the close icon,
+  Escape, a click outside it — all do the same thing, because there is only one thing to do
+  next. **Do not add a "publish anyway" button**: the popup tells the author what is wrong, it
+  does not negotiate over whether it gets published.
+
+Keep the author's text editable throughout, and resubmit it to `/v1/moderate` as a new request.
+
+Working references, all framework-free:
+`flask_api/app/static/articles/moderation-client.js` (`mapIssues` for the highlighting,
+`showDecision` for the popup — it builds its own DOM, so a surface needs no markup of its own),
+`articles.js` (the Articles editor) and `surfaces.js` (every other tab). The demo page
+(`/demo`, `flask_api/app/static/demo.html`, function `nudge`) is the minimal version.
 
 ## Open questions for the Data team
 

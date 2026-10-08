@@ -9,6 +9,10 @@ after edits, reopening "Rejected" to rewrite, gate revise with highlights across
 formatting, gate reject, link URLs, drafts (no moderation call), the
 unlimited publishing, hashtags, fail-closed errors, phone width, attachments, and the other
 dashboard tabs (Videos, Business Proposals) each on their own content_type.
+
+It also covers the "before you post" popup: the moderation rating, the issues quoted in it,
+that it offers no way to publish anyway, and that dismissing it any way at all leaves the
+editor open on the problem with nothing published.
 It clears this page's localStorage in the test browser only.
 """
 import argparse
@@ -110,6 +114,22 @@ def _one_page_pdf(text: str) -> bytes:
     return bytes(out)
 
 
+def popup_text(page):
+    """The "before you post" popup (moderation-client.js showDecision): wait for it, read it."""
+    page.wait_for_selector("#mod-ask", state="visible", timeout=30_000)
+    return page.inner_text("#mod-ask")
+
+
+def popup_rating(page):
+    return page.inner_text('#mod-ask [data-el="severity"]').strip().lower()
+
+
+def popup_dismiss(page):
+    """Dismiss the popup with its one button, back to the marked-up form."""
+    page.click('#mod-ask [data-act="change"].btn')
+    page.wait_for_selector("#mod-ask", state="hidden", timeout=30_000)
+
+
 def highlights(page):
     return page.evaluate("() => CSS.highlights.has('mod-revise') ? [...CSS.highlights.get('mod-revise')].map(r => r.toString()) : []")
 
@@ -147,15 +167,36 @@ with sync_playwright() as p:
     write(page, "PVC pipes for contractors", "<p>High quality PVC pipes, ISI marked, available in all sizes. Earn 50000 per week from home, no experience needed.</p>")
     page.click("#publish-btn")
     page.wait_for_selector(".banner.reject")
+    # The popup is now what the author meets first: the rating, what was found, and the choice
+    # of changing the content or posting anyway (senior review, 2026-10-04). The editor behind
+    # it is already marked up, so "change the content" lands on the problem.
+    txt = popup_text(page)
+    check("popup: shown on a model reject", page.is_visible("#mod-ask"))
+    check("popup: rating is a word, not a probability", popup_rating(page) in ("low", "medium", "high"),
+          popup_rating(page))
+    check("popup: quotes what was found", "Earn 50000 per week from home" in txt, txt[:200])
+    check("popup: says the article hasn't been published", "hasn't been published" in txt, txt[-140:])
+    # There is no way past the moderator here: changing the content is the only button, and
+    # nothing in the dialog publishes.
+    check("popup: offers no way to publish anyway",
+          page.locator("#mod-ask .modal-foot .btn").count() == 1
+          and page.inner_text('#mod-ask [data-act="change"].btn') == "Change the content",
+          page.inner_text("#mod-ask .modal-foot"))
+    SHOTS and page.screenshot(path=f"{SHOTS}/a2a_popup.png")
+    popup_dismiss(page)
+    check("popup: dismissing it leaves the editor open on the problem",
+          page.is_visible("#modal") and page.is_hidden("#mod-ask"))
+    check("popup: nothing published by dismissing it",
+          "PVC pipes for contractors" not in published_titles(page))
     hl = highlights(page)
     check("model reject: banner shown", page.is_visible(".banner.reject"))
     check("model reject: highlight is the problem sentence", hl == ["Earn 50000 per week from home, no experience needed"], str(hl))
-    check("model reject: trigger words marked", len(word_highlights(page)) >= 1 and page.locator(".issues .trigger").count() >= 1,
+    check("model reject: trigger words marked", len(word_highlights(page)) >= 1 and page.locator("#banner .issues .trigger").count() >= 1,
           str(word_highlights(page)))
     check("model reject: modal stays open to rewrite", page.is_visible("#modal"))
     check("model reject: not published", "PVC pipes for contractors" not in published_titles(page))
     SHOTS and page.screenshot(path=f"{SHOTS}/a2_model_reject.png")
-    page.locator(".issues li", has_text="Body").locator("[data-issue]").first.click()
+    page.locator("#banner .issues li", has_text="Body").locator("[data-issue]").first.click()
     sel = page.evaluate("() => window.getSelection().toString()")
     check("model reject: Show selects the text", sel == "Earn 50000 per week from home, no experience needed", sel)
     page.keyboard.press("End")
@@ -176,6 +217,8 @@ with sync_playwright() as p:
     write(page, "King size bedsheets", "<p>Cotton bedsheets in <b>king and queen</b> sizes, 300 thread count.</p><p>We also accept <i>payment in crypto</i>.</p>")
     page.click("#publish-btn")
     page.wait_for_selector(".banner.revise")
+    check("popup: shown on a revise as well as a reject", page.is_visible("#mod-ask"))
+    popup_dismiss(page)
     hl = highlights(page)
     check("rule revise: 'payment in crypto' highlighted across <i>", hl == ["payment in crypto"], str(hl))
     check("rule revise: instruction shown", "Payments must go through BONC" in page.inner_text("#banner"))
@@ -185,6 +228,9 @@ with sync_playwright() as p:
     # 6. reject (gate block) -> reason, and the matched phrase highlighted to rewrite
     write(page, "Investment opportunity", "<p>Invest now and double your money in 7 days.</p>")
     page.click("#publish-btn")
+    popup_text(page)
+    check("popup: a gate block is rated high", popup_rating(page) == "high", popup_rating(page))
+    popup_dismiss(page)
     page.wait_for_selector(".banner.reject")
     check("reject: banner with policy area", "fraud and scams" in page.inner_text("#banner"))
     check("reject: matched phrase highlighted to rewrite", highlights(page) == ["double your money"], str(highlights(page)))
@@ -197,6 +243,7 @@ with sync_playwright() as p:
     # 7. scam domain hidden behind link text -> rejected
     write(page, "Our supplier portal", '<p>Log in to <a href="https://paypa1-verify.example/login">our supplier portal</a> to see prices.</p>')
     page.click("#publish-btn")
+    popup_dismiss(page)
     page.wait_for_selector(".banner.reject")
     check("link: hidden scam URL is checked and rejected", page.is_visible(".banner.reject"))
     page.click("#close-btn")
@@ -255,6 +302,7 @@ with sync_playwright() as p:
         page.press("#hashtag-input", "Enter")
     page.click("#publish-btn")
     page.wait_for_selector(".banner.reject, .banner.revise", timeout=60_000)
+    popup_dismiss(page)
     check("hashtags: a scam tag stops the publish", page.is_visible("#modal"))
     check("hashtags: nothing published", "Cotton sari sourcing in Surat" not in published_titles(page))
     check("hashtags: the field is marked",
@@ -333,6 +381,9 @@ with sync_playwright() as p:
     page.fill("#s-description", "Earn 50000 per week from home, no experience needed. Pay a small registration fee to join.")
     page.click("#s-submit")
     page.wait_for_selector("#s-banner .banner.reject", timeout=60_000)
+    check("tabs: the popup names the surface", "video" in page.inner_text("#mod-ask-title").lower(),
+          page.inner_text("#mod-ask-title"))
+    popup_dismiss(page)
     check("tabs: a scam in the description is rejected",
           "Your video can't be published" in page.inner_text("#s-banner"))
     check("tabs: the offending field is marked",
@@ -359,8 +410,31 @@ with sync_playwright() as p:
     page.fill("#s-proposal", "Invest with us and double your money in 30 days, guaranteed.")
     page.click("#s-submit")
     page.wait_for_selector("#s-banner .banner.reject", timeout=60_000)
+    popup_dismiss(page)
     check("tabs: wording names the surface, not 'post'",
           "Your business proposal can't be published" in page.inner_text("#s-banner"))
+
+    # 14. Dismissing the popup any other way is still not a way to publish. Escape and a click
+    # on the backdrop are the two that a member will find by accident.
+    page.click("button.tab[data-surface='article']")
+    page.evaluate("localStorage.clear()"); page.reload()
+    write(page, "Pipes and fittings", "<p>ISI marked PVC pipes. Earn 50000 per week from home, no experience needed.</p>")
+    page.click("#publish-btn")
+    popup_text(page)
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#mod-ask", state="hidden", timeout=30_000)
+    check("popup: Escape closes it without publishing", not published_titles(page), published_titles(page))
+    check("popup: Escape doesn't also close the editor behind it", page.is_visible("#modal"))
+
+    page.click("#publish-btn")
+    popup_text(page)
+    page.mouse.click(8, 8)                      # the backdrop, outside the dialog
+    page.wait_for_selector("#mod-ask", state="hidden", timeout=30_000)
+    check("popup: clicking outside closes it without publishing", not published_titles(page),
+          published_titles(page))
+    check("popup: the article is kept under Rejected to rewrite",
+          "Pipes and fittings" in page.inner_text("#list") or page.is_visible("#modal"))
+    page.click("#close-btn")
 
     page.click("button.tab[data-surface='article']")
     check("tabs: Articles still works", page.is_visible("#articles-view") and page.is_hidden("#surface-view"))

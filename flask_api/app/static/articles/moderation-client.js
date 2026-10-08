@@ -7,13 +7,18 @@
  *   moderateFields(...)  any form: Videos, Requests, Proposals, Business Proposals, Add Business
  *   moderateArticle(...) the Articles editor (title + rich-text body + link URLs)
  *   moderateFile(...)    one attachment: image, video or PDF
+ *   showDecision(...)    the "before you post" popup: the moderation rating and what the
+ *                        moderator found, over the marked-up form
  *
  * A surface is wired up by listing its inputs and blocking submit unless the result allows:
  *
  *   const {result, parts, content} = await BoncModeration.moderateFields(
  *       [{name: "title", text: title}, {name: "description", text: description}],
  *       {contentType: "video", contentId: id});
- *   if (result.decision !== "allow") showIssues(BoncModeration.mapIssues(result.feedback, parts, content));
+ *   if (result.decision === "allow") return publish();
+ *   const issues = BoncModeration.mapIssues(result.feedback, parts, content);
+ *   showIssues(issues);                                  // highlight the inputs in place
+ *   BoncModeration.showDecision({result, issues, noun: "video", onClose: () => focusFirst()});
  *
  * It turns an article (title, rich-text body, link URLs) into ONE moderation
  * request, and maps the response's feedback offsets back onto those fields so
@@ -289,7 +294,122 @@
     return { result: body, parts, content };
   }
 
+  // ---------------- the "before you post" popup ----------------
+  // Senior review (2026-10-04): tell the author what the moderator found, with a rating, in a
+  // popup rather than only a banner they may scroll past. There is no "post anyway" - content
+  // the moderator objects to is not published, and the only way on is to change it.
+  //
+  // The dialog builds its own DOM, so a surface needs no markup of its own: call showDecision
+  // and handle onClose. Styling comes from .mod-ask / .mod-rating in articles.css.
+
+  const RATING_TEXT = {
+    low: "A small thing to look at before this goes out.",
+    medium: "The moderator is not comfortable with part of this.",
+    high: "The moderator is confident this breaks policy.",
+  };
+  let dialog = null;     // built on first use
+
+  const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function buildDialog() {
+    const el = document.createElement("div");
+    el.className = "backdrop mod-ask";
+    el.id = "mod-ask";
+    el.hidden = true;
+    el.innerHTML = `
+      <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="mod-ask-title">
+        <div class="modal-head">
+          <h2 id="mod-ask-title">Before you post</h2>
+          <button class="icon-btn" data-act="change" aria-label="Close">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p class="mod-rating">Moderation rating <b data-el="severity">—</b>
+            <span class="mod-rating-note" data-el="note"></span></p>
+          <p class="mod-message" data-el="message"></p>
+          <ol class="issues" data-el="issues"></ol>
+        </div>
+        <div class="modal-foot">
+          <p class="mod-foot-note" data-el="footnote"></p>
+          <button class="btn btn-primary" data-act="change">Change the content</button>
+        </div>
+      </div>`;
+    document.body.appendChild(el);
+    return el;
+  }
+
+  /**
+   * Render one issue as a list item: which input it is in, the sentence quoted with its trigger
+   * words marked, and the instruction.
+   */
+  function issueLi(issue, labelOf) {
+    let quote = escapeHtml(issue.field === "link" ? issue.url : issue.text);
+    if (issue.field !== "link" && issue.words && issue.words.length) {
+      let html = "", pos = issue.start;
+      for (const w of issue.words) {
+        html += escapeHtml(issue.text.slice(pos - issue.start, w.start - issue.start)) +
+                `<b class="trigger">${escapeHtml(w.text)}</b>`;
+        pos = w.end;
+      }
+      quote = html + escapeHtml(issue.text.slice(pos - issue.start));
+    }
+    return `<li><span class="where">${escapeHtml(labelOf(issue.field))}</span>` +
+           `<span class="quote">“${quote}”</span>: ${escapeHtml(issue.message)}</li>`;
+  }
+
+  /**
+   * Show what the moderator found, over the form it has already marked up.
+   *
+   *   showDecision({result, issues, noun: "article", onClose: () => focusFirstIssue()});
+   *
+   * `issues` are mapIssues() entries (so the quoted text and trigger words are already mapped
+   * onto the author's own inputs); `labels` renames the fields for display. `onClose` runs once,
+   * whichever way the author dismisses it - the button, the close icon, Escape, or a click
+   * outside - because there is only one thing to do next: change the content and try again.
+   */
+  function showDecision({ result, issues = [], noun = "post", labels = {}, onClose = () => {} }) {
+    dialog = dialog || buildDialog();
+    const fb = result.feedback || {};
+    const severity = fb.severity || "medium";
+    const el = (name) => dialog.querySelector(`[data-el="${name}"]`);
+    const labelOf = (field) => labels[field] || field;
+
+    dialog.querySelector("#mod-ask-title").textContent = fb.title || `This ${noun} can't be published`;
+    el("severity").textContent = severity;
+    el("severity").className = severity;
+    el("note").textContent = RATING_TEXT[severity] || "";
+    el("message").textContent = fb.message || "";
+    el("issues").innerHTML = issues.map((i) => issueLi(i, labelOf)).join("");
+    el("footnote").textContent = `This ${noun} hasn't been published.`;
+
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      dialog.hidden = true;
+      dialog.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey, true);
+      onClose();
+    };
+    const onClick = (e) => {
+      if (e.target === dialog || e.target.closest("[data-act]")) finish();
+    };
+    // Captured, so Escape closes this dialog and not the editor modal underneath it.
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      finish();
+    };
+    dialog.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey, true);
+    dialog.hidden = false;
+    dialog.querySelector('[data-act="change"].btn').focus();
+  }
+
   global.BoncModeration = { serializeEditor, editorLinks, buildContent, buildArticleContent, mapIssues,
                             rangeFor, moderateArticle, moderateFields, moderateFile,
-                            hashtagWords, normalizeHashtag };
+                            hashtagWords, normalizeHashtag, showDecision };
 })(window);

@@ -29,6 +29,8 @@ SCHEMA_VERSION = "1.7"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3:
                         # 1.5: sentence_scores[].by ("prefilter" = scored by the linear pre-filter, not the model)
                         # 1.6: media.text_readable - whether OCR read an attachment's writing, as
                         #      opposed to there being none (media.text_found); see app/ocr.py
+                        # 1.7: feedback.severity - the moderation rating shown to the author
+                        #      (low/medium/high), reported from whatever actually decided
                         # 1.7: media.visual - the CLIP visual check's verdict on the PICTURE
                         #      itself, and visual_content_checked now true for images that
                         #      were actually looked at; see app/clip.py
@@ -200,7 +202,9 @@ class Pipeline:
 
     def gate_only_result(self, req: ModerationRequest, gate: GateResult, gate_ms: float) -> dict:
         """Final result for content blocked by Layer 1 (no model call)."""
-        fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value)
+        # No model score exists after a gate block: the rule decided on its own, so the rating
+        # comes from the decision (see feedback.severity_of).
+        fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value, None)
         return self._build(req, Decision.REJECT, Stage.GATE, gate, None, gate_ms, None, [], [], None, fb, [])
 
     def moderate(self, req: ModerationRequest, gate: GateResult | None = None, gate_ms: float = 0.0) -> dict:
@@ -312,7 +316,13 @@ class Pipeline:
             with stages.time("words"):
                 model_issues = self._attach_words(view, model_issues, score, word_scores)
 
-        fb = self.feedback.build(decision, gate, model_issues, req.content_type.value)
+        # The rating (feedback.severity) reports whatever actually decided. A rule decision
+        # carries no model score at all - severity_of reads the decision instead - and where a
+        # sentence or a targeted segment escalated, the whole-text score understates it: the
+        # scan finds 0.99 in a paragraph that scores 0.1 as a whole.
+        risk = None if stage is Stage.GATE else max(
+            [scored.risk_score] + [i.risk_score for i in model_issues if i.risk_score is not None])
+        fb = self.feedback.build(decision, gate, model_issues, req.content_type.value, risk)
         total = gate_ms + (time.perf_counter() - t0) * 1000
         return self._build(req, decision, stage, gate, scored, gate_ms, total, segments, sentence_scores,
                            score.inference_ms, fb, word_scores, stages)
