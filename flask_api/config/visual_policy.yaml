@@ -91,3 +91,34 @@ labels:
       - a person holding a bag or box
       - a person holding a credit card
       - a person holding banknotes or cash
+      # Human bodies in legitimate contexts. Without these, 27% of ordinary body, skin and
+      # anatomy pictures scored unsafe at the shipped threshold - the gore label firing on
+      # skin and medical imagery, the sexual label on athletes and figure studies. There was
+      # nothing in the safe list for a body to BE, so the nearest match was an unsafe one.
+      # A physiotherapist, a dermatology clinic, a sportswear seller and a medical equipment
+      # supplier are all ordinary BONC members.
+      #
+      # Name the SCENE, not the pose. This is the third time the same mistake has cost
+      # recall, so it is worth stating as a rule: a prompt describing a body position
+      # ("a person exercising or training") also describes a person aiming a gun, and
+      # outscored 30 of the weapon images on its own. A prompt naming what is actually in
+      # the picture ("a person lifting weights in a gym") does not.
+      #
+      # Removed for that reason: "a photo of a person's hand, arm or leg" (describes a hand
+      # holding a pistol), "a medical photograph of skin or a limb" (fights the gore label by
+      # design, since that set counts surgical wounds as positives), and "a photo of a person
+      # exercising or training".
+      - a photo of an athlete competing in a sport
+      - a photo of a person lifting weights in a gym
+      - a photo of a person running on a track
+      - a photo of a swimmer in a swimming pool
+      - a photo of a person doing yoga or stretching
+      - a photo of a person in sportswear or a swimsuit
+      - a photo of a physiotherapist treating a patient on a treatment table
+      - a photo of a person receiving a massage
+      - a photo of a doctor or nurse examining a patient
+      - an anatomical diagram of the human body
+      - a medical illustration of muscles or bones
+      - a pencil drawing or sketch of a human figure
+      - a photo of a tattoo on skin
+      - a photo of a prosthetic limb or medical brace

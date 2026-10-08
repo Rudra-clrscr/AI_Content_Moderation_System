@@ -344,24 +344,36 @@ words. They version apart, roll back independently, and neither stands in for th
 the 352 MB vision encoder is loaded at serving time: the text encoder runs once offline in
 `scripts/build_clip_prompts.py`, which bakes the prompt embeddings into `prompts.npz`.
 
-**What it is measured at.** 1,063 sample images, `scripts/eval_clip_images.py`:
+**What it is measured at.** 1,168 sample images, `scripts/eval_clip_images.py`:
 
-| `reject_min` | weapons caught | gore caught | false positives |
-|---|---|---|---|
-| 0.50 | 98% | 99% | 5/200 objects, 0/63 real BONC uploads |
-| 0.70 | 94% | 98% | 2/200 objects, 0/63 real BONC uploads |
-| **0.90** (shipped) | **83%** | **95%** | **0/200 objects, 0/63 real BONC uploads** |
-| 0.99 | 62% | 76% | 0/200 objects, 0/63 real BONC uploads |
+| `reject_min` | weapons | gore | objects | BONC listings | human bodies |
+|---|---|---|---|---|---|
+| 0.50 | 93% | 98% | 5/200 | 0/63 | 17/105 |
+| 0.80 | 83% | 95% | 2/200 | 0/63 | 7/105 |
+| **0.90** (shipped) | **77%** | **93%** | **0/200** | **0/63** | **3/105** |
+| 0.95 | 72% | 86% | 0/200 | 0/63 | 1/105 |
+| 0.97 | 67% | 79% | 0/200 | 0/63 | 0/105 |
+| 0.99 | 57% | 64% | 0/200 | 0/63 | 0/105 |
 
-0.90 is the loosest setting with no false positive anywhere in the clean sets. **Re-run the
-script after any change to `visual_policy.yaml`** — the thresholds move with the prompts, and
-one careless phrasing moved weapon recall 8 points on its own.
+The last three columns are false positives. **Human bodies** (`images/body_parts`: 105 pictures
+of athletes, physiotherapy, anatomy diagrams and swimming, collected from Wikimedia Commons
+with a licence and a source URL for every row) was added to measure the `sexual` label, which
+has no positive samples behind it — and it immediately found that **27% of that set scored
+unsafe** at the shipped threshold, `gore` firing on skin and medical imagery as much as
+`sexual` on athletes. There was nothing in the safe list for a body to *be*, so the nearest
+match was an unsafe label. Fixing that cost 6 points of weapon recall and 2 of gore.
+
+**Re-run the script after any change to `visual_policy.yaml`.** The numbers move with the
+prompts, and the lesson has now cost recall three times: **name the scene, not the pose.** A
+prompt describing a body position ("a person exercising or training") also describes a person
+aiming a gun and outscored 30 weapon images on its own; "a person lifting weights in a gym"
+does not.
 
 **What it does not do.** It is zero-shot: nothing here is learned from BONC's own uploads, so a
-label is only as good as its wordings. The `sexual` label in the shipped policy has **no sample
-images behind it at all** and is therefore unmeasured — it is present because the policy needs
-it, not because it has been shown to work. There is still no counterfeit detector, and video is
-still not looked at.
+label is only as good as its wordings. The `sexual` label still has **no positive samples** —
+what is measured is the side that would hurt BONC, a clinic or a sportswear seller being
+refused, not whether it catches what it is named for. Treat its recall as unknown. There is
+still no counterfeit detector, and video is still not looked at.
 
 **Failure behaviour differs by cause, on purpose.** Missing model or `enabled: false` →
 the check is simply off, results say `visual_content_checked: false`, and the service behaves

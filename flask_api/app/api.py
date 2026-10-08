@@ -161,13 +161,21 @@ def moderate_media():
             return _error(413, "pdf_too_large", f"the file is larger than {pdf_limits.max_bytes} bytes",
                           limit=pdf_limits.max_bytes)
         try:
-            extracted = pdf_extract(data, pdf_limits, upload.filename, svc.settings.ocr)
+            extracted = pdf_extract(data, pdf_limits, upload.filename, svc.settings.ocr,
+                                    svc.settings.visual)
         except PdfError as exc:
             status = 413 if exc.code in ("pdf_too_large", "pdf_too_many_pages", "pdf_text_too_long") else 422
             return _error(status, exc.code, exc.message, **exc.extra)
         text = extracted.text
         block = {**block, **extracted.as_dict()}
         extra = {"pdf": block, "media": block}          # "pdf" kept for the original contract
+        if extracted.unsafe_visual:
+            # A scanned PDF is a stack of photographs. Whatever its text says, a page the
+            # visual check objects to is refused the same way the picture would be if it had
+            # been attached directly - the container must not decide the rule.
+            worst = max(extracted.unsafe_visual, key=lambda v: v.score)
+            return _visual_reject(upload.filename, worst, content_type, content_id, extra,
+                                  rule_id=f"visual.{worst.label}", page=worst.page)
 
     elif kind == "image":
         if len(data) > media.max_bytes:
@@ -261,7 +269,7 @@ def moderate_media():
 
 
 def _visual_reject(filename: str, looked, content_type: ContentType,
-                   content_id: str | None, extra: dict):
+                   content_id: str | None, extra: dict, rule_id: str = "", page: int | None = None):
     """A refusal decided by the picture rather than by any text.
 
     Built as a gate block so it is indistinguishable downstream from a blocked phrase: it gets
@@ -270,8 +278,10 @@ def _visual_reject(filename: str, looked, content_type: ContentType,
     there is no text to quote - what was wrong is in `media.visual`.
     """
     svc = _svc()
-    req = ModerationRequest(f"[{filename}]", content_type, content_id)
-    match = GateMatch(rule_id=f"visual.{looked.label}", category=looked.category,
+    # Name the page when there is one, so the author is told where to look in a 40-page scan.
+    where = f"[{filename}]" if page is None else f"[{filename}, page {page}]"
+    req = ModerationRequest(where, content_type, content_id)
+    match = GateMatch(rule_id=rule_id or f"visual.{looked.label}", category=looked.category,
                       action="block", spans=())
     result = svc.pipeline.gate_only_result(req, GateResult((match,)), 0.0)
     svc.sink.emit(result)

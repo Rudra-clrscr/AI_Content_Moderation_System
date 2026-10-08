@@ -387,3 +387,99 @@ def test_a_pdf_keeps_the_ordinary_bar(make_settings, sink, ocr):
     body = upload_to(client_scoring(make_settings, sink, 0.80, ocr),
                      make_pdf(["Something the model dislikes."]), "doc.pdf").get_json()
     assert body["decision"] != "allow", "0.80 is over the ordinary reject line"
+
+
+# ---- scanned PDFs ------------------------------------------------------------------
+# A scanned PDF is a stack of photographs. Without the visual check on its pages, a weapon or
+# gore photo published simply by being put in a PDF instead of attached as an image - the same
+# hole, one container along. The page is rendered ONCE and handed to both OCR and the check.
+
+def scanned_pdf(image_bytes, caption="INVOICE Order 4471 Qty 2"):
+    """A page that is a picture with a line of text on it, the way a real scan arrives."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    src = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    page = Image.new("RGB", (1240, 1754), "white")
+    src.thumbnail((900, 1100))
+    page.paste(src, (120, 320))
+    draw = ImageDraw.Draw(page)
+    try:
+        font = ImageFont.truetype("arial.ttf", 38)
+    except OSError:
+        font = ImageFont.load_default()
+    draw.text((120, 160), caption, fill=(0, 0, 0), font=font)
+    buf = io.BytesIO()
+    page.save(buf, format="PDF", resolution=150.0)
+    return buf.getvalue()
+
+
+class PageVisualStub:
+    """A visual check that objects to whatever page it is shown."""
+
+    def __init__(self, result, reject):
+        self.result, self.reject, self.calls = result, reject, 0
+        self.ready = True
+
+    def classify(self, image):
+        self.calls += 1
+        return self.result
+
+    def decides_reject(self, result):
+        return self.reject
+
+
+def test_a_pdf_page_is_rendered_once_for_both_checks(make_settings, ocr):
+    """Rendering is ~100 ms a page and both the reader and the check need the same pixels."""
+    from app.pdf import extract
+
+    s = make_settings(ocr=ocr)
+    stub = PageVisualStub(VisualResult(checked=True, label="safe", score=0.99), reject=False)
+    got = extract(scanned_pdf(png(size=(400, 300))), s.pdf, "scan.pdf", ocr, stub)
+    assert stub.calls == 1, "the page should be classified once, not once per consumer"
+    assert [v.page for v in got.visual_pages] == [1]
+    assert "INVOICE" in got.text.upper(), "OCR still read the same rendered page"
+
+
+def test_a_weapon_inside_a_scanned_pdf_is_refused(make_settings, ocr, scorer, sink):
+    from app import create_app
+
+    looked = VisualResult(checked=True, label="weapon", category="weapons", score=0.98,
+                          unsafe_score=0.99)
+    s = make_settings(max_chars=50_000, ocr=ocr,
+                      visual=PageVisualStub(looked, reject=True))
+    client = create_app(s, scorer=scorer, sink=sink).test_client()
+    body = client.post("/v1/moderate/media",
+                       data={"file": (io.BytesIO(scanned_pdf(png(size=(400, 300)))), "scan.pdf"),
+                             "content_type": "article"},
+                       content_type="multipart/form-data").get_json()
+
+    assert body["decision"] == "reject" and body["decided_by"] == "gate"
+    assert [m["rule_id"] for m in body["gate_matches"]] == ["visual.weapon"]
+    assert "page 1" in body["content"], "the author is told which page to look at"
+
+
+def test_a_clean_scan_still_publishes(make_settings, ocr, scorer, sink):
+    from app import create_app
+
+    looked = VisualResult(checked=True, label="safe", score=0.99)
+    s = make_settings(max_chars=50_000, ocr=ocr, visual=PageVisualStub(looked, reject=False))
+    client = create_app(s, scorer=scorer, sink=sink).test_client()
+    body = client.post("/v1/moderate/media",
+                       data={"file": (io.BytesIO(scanned_pdf(png(size=(400, 300)))), "scan.pdf"),
+                             "content_type": "article"},
+                       content_type="multipart/form-data").get_json()
+    assert body["decision"] == "allow"
+    assert body["pdf"]["visual_checked_pages"] == [1]
+
+
+def test_a_text_only_pdf_has_no_pixels_to_look_at(make_settings, ocr):
+    """A page of selectable text carries no picture, so there is nothing for the check to do
+    and it is not asked - the saving that keeps a 60-page document affordable."""
+    from app.pdf import extract
+    from tests.test_pdf import make_pdf
+
+    stub = PageVisualStub(VisualResult(checked=True, label="safe", score=0.99), reject=False)
+    got = extract(make_pdf(["Cotton bedsheets in king and queen sizes, 300 thread count."]),
+                  make_settings().pdf, "doc.pdf", ocr, stub)
+    assert stub.calls == 0
+    assert got.visual_pages == ()

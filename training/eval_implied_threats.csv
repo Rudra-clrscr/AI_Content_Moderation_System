@@ -1,0 +1,169 @@
+text,label,group
+We know where your warehouse is.,1,implied_threat
+"We have your home address, in case you were wondering.",1,implied_threat
+Nice godown you have in Bhiwandi. Would be a pity.,1,implied_threat
+"Your family lives above the shop, doesn't it.",1,implied_threat
+We drive past your unit every day. Remember that.,1,implied_threat
+Someone will be visiting your office this week.,1,implied_threat
+We know which school your son goes to.,1,implied_threat
+Your delivery route is very predictable.,1,implied_threat
+"I have your number, your address and your supplier list.",1,implied_threat
+We found your residence easily enough.,1,implied_threat
+It would be a shame if something happened to your shipment.,1,implied_threat
+"Your stock is not insured, I hope that works out for you.",1,implied_threat
+Lovely new truck. Hope nothing happens to it.,1,implied_threat
+Be a pity if your godown had an accident.,1,implied_threat
+Fires start so easily in those old warehouses.,1,implied_threat
+Would be unfortunate if your containers went missing at the port.,1,implied_threat
+I hope your machinery keeps running. Things break.,1,implied_threat
+Your cold storage looks fragile to me.,1,implied_threat
+Stop trading or face consequences.,1,implied_threat
+Withdraw the tender or there will be consequences for you.,1,implied_threat
+"Pull out of this deal, or deal with what follows.",1,implied_threat
+Keep undercutting us and see what happens.,1,implied_threat
+Carry on like this and you will find out.,1,implied_threat
+There are consequences for people who do this.,1,implied_threat
+You will regret going ahead with this.,1,implied_threat
+Think very carefully about your next move.,1,implied_threat
+Do not make me explain what happens next.,1,implied_threat
+You do not want to find out what we do about this.,1,implied_threat
+Continue and you will learn why nobody competes with us here.,1,implied_threat
+One more order from that buyer and we will see.,1,implied_threat
+People who cross us do not stay in business long.,1,implied_threat
+The last supplier who did this is no longer trading.,1,implied_threat
+Ask around about what happened to the firm in Sector 8.,1,implied_threat
+Others have tried this. Ask them how it went.,1,implied_threat
+We have dealt with people like you before.,1,implied_threat
+You are not the first to try this and you will end the same way.,1,implied_threat
+Nobody who has gone against us is still here.,1,implied_threat
+You have 48 hours before things get unpleasant.,1,implied_threat
+Pay by Friday or we handle it our own way.,1,implied_threat
+Settle the amount by Monday. After that it is out of my hands.,1,implied_threat
+You have until the end of the week. I will not ask again.,1,implied_threat
+Last chance to do this quietly.,1,implied_threat
+This is the only warning you will get.,1,implied_threat
+After tomorrow I stop being polite.,1,implied_threat
+The window for sorting this amicably is closing.,1,implied_threat
+We can make life very difficult for you.,1,implied_threat
+We can make sure you never get a licence in this district.,1,implied_threat
+Your trucks will not get past the checkpoint.,1,implied_threat
+You will find permits very hard to come by.,1,implied_threat
+We have friends who can make your clearances disappear.,1,implied_threat
+Your loading bay could get very congested.,1,implied_threat
+Labour problems have a way of finding uncooperative firms.,1,implied_threat
+Inspections tend to follow people who annoy us.,1,implied_threat
+We can arrange for your consignments to sit at customs indefinitely.,1,implied_threat
+Do as we say or your buyers hear about your personal life.,1,implied_threat
+I have photographs you would not want circulated.,1,implied_threat
+"Comply, or your wife learns what you have been doing.",1,implied_threat
+Cooperate and nobody needs to see what I have.,1,implied_threat
+"Your reputation is more fragile than you think, and I hold the pin.",1,implied_threat
+We will make sure your name is finished in this market.,1,implied_threat
+"As a friend, I would withdraw that bid if I were you.",1,implied_threat
+"My advice is to stop now, while you still can.",1,implied_threat
+A sensible man would take the money and go quiet.,1,implied_threat
+If I were you I would think about my family first.,1,implied_threat
+"Take this as friendly advice, not a request.",1,implied_threat
+Walk away now and nothing needs to happen.,1,implied_threat
+Be smart about this. Smart people stay healthy.,1,implied_threat
+"We will be in touch, one way or another.",1,implied_threat
+"This is not over, and I do not forget.",1,implied_threat
+I will remember this. So will the others.,1,implied_threat
+You have made this personal now.,1,implied_threat
+You will be hearing from people who are not as patient as me.,1,implied_threat
+My partners are less reasonable than I am.,1,implied_threat
+I can only hold them back for so long.,1,implied_threat
+The people I work for do not accept no.,1,implied_threat
+I am the polite one. You do not want the next call.,1,implied_threat
+The debt is collected one way or the other.,1,implied_threat
+We always recover what we are owed. Always.,1,implied_threat
+Your choice how we collect this.,1,implied_threat
+"Pay, or we come and take the value in goods.",1,implied_threat
+The amount doubles every week you make me wait.,1,implied_threat
+We do not use courts for this kind of thing.,1,implied_threat
+Our collection method is not the one you are used to.,1,implied_threat
+"Dekh lenge tujhe, abhi nahi to baad mein.",1,implied_threat
+Teri dukaan kahan hai humein pata hai.,1,implied_threat
+"Bahut hoshiyari mat dikha, anjaam bura hoga.",1,implied_threat
+Tu jaanta nahi hum kaun hain.,1,implied_threat
+"Apne parivaar ka socho, phir decision lo.",1,implied_threat
+"Humse panga mat lena, theek rahega.",1,implied_threat
+Agar deal nahi chhoda to dekh lena.,1,implied_threat
+You do not know who you are dealing with.,1,implied_threat
+Do you know who my people are?,1,implied_threat
+You will find out who we are soon enough.,1,implied_threat
+"Better you cooperate, otherwise we have other methods.",1,implied_threat
+"We will settle this outside, our way.",1,implied_threat
+"Do not involve police, it will be worse for you.",1,implied_threat
+Keep this between us if you want to stay comfortable.,1,implied_threat
+Your drivers should be careful on that highway.,1,implied_threat
+Night shift workers get tired. Accidents happen.,1,implied_threat
+Tell your staff to watch themselves.,1,implied_threat
+Your watchman is old. He cannot stop much.,1,implied_threat
+That loading crew of yours looks easy to replace.,1,implied_threat
+Make sure your people know not to talk.,1,implied_threat
+We will escalate this to our legal team if the invoice remains unpaid.,0,firm_business_language
+Failure to deliver by Friday will trigger the penalty clause in clause 7.,0,firm_business_language
+We may have to terminate the contract if quality does not improve.,0,firm_business_language
+There will be commercial consequences for the partnership if this continues.,0,firm_business_language
+We reserve the right to pursue damages for the delayed consignment.,0,firm_business_language
+Our lawyers will be in touch regarding the breach.,0,firm_business_language
+This is a final reminder before we file with the consumer forum.,0,firm_business_language
+Continued non-payment will result in suspension of further supply.,0,firm_business_language
+We will be claiming liquidated damages as provided in the agreement.,0,firm_business_language
+Please treat this as formal notice of our intention to rescind.,0,firm_business_language
+If the goods are not collected by the 15th we will invoice for storage.,0,firm_business_language
+We intend to recover the outstanding amount through the appropriate legal channel.,0,firm_business_language
+Any further delay and we will have to source from another vendor.,0,firm_business_language
+We will withhold the final payment until the defects are rectified.,0,firm_business_language
+The agreement permits us to cancel on seven days written notice.,0,firm_business_language
+We are placing the account on hold pending resolution.,0,firm_business_language
+This matter will be referred to arbitration as per the contract.,0,firm_business_language
+Repeated short deliveries will affect your vendor rating with us.,0,firm_business_language
+We will be forced to reconsider the renewal in March.,0,firm_business_language
+Failure to respond within ten days will be treated as refusal.,0,firm_business_language
+"We know what the market rate is, and your quote is well above it.",0,firm_business_language
+We have other suppliers quoting lower. Match it or we move on.,0,firm_business_language
+This is our final offer. Take it or leave it.,0,firm_business_language
+"If you cannot meet the deadline, say so now and we will go elsewhere.",0,firm_business_language
+We are not interested in renegotiating after the order is placed.,0,firm_business_language
+Your price is not competitive and we will be looking at alternatives.,0,firm_business_language
+We will walk away from this deal if the terms do not change.,0,firm_business_language
+Do not waste our time with another revised quotation.,0,firm_business_language
+"We expect delivery on the agreed date, with no further excuses.",0,firm_business_language
+This is the last time we will accept a late consignment.,0,firm_business_language
+The quality of this batch was unacceptable and we want it replaced.,0,firm_business_language
+Your driver was rude to our staff and we have reported it.,0,firm_business_language
+We are extremely disappointed with how this order was handled.,0,firm_business_language
+This is the third time your consignment has arrived damaged.,0,firm_business_language
+We have lost a customer because of your delay.,0,firm_business_language
+Your after-sales service has been appalling throughout.,0,firm_business_language
+I have never dealt with a less organised supplier.,0,firm_business_language
+The packing was careless and half the stock arrived broken.,0,firm_business_language
+Nobody at your office answers the phone and it is costing us money.,0,firm_business_language
+We are raising a formal complaint about this shipment.,0,firm_business_language
+"We know where the consignment is held up, it is at Nhava Sheva.",0,firm_business_language
+Our warehouse address is on the invoice for your records.,0,firm_business_language
+Fire safety certification for the godown is attached.,0,firm_business_language
+The insurance covers the stock in transit and at the warehouse.,0,firm_business_language
+Please confirm the delivery address before dispatch.,0,firm_business_language
+Our team will visit your office next week to discuss the terms.,0,firm_business_language
+I will be in touch on Monday with the revised schedule.,0,firm_business_language
+You have 48 hours to confirm the booking before the rate expires.,0,firm_business_language
+"The offer closes on Friday, after which the list price applies.",0,firm_business_language
+This is your last chance to book at the early-bird rate.,0,firm_business_language
+Act now before the festive stock runs out.,0,firm_business_language
+Deadline for the tender submission is the end of the month.,0,firm_business_language
+"There are consequences for ordering late in the season, mainly on price.",0,firm_business_language
+We cannot be held responsible for what happens after handover.,0,firm_business_language
+Accidents at the loading bay are covered under our liability policy.,0,firm_business_language
+Our drivers are trained to be careful on the highway.,0,firm_business_language
+The night shift supervisor will sign for the delivery.,0,firm_business_language
+Please make sure your staff know the gate timings.,0,firm_business_language
+We will settle the balance through the portal once the credit note is issued.,0,firm_business_language
+Do not involve a third party in this negotiation without telling us.,0,firm_business_language
+"Bhai rate thoda kam karo, market mein competition hai.",0,firm_business_language
+"Aapka maal time par nahi aaya, isliye problem hui.",0,firm_business_language
+Hum aapse baat karke solution nikal lenge.,0,firm_business_language
+"Payment Friday tak ho jayega, chinta mat karo.",0,firm_business_language
+Humein aapka address chahiye invoice ke liye.,0,firm_business_language

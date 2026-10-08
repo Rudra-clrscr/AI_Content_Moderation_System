@@ -69,18 +69,29 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # needed to serve: build_clip_prompts.py runs it offline and bakes
                             # the prompt embeddings into prompts.npz.
     reject_min: 0.90        # an unsafe label this confident refuses the upload. MEASURED on
-                            # 1063 sample images with scripts/eval_clip_images.py:
+                            # 1168 sample images with scripts/eval_clip_images.py:
                             #
-                            #   reject_min   weapons   gore   false positives
-                            #        0.50      98%     99%    5/200 objects, 0/63 BONC uploads
-                            #        0.70      94%     98%    2/200 objects, 0/63 BONC uploads
-                            #        0.90      83%     95%    0/200 objects, 0/63 BONC uploads
-                            #        0.99      62%     76%    0/200 objects, 0/63 BONC uploads
+                            #   reject_min  weapons  gore   false positives
+                            #                              objects  BONC   bodies
+                            #        0.50     93%    98%    5/200    0/63   17/105
+                            #        0.80     83%    95%    2/200    0/63    7/105
+                            #        0.90     77%    93%    0/200    0/63    3/105
+                            #        0.95     72%    86%    0/200    0/63    1/105
+                            #        0.97     67%    79%    0/200    0/63    0/105
+                            #        0.99     57%    64%    0/200    0/63    0/105
                             #
-                            # 0.90 is the loosest setting with no false positive anywhere in the
-                            # clean sets. Lower it to catch more and accept refusing the
-                            # occasional product photo; re-run the script after any change to
-                            # visual_policy.yaml, because the thresholds move with the prompts.
+                            # "bodies" is images/body_parts - athletes, physiotherapy, anatomy,
+                            # swimming - collected to measure the `sexual` label, which has no
+                            # positive samples behind it. It turned out to matter for `gore`
+                            # too: before the safe list learned to describe a body in a
+                            # legitimate context, 27% of that set scored unsafe at 0.90.
+                            #
+                            # 0.90 keeps every real BONC listing and every safe object, at
+                            # 3 body pictures in 105. Nothing at all is refused until 0.97,
+                            # which costs 10 points of weapon recall and 14 of gore. Re-run the
+                            # script after ANY change to visual_policy.yaml - the numbers move
+                            # with the prompts, which is how the body-part regression was
+                            # found in the first place.
     max_pixels: 40000000    # decoded size, against decompression bombs (as media.max_pixels)
     device: auto            # auto | cuda | directml | cpu. "auto" takes the best execution
                             # provider onnxruntime actually offers, so a host with the stock

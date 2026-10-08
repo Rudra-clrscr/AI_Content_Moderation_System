@@ -68,7 +68,12 @@ def load_sets(test_n: int) -> dict[str, pd.DataFrame]:
             # rate", complaints, and fraud-awareness writing that quotes abuse in order to
             # report it. All legitimate; the QA pass of 2026-09-30 found the pricing group
             # rejected at 0.58-0.97 and it is the largest remaining false-positive class.
-            "b2b_negotiation": pd.read_csv(HERE / "eval_b2b_negotiation.csv", keep_default_na=False)}
+            "b2b_negotiation": pd.read_csv(HERE / "eval_b2b_negotiation.csv", keep_default_na=False),
+            # Coercion that never names the harm ("we know where your warehouse is"), against
+            # firm contract language that must stay publishable ("failure to deliver triggers
+            # the penalty clause"). v5 catches 18% of the first group, so this set is a target,
+            # not a regression guard - and the second group is what a careless fix would break.
+            "implied_threats": pd.read_csv(HERE / "eval_implied_threats.csv", keep_default_na=False)}
     test = Path("D:/AI/bonc-data/test.csv")
     if test.exists():
         t = pd.read_csv(test, keep_default_na=False)
