@@ -29,11 +29,13 @@ SCHEMA_VERSION = "1.7"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3:
                         # 1.5: sentence_scores[].by ("prefilter" = scored by the linear pre-filter, not the model)
                         # 1.6: media.text_readable - whether OCR read an attachment's writing, as
                         #      opposed to there being none (media.text_found); see app/ocr.py
-                        # 1.7: feedback.severity - the moderation rating shown to the author
-                        #      (low/medium/high), reported from whatever actually decided
-                        # 1.7: media.visual - the CLIP visual check's verdict on the PICTURE
-                        #      itself, and visual_content_checked now true for images that
-                        #      were actually looked at; see app/clip.py
+                        # 1.7: two features shipped together, so this version means BOTH.
+                        #      feedback.severity - the moderation rating shown to the author
+                        #      (low/medium/high), reported from whatever actually decided; and
+                        #      media.visual - the CLIP visual check's verdict on the PICTURE
+                        #      itself (app/clip.py), with visual_content_checked now true for
+                        #      images that were actually looked at. A client seeing "1.7" has
+                        #      both; there is no build with one and not the other.
 
 
 class ContentType(str, Enum):
