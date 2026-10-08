@@ -18,6 +18,10 @@ Env overrides (all optional):
     TRIAGE                0 to turn off the linear pre-filter (every span then goes to the model)
     TRIAGE_THRESHOLD      float, overrides the threshold chosen when the filter was trained
     PDF_UPLOAD            0 to turn off POST /v1/moderate/pdf and /v1/moderate/media
+    VISUAL_CHECK          0 to turn off the CLIP visual check (app/clip.py); results then say
+                          visual_content_checked: false, as they did before it existed
+    VISUAL_REJECT_MIN     float, overrides visual.reject_min
+    VISUAL_DEVICE         auto | cuda | directml | cpu, where the visual check runs
     MEDIA_UPLOAD          0 to turn off image/video attachment checking
     PDF_OCR               0 to turn off OCR of scanned pages (they are then refused, as before)
     DB_SERVER, DB_NAME    SQL Server host and database
@@ -39,6 +43,7 @@ from dotenv import load_dotenv
 
 from app.routing import Thresholds
 from app.media import MediaLimits
+from app.clip import VisualCheck, VisualConfig
 from app.ocr import OcrConfig, OcrEngine
 from app.pdf import PdfLimits
 from app.targeted import DEFAULT_SUBJECTS, SentenceScan, TargetedAbuse, WordScan
@@ -81,6 +86,9 @@ class Settings:
     pdf: PdfLimits = field(default_factory=PdfLimits)
     media: MediaLimits = field(default_factory=MediaLimits)
     ocr: OcrEngine = field(default_factory=lambda: OcrEngine(OcrConfig(enabled=False)))
+    # Off by default: the model files are not in the repo, so a deployment that has not run
+    # scripts/fetch_clip.py behaves exactly as it did before the visual check existed.
+    visual: VisualCheck = field(default_factory=lambda: VisualCheck(VisualConfig(enabled=False)))
 
     def model_kwargs(self) -> dict:
         """Keyword args for ModelRegistry.load / OnnxScorer."""
@@ -115,6 +123,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
     pdf = raw.get("pdf", {})
     ocr = pdf.get("ocr", {})
     med = raw.get("media", {})
+    vis = med.get("visual", {})
     env = os.environ.get
     triage_threshold = env("TRIAGE_THRESHOLD", tr.get("threshold"))
     triage = (TriageFilter.load(_resolve(tr.get("dir", "models/triage-v1")),
@@ -188,6 +197,9 @@ def load_settings(path: str | Path | None = None) -> Settings:
             max_pixels=int(med.get("max_pixels", 40_000_000)),
             allow_unchecked_video=_as_bool(med.get("allow_unchecked_video", False)),
             allow_unreadable_image=_as_bool(med.get("allow_unreadable_image", False)),
+            allow_unreadable_image_when_seen=_as_bool(
+                med.get("allow_unreadable_image_when_seen", True)),
+            ocr_text_reject_min=float(med.get("ocr_text_reject_min", 0.99)),
         ),
         ocr=OcrEngine(OcrConfig(
             enabled=_as_bool(env("PDF_OCR", ocr.get("enabled", True))),
@@ -200,6 +212,15 @@ def load_settings(path: str | Path | None = None) -> Settings:
             trust_short_confidence=float(ocr.get("trust_short_confidence", 0.90)),
             rec_model_path=str(ocr.get("rec_model_path") or ""),
             rec_lang=str(ocr.get("rec_lang") or ""),
+        )),
+        visual=VisualCheck(VisualConfig(
+            enabled=_as_bool(env("VISUAL_CHECK", vis.get("enabled", False))),
+            model_dir=str(vis.get("model_dir", "models/img_v1")),
+            reject_min=float(env("VISUAL_REJECT_MIN", vis.get("reject_min", 0.90))),
+            max_pixels=int(vis.get("max_pixels", med.get("max_pixels", 40_000_000))),
+            intra_op_threads=int(vis.get("intra_op_threads", 4)),
+            inter_op_threads=int(vis.get("inter_op_threads", 1)),
+            device=str(env("VISUAL_DEVICE", vis.get("device", "auto"))),
         )),
     )
 

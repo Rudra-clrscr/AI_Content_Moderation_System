@@ -1,0 +1,93 @@
+# What the visual check looks for in an uploaded picture (app/clip.py).
+#
+# CLIP scores an image against written descriptions rather than against trained classes, so the
+# policy IS this file: add a label with a few phrasings and it is checked from the next restart,
+# with no retraining. The cost is that nothing here is learned from BONC's own pictures, so
+# every label is only as good as its wordings - measure a new one with
+# `python scripts/eval_clip_images.py` before trusting it.
+#
+# Each label carries several phrasings and takes the best-matching one, which is how zero-shot
+# CLIP is normally ensembled: one wording can miss a picture that another catches. Scores are a
+# softmax over every phrasing here, so the `safe` list is not decoration - it is what the unsafe
+# labels are judged against, and a thin one makes ordinary photographs look suspicious.
+
+version: 1
+
+# Phrasings are lower case and start "a photo of ..." where it reads naturally: that is the
+# shape of the captions CLIP was trained on, and it scores better than a bare noun.
+labels:
+  weapon:
+    unsafe: true
+    category: weapons
+    prompts:
+      - a photo of a handgun
+      - a photo of a pistol
+      - a person holding a gun
+      - a photo of a rifle
+      - a photo of a knife held in a hand
+      - a photo of a combat knife or dagger
+      - a photo of a firearm for sale
+
+  gore:
+    unsafe: true
+    category: graphic_violence
+    prompts:
+      - a photo of a bloody injury
+      - a photo of a wound with blood
+      - a graphic photo of blood on a person
+      - a photo of a surgical wound
+      - a photo of a badly injured person
+      - a close-up photo of a cut on skin
+
+  sexual:
+    unsafe: true
+    category: sexual_content
+    # UNMEASURED. There are no sample images for this label, so unlike weapon and gore its
+    # accuracy on BONC's traffic is unknown - it is here because the policy needs it, not
+    # because it has been shown to work. Get a sample set before relying on it.
+    prompts:
+      - a photo of a nude person
+      - a pornographic photo
+      - a sexually explicit photo
+      - a photo of a person posing in underwear
+
+  # Everything below is ordinary business imagery. These are the alternatives the unsafe labels
+  # compete against, so the list is deliberately broad: a picture that matches none of them has
+  # nothing to be "safe" as, and its unsafe score rises whatever is really in it.
+  safe:
+    unsafe: false
+    prompts:
+      - a product photo on a plain background
+      - a photo of an everyday object
+      - a photo of a smartphone or laptop
+      - a photo of a wallet, purse or bag
+      - a photo of money or banknotes
+      - a photo of a credit card or id card
+      - a photo of people working in an office
+      - a photo of a shop, factory or warehouse
+      - a screenshot of a document or invoice
+      - a photo of machinery or tools
+      - a photo of food or produce
+      - a photo of clothing, fabric or textiles
+      - a photo of furniture
+      - a photo of a car, truck or vehicle
+      - a logo, poster or graphic design
+      - a photo of a building or street
+      - a portrait photo of a person
+      - a landscape or nature photograph
+      - a chart, diagram or slide
+      - a photo of packaging or cardboard boxes
+      # A hand holding something, which is the pose the weapon prompts describe. Without these
+      # an outstretched arm holding a black wallet scores 0.985 weapon: the object is right, the
+      # pose is what CLIP matches on, and only a safe label in the same pose competes with it.
+      #
+      # Each one names the object. Generic wordings ("a hand holding an everyday object", "an
+      # outstretched arm holding an object") were tried and removed: they describe a hand
+      # holding a pistol just as well, and cost 4 to 8 points of weapon recall depending on the
+      # threshold (79% against 83% at the shipped 0.90) to buy exactly the false-positive rate
+      # these specific ones give on their own.
+      - a person holding a smartphone
+      - a person holding a wallet or purse
+      - a person holding a bag or box
+      - a person holding a credit card
+      - a person holding banknotes or cash

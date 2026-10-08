@@ -1,7 +1,20 @@
 flask>=3.1
 pyyaml>=6.0
 numpy>=2.1
-onnxruntime>=1.24
+onnxruntime>=1.24          # CPU. For a GPU, install ONE of the builds below INSTEAD - they
+                           # provide the same `onnxruntime` module and must not be installed
+                           # alongside this one:
+                           #   pip uninstall onnxruntime
+                           #   pip install "onnxruntime-gpu[cuda,cudnn]"   # NVIDIA, CUDA 13 + cuDNN 9
+                           #   pip install onnxruntime-directml            # any DX12 GPU on Windows
+                           # The extras matter: the bare onnxruntime-gpu wheel does not carry
+                           # the CUDA libraries, and without them it reports CUDA as available
+                           # and then fails to create the provider. app/clip.py calls
+                           # onnxruntime.preload_dlls() so the ones from those pip packages are
+                           # found, and falls back to CPU rather than failing if they are not.
+                           # Measured on an RTX 4050 laptop, CLIP ViT-B/32 vision encoder:
+                           # 14.8 images/s on 6 CPU cores, 60.5 on CUDA (4.1x), identical
+                           # decisions on all 273 images checked both ways.
 tokenizers>=0.21
 celery[redis]>=5.5
 waitress>=3.0
@@ -13,3 +26,8 @@ pypdf>=5.1                 # text extraction for POST /v1/moderate/pdf (pure Pyt
 # it reuses the onnxruntime above rather than adding a second inference stack.
 rapidocr>=3.0
 pypdfium2>=4.30            # renders a page to pixels; handles CCITT/JBIG2 scans that extractors refuse
+
+# Decoding uploaded pictures, for both OCR and the CLIP visual check (app/clip.py). It arrived
+# transitively through rapidocr before; declared here because the visual check needs it in its
+# own right and must not break if the OCR stack is ever dropped or swapped.
+pillow>=10.0
