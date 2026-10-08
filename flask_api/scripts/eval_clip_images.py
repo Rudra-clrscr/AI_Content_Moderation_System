@@ -54,6 +54,10 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         # the `sexual` label, which has no positive samples behind it - so what is measured is
         # the side that would actually hurt BONC, a clinic or a sportswear seller being refused.
         ("body_parts", images / "body_parts", False),
+        # The positive side of the `sexual` label. Not in the repo and not collectable by
+        # scraping - see docs/measuring_the_sexual_label.md for the two routes that work.
+        # Drop a licensed set in here and it is measured like any other; absent, it is skipped.
+        ("sexual_positive", images / "sexual_positive", True),
     ]
     return [(n, d, e) for n, d, e in candidates if d.is_dir()]
 
