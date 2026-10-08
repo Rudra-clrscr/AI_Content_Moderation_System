@@ -168,6 +168,33 @@ class OcrEngine:
         return {i: p for i, p in out.items()
                 if len(p.text) >= self.config.min_chars and self.config.reads_as_text(p)}
 
+    def read_rendered(self, pages: dict[int, "object"]) -> dict[int, PageText]:
+        """OCR pages somebody else has already rendered.
+
+        `read_pages` renders and reads in one go, which is all OCR needs on its own. But a
+        scanned page also has to be *looked at* by the visual check, and rendering a page is
+        the expensive part - ~100 ms before either of them does any work. So the PDF path
+        renders once and hands the same bitmaps to both (app/pdf.py), and this is the half of
+        `read_pages` that takes them.
+        """
+        if not self.enabled or not pages:
+            return {}
+        out: dict[int, PageText] = {}
+        with self._lock:
+            try:
+                engine = self._load()
+            except Exception:
+                log.exception("OCR could not run; pages stay unreadable")
+                return {}
+            for index, image in pages.items():
+                t0 = time.perf_counter()
+                try:
+                    out[index] = self._to_page_text(engine(image), (time.perf_counter() - t0) * 1000)
+                except Exception:
+                    log.warning("OCR failed on page %d", index + 1, exc_info=True)
+        return {i: p for i, p in out.items()
+                if len(p.text) >= self.config.min_chars and self.config.reads_as_text(p)}
+
     def read_image(self, array) -> PageText:
         """OCR an already-decoded RGB image (app/media.py hands us attachments this way)."""
         if not self.enabled:

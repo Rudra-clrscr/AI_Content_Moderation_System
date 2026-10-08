@@ -49,6 +49,11 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         ("gore", gore / "graphic_injury_gore", True),
         ("non_graphic", gore / "non_graphic", None),      # None: not a clean expectation
         ("BONC_Positive", images / "BONC_Positive", False),
+        # Human bodies, skin and anatomy: hands, athletes, physiotherapy, swimming, medical
+        # diagrams. Collected with scripts/collect_commons_images.py. These exist to measure
+        # the `sexual` label, which has no positive samples behind it - so what is measured is
+        # the side that would actually hurt BONC, a clinic or a sportswear seller being refused.
+        ("body_parts", images / "body_parts", False),
     ]
     return [(n, d, e) for n, d, e in candidates if d.is_dir()]
 
