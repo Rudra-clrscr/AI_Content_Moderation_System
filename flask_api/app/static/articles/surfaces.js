@@ -344,8 +344,18 @@
         publish(values, result);
         return;
       }
-      showFeedback(result, parts, content);
+      // Mark the inputs first, so they are waiting underneath the popup and the author lands
+      // on the first one when they dismiss it.
+      const issues = showFeedback(result, parts, content);
       record(values, result);
+      M.showDecision({
+        result, issues, noun: s.noun,
+        labels: Object.fromEntries(s.fields.map((f) => [f.name, f.label])),
+        onClose: () => {
+          const first = issues.find((i) => $(`s-${i.field}`));
+          if (first) $(`s-${first.field}`).focus();
+        },
+      });
     } catch (e) {
       // Fail closed: if the moderator can't be reached, nothing is published.
       banner("error", "Couldn't check this right now", `${e.message} Nothing was published.`);
@@ -393,7 +403,7 @@
     }
   }
 
-  /** Show the decision, and mark each input the moderator wants rewritten. */
+  /** Show the decision and mark each input the moderator wants rewritten. Returns the issues. */
   function showFeedback(result, parts, content) {
     const fb = result.feedback || {};
     const issues = M.mapIssues(fb, parts, content);
@@ -414,6 +424,7 @@
       msg.innerHTML = `<div class="field-hint">${esc(i.message)}</div>`;
     }
     $("s-banner").scrollIntoView({ block: "nearest" });
+    return issues;
   }
 
   function issueHtml(i, labelOf) {

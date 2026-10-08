@@ -43,6 +43,28 @@ class Issue:
         return d
 
 
+# How the risk score is reported to the author. Words, not the probability: a member reads
+# "high" and understands it, while a number only invites nudging the text until it drops under
+# the line. The bands are deliberately coarser than the decision boundary (0.5), so "medium"
+# covers a borderline reject and "high" means the model was not in two minds.
+SEVERITY_BANDS = ((0.80, "high"), (0.50, "medium"), (0.0, "low"))
+
+
+def severity_of(risk: float | None, decision: Decision) -> str:
+    """The rating shown with the feedback.
+
+    A gate block carries no model score - nothing was scored, because a rule decided on its
+    own - and is reported as "high"; a gate `revise` rule on text the model was happy with is
+    "medium", since the model's own score would read as "low" and understate it.
+    """
+    if risk is None:
+        return "high" if decision is Decision.REJECT else "medium"
+    for floor, name in SEVERITY_BANDS:
+        if risk >= floor:
+            return name
+    return "low"
+
+
 @dataclass
 class Feedback:
     revise_title: str = "Your post needs a few changes"
@@ -84,15 +106,16 @@ class Feedback:
                 for m in gate.matches if m.action in actions for s, e in m.spans]
 
     def build(self, decision: Decision, gate: GateResult, model_issues: list[Issue],
-              content_type: str = "post") -> dict | None:
+              content_type: str = "post", risk: float | None = None) -> dict | None:
         if decision is Decision.ALLOW:
             return None
+        common = {"severity": severity_of(risk, decision)}
         noun = self.nouns.get(content_type, "post")
         fmt = lambda text, **kw: text.format(noun=noun, **kw)  # noqa: E731
 
         if decision is Decision.REVISE:
             issues = self.rule_issues(gate, ("revise",)) + model_issues
-            return {"title": fmt(self.revise_title), "message": fmt(self.revise_message),
+            return {"title": fmt(self.revise_title), "message": fmt(self.revise_message), **common,
                     "issues": [i.as_dict() for i in sorted(issues, key=lambda i: (i.start, i.end))]}
 
         # REJECT: name the policy areas; highlight only if configured to.
@@ -100,7 +123,7 @@ class Feedback:
         names = list(dict.fromkeys(self.categories.get(m.category, m.category) for m in blocking))
         message = fmt(self.reject_message, categories=_join(names)) if names else fmt(self.reject_message_generic)
         issues = (self.rule_issues(gate, ("block", "revise")) + model_issues) if self.highlight_on_reject else []
-        return {"title": fmt(self.reject_title), "message": message,
+        return {"title": fmt(self.reject_title), "message": message, **common,
                 "categories": list(dict.fromkeys(m.category for m in blocking)),
                 "issues": [i.as_dict() for i in sorted(issues, key=lambda i: (i.start, i.end))]}
 
