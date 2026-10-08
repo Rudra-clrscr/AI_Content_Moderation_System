@@ -2,12 +2,12 @@
  * Articles tab + "Write article" modal with publish-time moderation.
  *
  *   Publish -> POST /v1/moderate (title + body + link URLs, content_type "article")
- *     allow  -> published immediately (uses one free publish)
- *     revise -> not published (a gate "revise" rule); the modal stays open with the parts to fix
- *               highlighted. The article is kept under "Needs changes" so the author can come back to it.
- *     reject -> not published (risk > 0.5, or a gate block); the reason is shown with the sentences
- *               to rewrite highlighted and their trigger words marked. Kept under "Rejected", where
- *               the author can reopen it, rewrite and publish again.
+ *     allow  -> published immediately
+ *     revise / reject -> not published. The parts to fix are highlighted in place, and the
+ *               "before you post" popup (moderation-client.js showDecision) shows the
+ *               moderation rating and what was found. Dismissing it leaves the modal open on
+ *               the first issue, and the article is kept under "Needs changes" (revise) or
+ *               "Rejected" (reject) so the author can come back, rewrite and publish again.
  *   Save as Draft -> no moderation (drafts aren't public).
  *
  * browser (localStorage) because this is a front-end reference, not the platform.
@@ -433,7 +433,14 @@
                    { moderation, attachments: storedAttachments() });
           render();
         }
-        showFeedback(result, parts, content, serialized);
+        // The fields are marked first, so they are already waiting underneath the popup and the
+        // author lands on the first one when they dismiss it.
+        const issues = showFeedback(result, parts, content, serialized);
+        M.showDecision({
+          result, issues, noun: "article",
+          labels: { title: "Title", body: "Body", link: "Link", hashtags: "Hashtags" },
+          onClose: focusFirstIssue,
+        });
       }
     } catch (e) {
       // Fail closed: nothing is published if the check couldn't run.
@@ -469,6 +476,7 @@
     return r;
   }
 
+  /** Render the decision in the modal and mark the inputs. Returns the mapped issues. */
   function showFeedback(result, parts, content, serialized) {
     const fb = result.feedback || {};
     const issues = M.mapIssues(fb, parts, content);
@@ -511,6 +519,22 @@
       $("hashtags-msg").innerHTML = tagIssues.map((i) => `<div class="field-hint">${esc(i.message)}</div>`).join("");
     }
     $("banner").scrollIntoView({ block: "nearest" });
+    return issues;
+  }
+
+  /** Put the cursor where the first issue is, so "change the content" lands on the problem. */
+  function focusFirstIssue() {
+    const first = (feedbackState?.issues || [])[0];
+    if (!first) return;
+    if (first.field === "title") { $("title").focus(); return; }
+    if (first.field === "hashtags") { $("hashtag-input").focus(); return; }
+    const r = M.rangeFor(feedbackState.serialized, first.start, first.end);
+    body.focus();
+    if (r) {
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+      (r.startContainer.parentElement || body).scrollIntoView({ block: "center", behavior: "smooth" });
+    }
   }
 
   function issueHtml(i, k, where) {
