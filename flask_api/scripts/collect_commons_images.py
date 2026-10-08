@@ -161,8 +161,17 @@ def main() -> int:
     folder.mkdir(parents=True, exist_ok=True)
     per_term = max(2, args.limit // len(terms) + 1)
 
+    # Carry forward whatever a previous run collected. Rewriting labels.csv from scratch
+    # orphans the files already on disk - they keep their pixels and lose their licence, which
+    # for CC material is not a detail. Hashes already present are skipped, so re-running tops
+    # the set up instead of duplicating it.
+    csv_path = folder / "labels.csv"
     rows: list[dict] = []
-    seen_hashes: set[str] = set()
+    if csv_path.exists():
+        with csv_path.open(encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.DictReader(fh))
+        print(f"carrying forward {len(rows)} rows already in {csv_path.name}")
+    seen_hashes: set[str] = {r.get("sha256", "") for r in rows}
     print(f"collecting up to {args.limit} images into {folder}")
     for term in terms:
         if len(rows) >= args.limit:
@@ -207,7 +216,6 @@ def main() -> int:
         print("nothing collected", file=sys.stderr)
         return 1
 
-    csv_path = folder / "labels.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
         writer.writeheader()

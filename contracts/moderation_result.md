@@ -344,22 +344,24 @@ words. They version apart, roll back independently, and neither stands in for th
 the 352 MB vision encoder is loaded at serving time: the text encoder runs once offline in
 `scripts/build_clip_prompts.py`, which bakes the prompt embeddings into `prompts.npz`.
 
-**What it is measured at.** 1,137 sample images, `scripts/eval_clip_images.py`:
+**What it is measured at.** 1,168 sample images, `scripts/eval_clip_images.py`:
 
 | `reject_min` | weapons | gore | objects | BONC listings | human bodies |
 |---|---|---|---|---|---|
-| 0.50 | 93% | 98% | 5/200 | 0/63 | 11/74 |
-| 0.80 | 83% | 95% | 2/200 | 0/63 | 4/74 |
-| **0.90** (shipped) | **77%** | **93%** | **0/200** | **0/63** | **2/74** |
-| 0.95 | 72% | 86% | 0/200 | 0/63 | 0/74 |
-| 0.99 | 57% | 64% | 0/200 | 0/63 | 0/74 |
+| 0.50 | 93% | 98% | 5/200 | 0/63 | 17/105 |
+| 0.80 | 83% | 95% | 2/200 | 0/63 | 7/105 |
+| **0.90** (shipped) | **77%** | **93%** | **0/200** | **0/63** | **3/105** |
+| 0.95 | 72% | 86% | 0/200 | 0/63 | 1/105 |
+| 0.97 | 67% | 79% | 0/200 | 0/63 | 0/105 |
+| 0.99 | 57% | 64% | 0/200 | 0/63 | 0/105 |
 
-The last three columns are false positives. **Human bodies** (`images/body_parts`: athletes,
-physiotherapy, anatomy diagrams, swimming) was added to measure the `sexual` label, which has
-no positive samples behind it — and it immediately found that **27% of that set scored unsafe**
-at the shipped threshold, `gore` firing on skin and medical imagery as much as `sexual` on
-athletes. There was nothing in the safe list for a body to *be*, so the nearest match was an
-unsafe label. Fixing that cost 6 points of weapon recall and 2 of gore.
+The last three columns are false positives. **Human bodies** (`images/body_parts`: 105 pictures
+of athletes, physiotherapy, anatomy diagrams and swimming, collected from Wikimedia Commons
+with a licence and a source URL for every row) was added to measure the `sexual` label, which
+has no positive samples behind it — and it immediately found that **27% of that set scored
+unsafe** at the shipped threshold, `gore` firing on skin and medical imagery as much as
+`sexual` on athletes. There was nothing in the safe list for a body to *be*, so the nearest
+match was an unsafe label. Fixing that cost 6 points of weapon recall and 2 of gore.
 
 **Re-run the script after any change to `visual_policy.yaml`.** The numbers move with the
 prompts, and the lesson has now cost recall three times: **name the scene, not the pose.** A

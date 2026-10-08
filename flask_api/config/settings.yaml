@@ -69,15 +69,16 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # needed to serve: build_clip_prompts.py runs it offline and bakes
                             # the prompt embeddings into prompts.npz.
     reject_min: 0.90        # an unsafe label this confident refuses the upload. MEASURED on
-                            # 1137 sample images with scripts/eval_clip_images.py:
+                            # 1168 sample images with scripts/eval_clip_images.py:
                             #
                             #   reject_min  weapons  gore   false positives
-                            #                              objects  BONC  bodies
-                            #        0.50     93%    98%    5/200    0/63   11/74
-                            #        0.80     83%    95%    2/200    0/63    4/74
-                            #        0.90     77%    93%    0/200    0/63    2/74
-                            #        0.95     72%    86%    0/200    0/63    0/74
-                            #        0.99     57%    64%    0/200    0/63    0/74
+                            #                              objects  BONC   bodies
+                            #        0.50     93%    98%    5/200    0/63   17/105
+                            #        0.80     83%    95%    2/200    0/63    7/105
+                            #        0.90     77%    93%    0/200    0/63    3/105
+                            #        0.95     72%    86%    0/200    0/63    1/105
+                            #        0.97     67%    79%    0/200    0/63    0/105
+                            #        0.99     57%    64%    0/200    0/63    0/105
                             #
                             # "bodies" is images/body_parts - athletes, physiotherapy, anatomy,
                             # swimming - collected to measure the `sexual` label, which has no
@@ -86,10 +87,11 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # legitimate context, 27% of that set scored unsafe at 0.90.
                             #
                             # 0.90 keeps every real BONC listing and every safe object, at
-                            # 2 body pictures in 74. 0.95 refuses nothing at all but gives up
-                            # 5 points of weapon recall and 7 of gore. Re-run the script after
-                            # ANY change to visual_policy.yaml - the numbers move with the
-                            # prompts, which is how the body-part regression was found.
+                            # 3 body pictures in 105. Nothing at all is refused until 0.97,
+                            # which costs 10 points of weapon recall and 14 of gore. Re-run the
+                            # script after ANY change to visual_policy.yaml - the numbers move
+                            # with the prompts, which is how the body-part regression was
+                            # found in the first place.
     max_pixels: 40000000    # decoded size, against decompression bombs (as media.max_pixels)
     device: auto            # auto | cuda | directml | cpu. "auto" takes the best execution
                             # provider onnxruntime actually offers, so a host with the stock
