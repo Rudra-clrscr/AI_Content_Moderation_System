@@ -39,7 +39,7 @@ weapons and gore. It is skipped when absent, so nothing breaks in the meantime.
 Handle whatever arrives as the agreement requires, keep it off shared machines, and do not
 commit it — `images/` is already gitignored.
 
-## Route 2 — a reference classifier over BONC's own uploads (recommended)
+## Route 2 — a reference classifier over BONC's own uploads (CHOSEN, harness built)
 
 The question that actually matters is not "what does this label score on an academic corpus"
 but "what does it do to BONC's traffic". That can be answered without anyone holding a
@@ -55,6 +55,38 @@ pornography dataset:
 
 This measures the label where it is used, needs no restricted data, and the disagreements are
 reviewable by whoever already handles reports.
+
+### What the first run found (1,168 images, 2026-10-08)
+
+```
+python scripts/fetch_nsfw_reference.py
+python scripts/eval_sexual_label.py --images ../images
+```
+
+The reference called **23 of 1,168** NSFW. The policy refused **16 of those 23 (70%)** — 13
+under `gore`, 3 under `sexual`. Seven got through entirely.
+
+**Recall for the `sexual` label is still not measured, and this run could not measure it.** The
+reference finds essentially no sexual content in these sets: the 63 real BONC listings top out
+at P(nsfw) = 0.002, and 19 of the 23 it flagged are bloody-injury pictures, which this
+reference reads as NSFW along with everything else graphic. What the run established is that
+the two models agree 97.95% of the time and that the pipeline refuses most of what the
+reference objects to — not that the `sexual` prompts work.
+
+**The number that will answer it has to come from the live upload stream.** Point the same
+script at a sample of real uploads and the question answers itself; a static corpus of safe
+images cannot.
+
+Two disagreements worth keeping in mind, both from `images/body_parts`:
+
+| image | reference | policy | who is right |
+|---|---|---|---|
+| Thai massage, CC BY-SA 3.0 | 0.998 NSFW | safe 0.000 | **the policy** — a person on a treatment table is a classic NSFW-classifier false positive |
+| boxing training, 1960s, CC0 | 0.000 normal | `sexual` 0.927 | **the reference** — shirtless boxers, and the one false positive the `sexual` label has |
+
+That table is the reason this is a second opinion and not a grader. The reference has its own
+error rate, visibly, so the output of this script is a list to read rather than a score to
+quote.
 
 It also raises a question worth asking once the numbers exist: if a dedicated classifier is
 being run anyway, should it *replace* the `sexual` prompts rather than grade them? A purpose-

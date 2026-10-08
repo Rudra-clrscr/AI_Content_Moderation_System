@@ -34,3 +34,8 @@ flask_api/scripts/*.txt
 # redistribute, exactly like res/ above. `python flask_api/scripts/eval_clip_images.py` reads
 # them from here; images/labels.csv records where each one came from.
 images/
+
+# NSFW reference classifier (scripts/fetch_nsfw_reference.py). A second opinion used only by
+# scripts/eval_sexual_label.py to measure the `sexual` label's recall - nothing in app/ loads
+# it, and the service runs identically without it. Third-party weights we don't redistribute.
+flask_api/models/nsfw_ref/
