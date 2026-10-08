@@ -73,10 +73,23 @@ class MediaLimits:
     # how a scam arrives. Turn it on to publish those anyway - they are then recorded with
     # checked: false, never as a clean result.
     allow_unreadable_image: bool = False
+    # An image whose writing OCR could not read, but whose PICTURE the visual check looked at
+    # and cleared. Refusing those was right while nothing inspected the picture; now that
+    # app/clip.py does, it refuses 13% of real listings over logos and number plates. What is
+    # still unchecked is the WORDS, so this is only ever reached when the visual check actually
+    # ran and found nothing - never when it is off or missing.
+    allow_unreadable_image_when_seen: bool = True
+    # Text pulled out of a picture is held to a higher bar than text somebody typed. OCR of a
+    # shopfront returns word-salad ("TURNKEY MWRULTANTS A SOLUTIONS"), and the model was
+    # trained on prose, so it scores that noise unreliably. Measured on 63 real BONC listings
+    # and the scam flyers: legitimate signage lands at 0.78-0.976, scam text at 0.9997.
+    ocr_text_reject_min: float = 0.99
 
     def __post_init__(self) -> None:
         if min(self.max_bytes, self.max_pixels) < 1:
             raise ValueError("media limits must be positive")
+        if not 0.0 <= self.ocr_text_reject_min <= 1.0:
+            raise ValueError("media.ocr_text_reject_min must be in [0, 1]")
 
 
 def detect_kind(data: bytes, filename: str = "") -> str:

@@ -66,7 +66,7 @@ Anything published with a post has to be checked, or the scam simply moves into 
 | Kind | What is read | Rule |
 |---|---|---|
 | `pdf` | Text, with OCR for scanned pages | A page that can't be read is **refused** |
-| `image` | OCR **and** the visual check | Both run on the same decoded picture. Text is moderated as usual; the picture itself is scored against the visual policy and a confident unsafe label **rejects** the upload (*1.7*). An image with no text and nothing the visual check objects to is **allowed**. An image with writing OCR **could not read** is still **refused** (`422 media_unreadable`), because its words have not been checked even though its picture has. With the visual check off or its model missing, this row behaves exactly as it did in 1.6 and the result says `visual_content_checked: false` |
+| `image` | OCR **and** the visual check | Both run on the same decoded picture. Text is moderated — at a higher bar than typed text, see below — and the picture itself is scored against the visual policy, where a confident unsafe label **rejects** the upload (*1.7*). An image with writing OCR could not read is **allowed** when the visual check looked at the picture and cleared it, carrying `checked: false` for its words (*1.7*); it is **refused** (`422 media_unreadable`) when nothing looked at it either. With the visual check off or its model missing, this row behaves exactly as it did in 1.6 |
 | `video` | Nothing | **Allowed unchecked** (`checked: false`) while `media.allow_unchecked_video` is on, as it is in the shipped config; **refused** when it is off |
 | anything else | — | `422 media_unsupported` |
 
@@ -96,7 +96,7 @@ them:
 |---|---|---|---|
 | `false` | `false` | No writing in the picture (a product photo) | `allow`, `visual_content_checked: false` |
 | `true` | `true` | The writing was read and moderated | the usual decision |
-| `true` | `false` | There **is** writing and OCR could not read it | `422 media_unreadable` |
+| `true` | `false` | There **is** writing and OCR could not read it | `allow` with `checked: false` when the visual check cleared the picture; `422 media_unreadable` when it did not run (*changed in 1.7*) |
 
 A file with nothing to read (a photo with no text, or an unchecked video) still returns a
 normal `allow` result and is still written to the audit log, so the record shows both what was
@@ -107,7 +107,20 @@ writing on it is completely ordinary, and refusing those would break the feature
 honest seller. A PDF page with no text is not ordinary — it is a scan, and scans are how a
 screenshot of a scam arrives. The asymmetry is deliberate.
 
-**Why writing OCR can't read is refused rather than allowed.** Detection finds where the words
+**Why writing OCR can't read is no longer refused outright** (*changed in 1.7*). It used to be,
+and the reason was sound: nothing had inspected the picture, so an unread caption was the whole
+of what was known about it. The visual check changed that half of the problem — the picture is
+now scored — while the other half, the words, stays unknown. Measured on 63 real BONC listing
+pictures, the blanket refusal was turning away **19%** of them over logos, number plates and
+watermarks: `'D'`, `'CRUK'`, `'00 0000'`, `'星'`. All 63 now publish.
+
+The case the old rule actually guarded against is covered at the source instead: the Devanagari
+recognition model is bundled, so Hindi is **read** rather than falling into this path at all.
+Verified end to end — a rendered Hindi threat is rejected by `abuse.hi_targeted`, benign Hindi
+signage publishes. Set `media.allow_unreadable_image_when_seen: false` to restore the old
+refusal.
+
+**The original reasoning, for the record.** Detection finds where the words
 are; recognition turns them into characters. RapidOCR bundles a Latin and a Chinese recognition
 model, so a Hindi picture came back with every line located and near-nothing recognised — and
 that used to be reported as an ordinary `allow` with a clean record. A Devanagari threat
@@ -240,6 +253,38 @@ job failed.
 | 413 | `content_too_long` |
 | 503 | `model_not_ready` (sync), `queue_unavailable` (async) |
 | 500 | `inference_failed` |
+
+## Text read out of a picture is judged at a higher bar (*added in 1.7*)
+
+Words a member types are prose. Words OCR pulls off a shopfront are not: `'TURNKEY MWRULTANTS A
+SOLUTIONS'`, `'RADIATORS RADIATORS &ACCESSORIES ACCESSORIES HEAT YOUR HOME IN STYIL ACSES'`. The
+moderation model was trained on sentences and scores that noise unreliably — it put four ordinary
+BONC listings in the reject band at 0.78–0.976.
+
+So an image's text is routed at `media.ocr_text_reject_min` (0.99) instead of the ordinary
+`thresholds`, and at **one boundary rather than two**: a `revise` verdict means "edit the
+highlighted part", which cannot be done to words baked into a photograph — the author can only
+replace the picture. The `thresholds` block in the result reports the boundaries actually
+applied, so a decision stays reproducible.
+
+Measured with `scripts/eval_ocr_text_bar.py`, scoring rendered text read back through the real
+OCR stack:
+
+| set | n | min | p50 | max |
+|---|---|---|---|---|
+| scam flyers | 10 | 0.9996 | 0.9997 | 0.9997 |
+| threats | 8 | 0.0738 | 0.9996 | 0.9997 |
+| business signage | 10 | 0.0002 | 0.0002 | 0.0009 |
+| real BONC listings | 43 | 0.0002 | 0.0002 | 0.9281 |
+
+Any bar in **[0.95, 0.999]** catches 17 of the 18 harmful images and refuses none of the 53
+honest ones. The 18th — *"Stop trading or face consequences, we have your address"* at 0.074 —
+is missed at **every** bar including the ordinary 0.5, so it is a gap in the model rather than
+in this threshold.
+
+**This moves the model's boundary only.** Gate rules are unaffected: a rule either matched or it
+did not, and a scam phrase photographed is still a scam phrase. PDFs keep the ordinary bar —
+their text is extracted, not guessed at, and reads as what the author wrote.
 
 ## The visual check (*added in 1.7*)
 

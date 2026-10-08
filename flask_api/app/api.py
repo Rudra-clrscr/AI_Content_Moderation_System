@@ -14,7 +14,7 @@ from app.model import ModelNotReady
 from app.pdf import PdfError
 from app.pdf import extract as pdf_extract
 from app.pipeline import ContentType, ModerationRequest, Stage
-from app.routing import Decision
+from app.routing import Decision, Thresholds
 
 log = logging.getLogger(__name__)
 bp = Blueprint("moderation", __name__)
@@ -59,14 +59,21 @@ def _parse_request() -> ModerationRequest | tuple:
     return ModerationRequest(content, content_type, None if content_id is None else str(content_id))
 
 
-def _moderate(req: ModerationRequest, extra: dict | None = None):
+def _moderate(req: ModerationRequest, extra: dict | None = None,
+              thresholds: "Thresholds | None" = None):
     """Gate, then queue or score. Shared by the JSON and PDF endpoints so a PDF is judged by
-    exactly the same rules. `extra` is merged into the response (the PDF page map)."""
+    exactly the same rules. `extra` is merged into the response (the PDF page map).
+
+    `thresholds` raises the bar for one request - used for text OCR'd out of a picture, which
+    is noisier than anything a member types. The gate is unaffected either way: a rule either
+    matched or it didn't, and a scam phrase in a photograph is still a scam phrase.
+    """
     svc = _svc()
+    pipeline = svc.pipeline if thresholds is None else svc.pipeline.with_thresholds(thresholds)
     # Layer 1 always runs inline — it's cheap, and a block needs no model or queue.
-    gate, gate_ms = svc.pipeline.run_gate(req)
+    gate, gate_ms = pipeline.run_gate(req)
     if gate.blocked:
-        result = svc.pipeline.gate_only_result(req, gate, gate_ms)
+        result = pipeline.gate_only_result(req, gate, gate_ms)
         svc.sink.emit(result)
         return jsonify({**result, **(extra or {})}), 200
 
@@ -86,7 +93,7 @@ def _moderate(req: ModerationRequest, extra: dict | None = None):
         }), 202
 
     try:
-        result = svc.pipeline.moderate(req, gate=gate, gate_ms=gate_ms)
+        result = pipeline.moderate(req, gate=gate, gate_ms=gate_ms)
     except ModelNotReady as exc:
         return _error(503, "model_not_ready", str(exc))
     except Exception:
@@ -197,10 +204,17 @@ def moderate_media():
                           "this image could not be checked just now. Please try again in a "
                           "moment.", kind=kind)
         if read.has_text and not read.readable:
-            # There IS writing here and OCR could not read it, so nothing in this picture has
-            # been checked. Answering "allow" was how a Devanagari threat published with a
-            # clean result while the extracted text was gibberish.
-            if not media.allow_unreadable_image:
+            # There IS writing here and OCR could not read it, so its WORDS are unchecked.
+            # Answering "allow" is how a Devanagari threat once published with a clean result.
+            #
+            # What has changed is that the picture itself is no longer unexamined: when the
+            # visual check ran and cleared it, the only thing left unknown is the writing, and
+            # refusing on that alone was turning away 13% of real listings over logos, number
+            # plates and watermarks. The record still says checked: false - this is a narrower
+            # claim ("we looked at it, we could not read it"), never a clean result.
+            seen_and_clear = (media.allow_unreadable_image_when_seen and looked.checked
+                              and not looked.unsafe)
+            if not (media.allow_unreadable_image or seen_and_clear):
                 return _error(422, "media_unreadable",
                               "there is writing in this image that could not be read, so it "
                               "cannot be checked. Upload a clearer picture, or put the words "
@@ -230,7 +244,20 @@ def moderate_media():
                       f"the file's text is {len(text)} characters, over the "
                       f"{char_limit} character limit")
 
-    return _moderate(ModerationRequest(text, content_type, content_id), extra)
+    # Words read off a photograph are held to a higher bar than words somebody typed. OCR of a
+    # shopfront comes back as word-salad and the model, trained on prose, scores that noise
+    # unreliably - it put four ordinary BONC listings in the reject band. Measured: legitimate
+    # signage 0.78-0.976, scam flyers 0.9997, so the two still separate. PDFs keep the ordinary
+    # bar: their text is extracted, not guessed at, and reads as what the author wrote.
+    # One boundary, not two. A "revise" verdict asks the author to edit the highlighted part,
+    # which is meaningless for words baked into a photograph - their only remedies are to
+    # replace the picture or leave it. So image text is allowed below the bar and refused at or
+    # above it, with nothing in between.
+    thresholds = None
+    if kind == "image":
+        thresholds = Thresholds(allow_max=media.ocr_text_reject_min,
+                                reject_min=media.ocr_text_reject_min)
+    return _moderate(ModerationRequest(text, content_type, content_id), extra, thresholds)
 
 
 def _visual_reject(filename: str, looked, content_type: ContentType,

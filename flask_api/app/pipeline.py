@@ -4,6 +4,7 @@ async Celery worker, so both paths produce an identical result payload
 from __future__ import annotations
 
 import hashlib
+import copy
 import logging
 import math
 import time
@@ -174,6 +175,23 @@ class Pipeline:
         self.sentence_scan = sentence_scan or SentenceScan(enabled=False)
         self.word_scan = word_scan or WordScan(enabled=False)
         self.triage = triage or TriageFilter()
+
+    def with_thresholds(self, thresholds: Thresholds) -> "Pipeline":
+        """This pipeline, judged at different boundaries.
+
+        Text that came out of a picture needs a higher bar than text somebody typed - see
+        `media.ocr_text_reject_min` - and that bar has to apply to every stage, not just the
+        whole-text score: the sentence scan, the targeted check and the word scan all route
+        against `self.thresholds` too.
+
+        A shallow copy is how that is done, rather than threading an override through nine call
+        sites where one could be missed. Everything else - the model, the gate, the scans - is
+        shared and read-only, and already shared across concurrent requests, so the copy costs
+        nothing and changes nothing but the boundaries.
+        """
+        clone = copy.copy(self)
+        clone.thresholds = thresholds
+        return clone
 
     def run_gate(self, req: ModerationRequest) -> tuple[GateResult, float]:
         t0 = time.perf_counter()

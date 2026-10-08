@@ -197,6 +197,9 @@ def load_settings(path: str | Path | None = None) -> Settings:
             max_pixels=int(med.get("max_pixels", 40_000_000)),
             allow_unchecked_video=_as_bool(med.get("allow_unchecked_video", False)),
             allow_unreadable_image=_as_bool(med.get("allow_unreadable_image", False)),
+            allow_unreadable_image_when_seen=_as_bool(
+                med.get("allow_unreadable_image_when_seen", True)),
+            ocr_text_reject_min=float(med.get("ocr_text_reject_min", 0.99)),
         ),
         ocr=OcrEngine(OcrConfig(
             enabled=_as_bool(env("PDF_OCR", ocr.get("enabled", True))),

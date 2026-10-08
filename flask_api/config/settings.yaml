@@ -110,6 +110,49 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # publish them anyway; they are then recorded with checked: false
                             # and the editor shows "not inspected", never a green OK.
 
+  allow_unreadable_image_when_seen: true
+                            # ...unless the VISUAL CHECK looked at the picture and cleared it.
+                            # Refusing unreadable writing was right while nothing inspected the
+                            # picture; app/clip.py now does, and the blanket refusal was turning
+                            # away 19% of real BONC listings over logos, number plates and
+                            # watermarks ("D", "CRUK", "00 0000"). What stays unknown is the
+                            # WORDS, so the record still says checked: false - a narrower claim
+                            # ("we looked at it, we could not read it"), never a clean result.
+                            # Only ever reached when the visual check actually ran and found
+                            # nothing; with it off or missing, the old refusal stands.
+                            #
+                            # The case this used to guard - a Devanagari threat published with
+                            # a clean record - is now covered at the source instead: the
+                            # Devanagari recognition model is bundled (pdf.ocr.rec_lang below),
+                            # so Hindi is READ rather than falling down here. Verified end to
+                            # end: a rendered Hindi threat is rejected by abuse.hi_targeted,
+                            # benign Hindi signage publishes.
+  ocr_text_reject_min: 0.99 # Words read off a photograph are held to a higher bar than words
+                            # somebody typed, and to ONE boundary rather than two - a "revise"
+                            # verdict says "edit the highlighted part", which cannot be done to
+                            # text baked into a picture.
+                            #
+                            # Why: OCR of a shopfront returns word-salad ("TURNKEY MWRULTANTS A
+                            # SOLUTIONS"), and the model was trained on prose, so it scored four
+                            # ordinary BONC listings into the reject band. MEASURED with
+                            # scripts/eval_ocr_text_bar.py, scoring rendered text read back
+                            # through the real OCR stack:
+                            #
+                            #   scam flyers      10 images   0.9996 - 0.9997
+                            #   threats           8 images   0.9990 - 0.9997 (one outlier, below)
+                            #   business signage 10 images   0.0002 - 0.0009
+                            #   real BONC listings  43       0.0002 - 0.9281
+                            #
+                            # Any bar in [0.95, 0.999] catches 17 of the 18 harmful images and
+                            # refuses none of the 53 honest ones. 0.99 sits in the middle of
+                            # that band. The 18th - "Stop trading or face consequences, we have
+                            # your address" at 0.074 - is missed at EVERY bar including the
+                            # ordinary 0.5, so it is a gap in the model, not in this number.
+                            #
+                            # Gate rules are unaffected: a rule either matched or it did not,
+                            # and a scam phrase photographed is still a scam phrase. PDFs keep
+                            # the ordinary bar - their text is extracted, not guessed at.
+
 pdf:                        # POST /v1/moderate/pdf: extract the text, then moderate it normally
   enabled: true             # PDF_UPLOAD=0 turns the endpoint off
   max_bytes: 25000000       # 25 MB upload
@@ -132,7 +175,7 @@ pdf:                        # POST /v1/moderate/pdf: extract the text, then mode
     max_pixels: 4000000     # hard cap per page whatever the dpi implies (hostile page sizes)
     min_chars: 20           # OCR must recover at least this much, or the page stays unreadable
     min_confidence: 0.5     # and be at least this confident, or we don't trust what it read
-    min_chars_per_box: 6    # Detection finds where the writing is; recognition turns it into
+    min_chars_per_box: 5    # Detection finds where the writing is; recognition turns it into
     trust_short_confidence: 0.90
                             # characters. A script the recognition model doesn't cover still
                             # detects every line and then returns near-nothing, at a confidence
@@ -143,15 +186,21 @@ pdf:                        # POST /v1/moderate/pdf: extract the text, then mode
                             # read comes back as a word or more; below min_chars_per_box the
                             # reading is not trusted unless recognition is at least
                             # trust_short_confidence sure (genuinely short signage: "SALE").
-                            # The Devanagari recognition model is NOT bundled - RapidOCR ships
-                            # Latin and Chinese only, which is why Hindi pictures are refused
-                            # rather than read. Fetch it (~8 MB, once, not at request time) and
-                            # uncomment the two keys below:
+                            # Lowered 6 -> 5 (2026-10-08): a legitimate 12-line English
+                            # shopfront sign averaged 5.8 and was refused on the technicality,
+                            # while clean reads average 16 and the Devanagari failure this
+                            # guards against sat at 1.5-4. 5 keeps the margin and stops
+                            # refusing stylised signage.
+                            # Devanagari recognition is ON (2026-10-08). RapidOCR ships Latin
+                            # and Chinese only, which is why Hindi pictures used to read as
+                            # gibberish and get refused. This model reads Latin too, so it
+                            # REPLACES the default rather than running alongside it.
                             #   python scripts/fetch_ocr_langs.py devanagari
-                            # It reads Latin script too, so it replaces the default rather than
-                            # running alongside it. `--list` shows the other scripts available.
-    # rec_model_path: models/ocr/devanagari_rec.onnx
-    # rec_lang: devanagari
+                            # The file is gitignored; re-run that on a fresh checkout, or
+                            # comment the two keys below out to fall back to Latin-only.
+                            # `--list` shows the other scripts available.
+    rec_model_path: models/ocr/devanagari_rec.onnx
+    rec_lang: devanagari
 
 latency_budget_ms: 30      # inference-only budget for ONE call; overruns are logged, not failed.
                            # Realistic for short content (a listing is ~11 ms, p95 ~30 ms measured with

@@ -75,7 +75,12 @@ class KeywordScorer:
     version = "m-1"
 
     def score(self, text):
-        r = 0.95 if "earn" in text.lower() else 0.01
+        # 0.999, not an arbitrary "clearly bad" number: text OCR'd out of a picture is judged
+        # at media.ocr_text_reject_min, and this stands in for the live model, which scores
+        # scam flyers read back through real OCR at 0.9996-0.9997 while the worst honest BONC
+        # listing reaches 0.9281 (scripts/eval_ocr_text_bar.py). A stub below the bar would be
+        # testing a model that does not exist.
+        r = 0.999 if "earn" in text.lower() else 0.01
         return ScoreResult(r, "x", {"x": r}, self.version, 1.0)
 
 

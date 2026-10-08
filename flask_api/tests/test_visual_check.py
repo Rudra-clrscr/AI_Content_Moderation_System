@@ -283,3 +283,107 @@ def test_no_prompt_is_repeated_within_or_across_labels():
         for prompt in spec["prompts"]:
             assert prompt not in seen, f"{prompt!r} appears in both {seen.get(prompt)!r} and {name!r}"
             seen[prompt] = name
+
+
+# ---- words read off a photograph ---------------------------------------------------
+# Text a member types is prose. Text OCR pulls off a shopfront is word-salad
+# ("TURNKEY MWRULTANTS A SOLUTIONS"), and the model was trained on sentences, so it scored
+# four ordinary BONC listings into the reject band. Image text is therefore judged at
+# media.ocr_text_reject_min. Measured (scripts/eval_ocr_text_bar.py): scam flyers read back
+# through real OCR land at 0.9996-0.9997, the worst honest listing at 0.9281, so any bar in
+# [0.95, 0.999] catches every scam and refuses nothing honest.
+
+@pytest.fixture
+def ocr():
+    """The real OCR stack, skipped where it can't run. These tests are about what happens to
+    text that came OUT of a picture, so a stubbed reader would test nothing."""
+    pytest.importorskip("rapidocr")
+    import numpy as np
+    from PIL import Image
+
+    from app.ocr import OcrConfig, OcrEngine
+
+    engine = OcrEngine(OcrConfig(enabled=True))
+    probe = engine.read_image(np.asarray(
+        Image.open(io.BytesIO(image_with_text(["Cotton bedsheets in king size."]))).convert("RGB")))
+    if not probe.text:
+        pytest.skip("OCR could not read a plain rendered image on this host")
+    return engine
+
+
+class RiskScorer:
+    version = "r-1"
+
+    def __init__(self, risk):
+        self.risk = risk
+
+    def score(self, text):
+        from app.model import ScoreResult
+
+        return ScoreResult(self.risk, "x", {"x": self.risk}, self.version, 1.0)
+
+
+def image_with_text(lines=("Some words on a sign",)):
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (900, 200), "white")
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("arial.ttf", 40)
+    except OSError:
+        font = ImageFont.load_default()
+    for i, line in enumerate(lines):
+        draw.text((40, 40 + i * 60), line, fill=(10, 10, 10), font=font)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def upload_to(client, data, name="sign.png"):
+    return client.post("/v1/moderate/media",
+                       data={"file": (io.BytesIO(data), name), "content_type": "article"},
+                       content_type="multipart/form-data")
+
+
+def client_scoring(make_settings, sink, risk, ocr, **kw):
+    from app import create_app
+
+    return create_app(make_settings(max_chars=50_000, ocr=ocr, **kw),
+                      scorer=RiskScorer(risk), sink=sink).test_client()
+
+
+@pytest.mark.parametrize("risk, decision", [
+    (0.93, "allow"),    # the worst real BONC listing measured
+    (0.98, "allow"),    # garbled signage, still under the bar
+    (0.999, "reject"),  # where scam flyers actually land
+])
+def test_image_text_is_judged_at_the_higher_bar(make_settings, sink, ocr, risk, decision):
+    client = client_scoring(make_settings, sink, risk, ocr)
+    body = upload_to(client, image_with_text()).get_json()
+    assert body["decision"] == decision, f"risk {risk} should {decision}"
+
+
+def test_image_text_has_no_revise_band(make_settings, sink, ocr):
+    """A revise says "edit the highlighted part", which cannot be done to words baked into a
+    photograph - the author can only replace the picture. So there is one boundary, not two."""
+    body = upload_to(client_scoring(make_settings, sink, 0.80, ocr), image_with_text()).get_json()
+    assert body["decision"] == "allow"
+    assert body["thresholds"]["allow_max"] == body["thresholds"]["reject_min"]
+
+
+def test_a_gate_rule_still_blocks_whatever_the_bar_is(make_settings, sink, ocr):
+    """The higher bar moves the MODEL's boundary. A deterministic rule either matched or it
+    didn't, and a scam phrase photographed is still a scam phrase."""
+    body = upload_to(client_scoring(make_settings, sink, 0.01, ocr),
+                     image_with_text(["Invest now and double your money"])).get_json()
+    assert body["decision"] == "reject" and body["decided_by"] == "gate"
+
+
+def test_a_pdf_keeps_the_ordinary_bar(make_settings, sink, ocr):
+    """Only OCR'd image text is noisy. A PDF's text is extracted, not guessed at, and reads as
+    whatever the author actually wrote - so it is judged like anything else they typed."""
+    from tests.test_pdf import make_pdf
+
+    body = upload_to(client_scoring(make_settings, sink, 0.80, ocr),
+                     make_pdf(["Something the model dislikes."]), "doc.pdf").get_json()
+    assert body["decision"] != "allow", "0.80 is over the ordinary reject line"

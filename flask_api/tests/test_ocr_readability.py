@@ -80,7 +80,11 @@ class KeywordScorer:
     version = "k-1"
 
     def score(self, text):
-        r = 0.99 if "burn" in text.lower() else 0.01
+        # 0.999, not 0.99: text OCR'd out of a picture is judged at media.ocr_text_reject_min,
+        # and this stands in for the live model, which scores this very threat - rendered,
+        # photographed and read back - at 0.9997 (scripts/eval_ocr_text_bar.py). A stub sitting
+        # exactly on the boundary would be testing an edge, not the behaviour.
+        r = 0.999 if "burn" in text.lower() else 0.01
         return ScoreResult(r, "unsafe" if r > 0.5 else "safe", {"safe": 1 - r, "unsafe": r}, self.version, 1.0)
 
 
