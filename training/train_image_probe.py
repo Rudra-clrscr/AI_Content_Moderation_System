@@ -45,7 +45,20 @@ SETS = {
     "allow": "safe",
     "BONC_Positive": "safe",
     "body_parts": "safe",
+    # Dense crowds that are NOT confrontation: trade fairs, queues, wedding and temple
+    # processions. Without these in the safe half the probe would learn "crowd = unrest",
+    # which on an Indian B2B platform would refuse a great deal of ordinary business life.
+    "crowds_safe": "safe",
 }
+# `unrest` is deliberately NOT a probe class, though images/unrest is collected and the policy
+# has the label. Measured: adding it cost 13 of 90 safe crowds and 10 of 105 body parts at the
+# shipped threshold, against 4 and 3 without it, and gained nothing on weapons or gore. 90
+# examples are not enough to separate a protest crowd from a trade-fair crowd - the difference
+# is in posture and expression, not in the scene. The prompts carry that label alone until
+# there are enough examples to beat them.
+#
+# The safe crowds stay in the training set regardless: they make the `safe` class broader,
+# which is worth having whether or not `unrest` is ever learned.
 CLASSES = ["safe", "weapon", "gore"]
 
 
@@ -104,6 +117,8 @@ def embed_all(encoder: Path, images: Path, device: str):
     seq = load_groups(images)
     X, y, g, paths = [], [], [], []
     for rel, label in SETS.items():
+        if label not in CLASSES:
+            continue
         folder = images / rel
         if not folder.is_dir():
             print(f"  {rel}: missing, skipped")

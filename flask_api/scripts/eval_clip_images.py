@@ -58,6 +58,11 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         # scraping - see docs/measuring_the_sexual_label.md for the two routes that work.
         # Drop a licensed set in here and it is measured like any other; absent, it is skipped.
         ("sexual_positive", images / "sexual_positive", True),
+        # Confrontation, and the ordinary crowds that look like it. The second set is the one
+        # that decides whether this label is affordable: a trade fair, a wedding procession and
+        # a temple festival are all dense crowds, several with banners and raised hands.
+        ("unrest", images / "unrest", True),
+        ("crowds_safe", images / "crowds_safe", False),
     ]
     return [(n, d, e) for n, d, e in candidates if d.is_dir()]
 

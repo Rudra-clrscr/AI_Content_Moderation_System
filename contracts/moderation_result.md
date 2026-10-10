@@ -379,11 +379,25 @@ make different mistakes, so together they cover more than either alone.
 Measured out-of-fold with **grouped** cross-validation, so near-duplicate video frames never
 straddle a fold:
 
-| | weapons | gore | BONC listings refused |
-|---|---|---|---|
-| prompts only (0.90) | 77% | 93% | 0/63 |
-| + probe (0.90) | 81% | 97% | 0/63 |
-| **+ probe (0.70, shipped)** | **93%** | **99%** | **0/63** |
+| | weapons | gore | unrest | BONC listings refused |
+|---|---|---|---|---|
+| prompts only (0.90) | 77% | 93% | 49% | 0/63 |
+| + probe (0.90) | 85% | 97% | 49% | 0/63 |
+| **+ probe (0.70, shipped)** | **93%** | **99%** | **49%** | **0/63** |
+
+`unrest` (*category* `violence_or_unrest`) is carried by its prompts alone. It exists because
+violence and anger should not be promoted on a networking platform — **not** to keep politics
+out: a post about a tariff, or about a transport strike delaying deliveries, is ordinary trade
+talk and is not what the prompts describe. They describe confrontation: riots, baton charges,
+burning effigies, stone-throwing. 4 of 90 ordinary crowds (trade fairs, queues, wedding and
+temple processions) are refused by it, and no real BONC listing is.
+
+Its 49% is the weakest number in this table and is honest: a seated sit-in, a candlelight vigil
+and a baton charge look nothing alike, and ten English phrasings cover that range poorly. It
+was tried as a fourth probe class and **dropped** — on 90 examples it cost 13 of 90 safe crowds
+and 10 of 105 body parts while gaining nothing on weapons or gore, because the difference
+between a protest crowd and a trade-fair crowd is posture and expression rather than the scene.
+More images of both, then re-fit, is the route to improving it.
 
 The grouping matters more than it sounds: with a random split the weapons figure reads 95% and
 the honest one is 73%. 300 frames from a handful of videos are easy to memorise and hard to

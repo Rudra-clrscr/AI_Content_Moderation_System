@@ -55,6 +55,26 @@ labels:
       - a sexually explicit photo
       - a photo of a person posing in underwear
 
+  unrest:
+    unsafe: true
+    category: violence_or_unrest
+    # The motive is not "no politics" - a post about a tariff or a transport strike's effect on
+    # deliveries is ordinary B2B talk. It is that violence and anger should not be PROMOTED on
+    # a networking platform, so what this looks for is confrontation: riots, baton charges,
+    # burning effigies, angry crowds. A banner on its own is not enough, which is why the safe
+    # list below carries as many ordinary crowds as this carries angry ones.
+    prompts:
+      - a photo of a riot in the street
+      - a photo of police clashing with demonstrators
+      - a photo of an angry crowd shouting and raising fists
+      - a photo of protesters burning an effigy
+      - a photo of a burning vehicle during a protest
+      - a photo of people fighting in the street
+      - a photo of a violent confrontation between people
+      - a photo of a crowd throwing stones
+      - a photo of a police baton charge on a crowd
+      - a photo of a street barricade with protesters
+
   # Everything below is ordinary business imagery. These are the alternatives the unsafe labels
   # compete against, so the list is deliberately broad: a picture that matches none of them has
   # nothing to be "safe" as, and its unsafe score rises whatever is really in it.
@@ -126,3 +146,18 @@ labels:
       - a pencil drawing or sketch of a human figure
       - a photo of a tattoo on skin
       - a photo of a prosthetic limb or medical brace
+      # Crowds that are NOT angry. This is the counterweight to `unrest`, and it matters more
+      # than the unrest prompts do: a trade fair, a queue, a wedding procession and a temple
+      # festival are all dense crowds, several of them with banners, raised hands and chanting.
+      # Without something for an ordinary crowd to BE, every gathering reads as a protest.
+      - a photo of an audience at a business conference
+      - a photo of a trade fair or exhibition hall
+      - a photo of a product launch or award ceremony
+      - a photo of a busy market street
+      - a photo of a queue of customers outside a shop
+      - a photo of a crowded railway station platform
+      - a photo of a wedding procession
+      - a photo of a religious procession or temple festival
+      - a photo of a sports crowd cheering in a stadium
+      - a photo of a parade with a marching band
+      - a photo of a concert audience
