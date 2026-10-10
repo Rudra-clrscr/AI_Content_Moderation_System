@@ -369,8 +369,35 @@ prompt describing a body position ("a person exercising or training") also descr
 aiming a gun and outscored 30 weapon images on its own; "a person lifting weights in a gym"
 does not.
 
-**What it does not do.** It is zero-shot: nothing here is learned from BONC's own uploads, so a
-label is only as good as its wordings. The `sexual` label still has **no positive samples** —
+**A trained probe decides alongside the prompts** (*added after the first measurement round*).
+`models/img_v1/probe.npz` is a logistic regression over the frozen encoder's embeddings, fitted
+on BONC's 968 labelled pictures by `training/train_image_probe.py` — the same shape as Layer
+1.5's triage filter, and served the same way, as one matrix multiply. A picture is refused if
+the prompts cross `visual.reject_min` **or** the probe crosses `visual.probe_reject_min`; they
+make different mistakes, so together they cover more than either alone.
+
+Measured out-of-fold with **grouped** cross-validation, so near-duplicate video frames never
+straddle a fold:
+
+| | weapons | gore | BONC listings refused |
+|---|---|---|---|
+| prompts only (0.90) | 77% | 93% | 0/63 |
+| + probe (0.90) | 81% | 97% | 0/63 |
+| **+ probe (0.70, shipped)** | **93%** | **99%** | **0/63** |
+
+The grouping matters more than it sounds: with a random split the weapons figure reads 95% and
+the honest one is 73%. 300 frames from a handful of videos are easy to memorise and hard to
+generalise from, and the probe alone does **not** beat the prompts on weapons (73% against
+77%) — it is the combination that wins. `media.visual.probe_reject_min` in `settings.yaml`
+carries the full sweep; deleting `probe.npz` falls back to prompts alone.
+
+`app/clip.py` also serves SigLIP 2 bundles (`scoring: sigmoid`, independent per-label scores)
+as well as CLIP's softmax. SigLIP was measured and **not** adopted: with its own sigmoid
+calibration it reaches 57% weapons / 68% gore at matched false positives, and with softmax it
+is roughly level with CLIP for about four times the compute (196 vision tokens against 49).
+
+**What it does not do.** The prompts are zero-shot, so a label with no probe class behind it is
+only as good as its wordings. The `sexual` label still has **no positive samples** —
 what is measured is the side that would hurt BONC, a clinic or a sportswear seller being
 refused, not whether it catches what it is named for. Treat its recall as unknown. There is
 still no counterfeit detector, and video is still not looked at.

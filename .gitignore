@@ -42,3 +42,8 @@ flask_api/models/nsfw_ref/
 
 # Round 8 candidate bundle, kept for inspection; not referenced by settings.yaml (v5 is live).
 flask_api/models/v6_candidate/
+
+# SigLIP 2 bundles, measured and not adopted (see contracts/moderation_result.md). Kept out of
+# git like every other third-party weight; scripts/build_clip_prompts.py --family siglip2 rebuilds.
+flask_api/models/img_v2/
+flask_api/models/img_v2_softmax/

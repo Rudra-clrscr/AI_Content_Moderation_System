@@ -21,6 +21,7 @@ Env overrides (all optional):
     VISUAL_CHECK          0 to turn off the CLIP visual check (app/clip.py); results then say
                           visual_content_checked: false, as they did before it existed
     VISUAL_REJECT_MIN     float, overrides visual.reject_min
+    VISUAL_PROBE_REJECT_MIN  float, overrides visual.probe_reject_min (the trained probe)
     VISUAL_DEVICE         auto | cuda | directml | cpu, where the visual check runs
     MEDIA_UPLOAD          0 to turn off image/video attachment checking
     PDF_OCR               0 to turn off OCR of scanned pages (they are then refused, as before)
@@ -217,6 +218,8 @@ def load_settings(path: str | Path | None = None) -> Settings:
             enabled=_as_bool(env("VISUAL_CHECK", vis.get("enabled", False))),
             model_dir=str(vis.get("model_dir", "models/img_v1")),
             reject_min=float(env("VISUAL_REJECT_MIN", vis.get("reject_min", 0.90))),
+            probe_reject_min=float(env("VISUAL_PROBE_REJECT_MIN",
+                                       vis.get("probe_reject_min", 0.70))),
             max_pixels=int(vis.get("max_pixels", med.get("max_pixels", 40_000_000))),
             intra_op_threads=int(vis.get("intra_op_threads", 4)),
             inter_op_threads=int(vis.get("inter_op_threads", 1)),

@@ -142,7 +142,13 @@ def main() -> int:
     print(f"\nthreshold sweep   caught: {', '.join(catch)}   false positives: {', '.join(clean)}")
     print(f"{'reject_min':>10} " + "".join(f"{n.split()[0]:>16}" for n in catch + clean))
     best = None
-    for thr in (0.50, 0.70, 0.80, 0.90, 0.95, 0.97, 0.99, 0.995, 0.999):
+    # Sigmoid bundles (SigLIP) live far lower than softmax ones: a label is scored on its own
+    # account, so an unambiguous match sits around 0.3-0.6 rather than winning a 0.99 softmax.
+    # The sweep has to cover both or it measures nothing for half the models.
+    sigmoid = check.status.get("scoring") == "sigmoid"
+    steps = ((0.01, 0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50, 0.70) if sigmoid
+             else (0.50, 0.70, 0.80, 0.90, 0.95, 0.97, 0.99, 0.995, 0.999))
+    for thr in steps:
         row = []
         rates = {}
         for name in catch + clean:
