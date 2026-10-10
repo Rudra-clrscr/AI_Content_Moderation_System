@@ -110,15 +110,23 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # videos are easy to memorise and hard to generalise from.
                             #
                             #   prompts only @0.90   77% weapons  93% gore   0/63 BONC
-                            #   + probe @0.90        81%          97%        0/63
+                            #   + probe @0.90        85%          97%        0/63
                             #   + probe @0.70        93%          99%        0/63
                             #   + probe @0.50        96%         100%        0/63
                             #
-                            # Every false positive at 0.70 is on the adversarial object set
-                            # (2/200) or body parts (4/105). REAL BONC LISTINGS ARE NEVER
-                            # REFUSED at any threshold, which is why 0.70 is affordable.
-                            # Re-fit after adding images; delete probe.npz to fall back to
-                            # prompts alone.
+                            # At the shipped 0.70, 12 of 458 safe pictures are refused: 3 of 200
+                            # objects, 5 of 105 body parts, 4 of 90 ordinary crowds. REAL BONC
+                            # LISTINGS ARE NEVER REFUSED at any threshold, which is what makes
+                            # 0.70 affordable. Re-fit after adding images; delete probe.npz to
+                            # fall back to prompts alone.
+                            #
+                            # The probe covers weapon and gore only. `unrest` was tried as a
+                            # fourth class and dropped: it cost 13 of 90 safe crowds and 10 of
+                            # 105 body parts, and gained nothing elsewhere. 90 examples cannot
+                            # separate a protest crowd from a trade-fair crowd, where the
+                            # difference is posture and expression rather than the scene. That
+                            # label is carried by its prompts alone, at 49% recall - add more
+                            # unrest and crowd images and re-fit before trusting it further.
     device: auto            # auto | cuda | directml | cpu. "auto" takes the best execution
                             # provider onnxruntime actually offers, so a host with the stock
                             # CPU-only wheel keeps working unchanged. For a GPU, install the

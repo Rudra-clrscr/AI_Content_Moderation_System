@@ -57,15 +57,43 @@ SETS: dict[str, list[str]] = {
         "human face portrait", "hairdresser salon", "spa treatment room",
         "orthopedic brace leg", "walking stick hand", "wheelchair user", "first aid training",
     ],
+    # Crowds with anger in them. The motive is not "no politics" - a tariff discussion is
+    # ordinary B2B talk - it is that violence and anger should not be promoted on a networking
+    # platform. So what is wanted here is confrontation, not every gathering.
+    "unrest": [
+        "street protest demonstration", "political rally crowd", "riot police clash",
+        "angry crowd shouting", "protesters holding placards", "burning effigy protest",
+        "labour strike picket line", "tear gas demonstration", "barricade confrontation",
+        "mob violence street", "farmers protest march", "anti government demonstration",
+        "police baton charge", "burning tyres protest", "crowd throwing stones",
+    ],
+    # Crowds that are NOT angry, and which a careless prompt would refuse: this is the
+    # counterweight set, and it matters more than the positives. A trade fair, a queue and a
+    # religious procession are all dense crowds, some with banners and raised hands.
+    "crowds_safe": [
+        "business conference audience", "trade fair exhibition hall", "product launch event",
+        "crowded indian market street", "shopping mall crowd", "queue outside shop",
+        "team meeting office", "award ceremony stage", "sports stadium crowd cheering",
+        "wedding procession india", "religious procession festival", "temple festival crowd",
+        "graduation ceremony", "music concert audience", "marathon runners crowd",
+        "street food market crowd", "railway station platform crowd", "parade marching band",
+    ],
 }
 
-# A result is dropped if any of these appear in its title or categories. The subjects above do
-# not need them, so a hit means the search drifted somewhere it should not go.
-_EXCLUDE = re.compile(
+# A result is dropped if any of these appear in its title or categories. The sexual exclusions
+# apply everywhere - no set here needs explicit material, so a hit means the search drifted.
+_EXCLUDE_SEXUAL = (
     r"nude|nudity|naked|topless|erotic|porn|sex|genital|penis|vagina|breast|nipple|buttock|"
-    r"lingerie|underwear|bdsm|fetish|strip|bikini.?model|glamour|autopsy|corpse|cadaver|"
-    r"wound|blood|injur|surgery|amputat|autops",
-    re.I)
+    r"lingerie|underwear|bdsm|fetish|bikini.?model|glamour")
+# Graphic injury is excluded only where it would be off-topic. For `unrest` it must NOT be:
+# protest and riot photographs are routinely categorised with "violence", "injury" or "blood",
+# and filtering on those threw away four fifths of that set on the first run.
+_EXCLUDE_GRAPHIC = r"autopsy|corpse|cadaver|wound|blood|injur|surgery|amputat"
+_EXCLUDE_BY_SET = {
+    "unrest": re.compile(_EXCLUDE_SEXUAL, re.I),
+    "crowds_safe": re.compile(_EXCLUDE_SEXUAL + r"|riot|protest|clash|violen", re.I),
+}
+_EXCLUDE = re.compile(_EXCLUDE_SEXUAL + "|" + _EXCLUDE_GRAPHIC, re.I)
 
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 
@@ -78,11 +106,12 @@ def api(params: dict) -> dict:
         return json.loads(resp.read())
 
 
-def search(term: str, want: int) -> list[dict]:
+def search(term: str, want: int, exclude=None, phrase: bool = True) -> list[dict]:
     """Image files matching `term`, with their licence and dimensions."""
     try:
         found = api({"action": "query", "generator": "search",
-                     "gsrsearch": f'filetype:bitmap "{term}"', "gsrnamespace": "6",
+                     "gsrsearch": (f'filetype:bitmap "{term}"' if phrase
+                                   else f"filetype:bitmap {term}"), "gsrnamespace": "6",
                      "gsrlimit": str(min(want * 3, 50)),
                      "prop": "imageinfo|categories", "cllimit": "20",
                      # Thumbnails, not originals. upload.wikimedia.org rate-limits bulk access
@@ -98,7 +127,8 @@ def search(term: str, want: int) -> list[dict]:
     for page in (found.get("query", {}) or {}).get("pages", []) or []:
         title = page.get("title", "")
         cats = " ".join(c.get("title", "") for c in page.get("categories", []) or [])
-        if _EXCLUDE.search(title) or _EXCLUDE.search(cats):
+        bad = exclude or _EXCLUDE
+        if bad.search(title) or bad.search(cats):
             continue
         info = (page.get("imageinfo") or [{}])[0]
         url = info.get("thumburl") or info.get("url", "")
@@ -176,7 +206,10 @@ def main() -> int:
     for term in terms:
         if len(rows) >= args.limit:
             break
-        hits = search(term, per_term)
+        # An exact-phrase search is precise but thin; where a set comes back short the
+        # unquoted form finds far more and the per-set exclusions keep it honest.
+        bad = _EXCLUDE_BY_SET.get(args.set_name)
+        hits = search(term, per_term, bad) or search(term, per_term, bad, phrase=False)
         taken = 0
         for hit in hits:
             if taken >= per_term or len(rows) >= args.limit:
