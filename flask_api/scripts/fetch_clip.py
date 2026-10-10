@@ -23,7 +23,17 @@ The text encoder is only needed to build `prompts.npz` from `config/visual_polic
 is an offline step. A serving host does not need it, and `--with-text-encoder` exists for the
 host that edits the policy.
 
-Weights: openai/clip-vit-base-patch32, ONNX export by Xenova, MIT licence.
+Weights: openai/clip-vit-base-patch32, ONNX export by Xenova.
+
+**Licence: not declared.** An earlier version of this file said "MIT licence"; that was wrong
+and unverified. OpenAI's CLIP *code* on GitHub is MIT, but neither the weights repo
+(openai/clip-vit-base-patch32) nor the ONNX export (Xenova/clip-vit-base-patch32) declares a
+licence in its card metadata or body. Widely used commercially on the assumption that the MIT
+grant carries over to the weights, but that is an assumption, not a statement by the publisher.
+Worth a look from whoever signs off on third-party dependencies.
+
+google/siglip2-base-patch16-224 is explicit Apache 2.0 by comparison, if licensing certainty
+matters more than the cost of changing encoder.
 """
 from __future__ import annotations
 

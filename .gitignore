@@ -39,3 +39,6 @@ images/
 # scripts/eval_sexual_label.py to measure the `sexual` label's recall - nothing in app/ loads
 # it, and the service runs identically without it. Third-party weights we don't redistribute.
 flask_api/models/nsfw_ref/
+
+# Round 8 candidate bundle, kept for inspection; not referenced by settings.yaml (v5 is live).
+flask_api/models/v6_candidate/
