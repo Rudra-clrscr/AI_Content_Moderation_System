@@ -93,6 +93,32 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # with the prompts, which is how the body-part regression was
                             # found in the first place.
     max_pixels: 40000000    # decoded size, against decompression bombs (as media.max_pixels)
+    probe_reject_min: 0.70  # the TRAINED probe's own boundary (models/img_v1/probe.npz,
+                            # training/train_image_probe.py). A picture is refused if the
+                            # written prompts cross reject_min OR the probe crosses this - they
+                            # make different mistakes, and together they cover more than either.
+                            #
+                            # The probe is a logistic regression over the frozen encoder's
+                            # embeddings, fitted on BONC's own 968 labelled pictures. Same shape
+                            # as Layer 1.5's triage filter: scikit-learn to fit, one matrix
+                            # multiply to serve, no new dependency in the Flask app.
+                            #
+                            # MEASURED out-of-fold with GROUPED cross-validation, so near-
+                            # duplicate video frames never straddle a fold. That distinction is
+                            # not pedantry: with a random split the weapons number reads 95%,
+                            # and the honest one is 73%, because 300 frames from a handful of
+                            # videos are easy to memorise and hard to generalise from.
+                            #
+                            #   prompts only @0.90   77% weapons  93% gore   0/63 BONC
+                            #   + probe @0.90        81%          97%        0/63
+                            #   + probe @0.70        93%          99%        0/63
+                            #   + probe @0.50        96%         100%        0/63
+                            #
+                            # Every false positive at 0.70 is on the adversarial object set
+                            # (2/200) or body parts (4/105). REAL BONC LISTINGS ARE NEVER
+                            # REFUSED at any threshold, which is why 0.70 is affordable.
+                            # Re-fit after adding images; delete probe.npz to fall back to
+                            # prompts alone.
     device: auto            # auto | cuda | directml | cpu. "auto" takes the best execution
                             # provider onnxruntime actually offers, so a host with the stock
                             # CPU-only wheel keeps working unchanged. For a GPU, install the

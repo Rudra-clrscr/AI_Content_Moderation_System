@@ -25,8 +25,38 @@ sys.path.insert(0, str(ROOT))
 
 # The image model is its own bundle with its own version, separate from the text moderation
 # model in models/v5. They are different models doing different jobs and they version apart.
-BUNDLE_VERSION = "clip-vit-b32-bonc-img-v1"
-BASE_MODEL = "Xenova/clip-vit-base-patch32"
+# Each encoder family describes how its own weights want to be fed and read. Getting any of
+# this wrong scores every picture differently while nothing visibly fails, so it is written
+# into the bundle rather than assumed by the serving code.
+#
+#   fit       "crop" resizes the shortest edge and centre-crops (CLIP); "stretch" goes straight
+#             to a square (SigLIP). Not interchangeable.
+#   scoring   "softmax" makes the labels compete; "sigmoid" scores each on its own. Thresholds
+#             do NOT carry across - they mean different things.
+#   scale/bias  the model's own learned constants.
+FAMILIES = {
+    "clip": {
+        "version": "clip-vit-b32-bonc-img-v1",
+        "base_model": "Xenova/clip-vit-base-patch32",
+        "arch": "CLIP ViT-B/32, vision encoder only (512-d projected embeddings)",
+        "image_size": 224, "fit": "crop", "scoring": "softmax",
+        "mean": (0.48145466, 0.4578275, 0.40821073),
+        "std": (0.26862954, 0.26130258, 0.27577711),
+        "logit_scale": 100.0, "logit_bias": 0.0,
+    },
+    "siglip2": {
+        "version": "siglip2-base16-bonc-img-v2",
+        "base_model": "onnx-community/siglip2-base-patch16-224-ONNX",
+        "arch": "SigLIP 2 base/16 @224, vision encoder only (768-d pooled embeddings)",
+        "image_size": 224, "fit": "stretch", "scoring": "sigmoid",
+        "mean": (0.5, 0.5, 0.5), "std": (0.5, 0.5, 0.5),
+        # From google/siglip2-base-patch16-224's own weights. logit_scale is stored in log
+        # space, so the multiplier is exp(4.724453) = 112.7.
+        "logit_scale": 112.7318, "logit_bias": -16.7717,
+    },
+}
+BUNDLE_VERSION = FAMILIES["clip"]["version"]
+BASE_MODEL = FAMILIES["clip"]["base_model"]
 
 
 def policy_digest(path: Path) -> str:
@@ -67,6 +97,12 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--policy", type=Path, default=ROOT / "config" / "visual_policy.yaml")
     ap.add_argument("--model-dir", type=Path, default=ROOT / "models" / "img_v1")
+    ap.add_argument("--family", choices=sorted(FAMILIES), default="clip",
+                    help="which encoder family this bundle is (default: clip)")
+    ap.add_argument("--scoring", choices=["softmax", "sigmoid"], default=None,
+                    help="override the family's decision rule. SigLIP's own sigmoid calibration "
+                         "is tuned for its pretraining classes, not for a moderation policy - "
+                         "worth measuring both on the actual sets before believing either.")
     ap.add_argument("--check", action="store_true",
                     help="exit non-zero if the existing prompts.npz is stale, and write nothing")
     args = ap.parse_args()
@@ -111,7 +147,9 @@ def main() -> int:
         ids[i, : len(e)] = e
 
     sess = ort.InferenceSession(str(text_model), providers=["CPUExecutionProvider"])
-    embeds = sess.run(None, {"input_ids": ids})[0].astype(np.float32)
+    out_names = [o.name for o in sess.get_outputs()]
+    want = "text_embeds" if "text_embeds" in out_names else "pooler_output"
+    embeds = sess.run([want], {"input_ids": ids})[0].astype(np.float32)
     embeds /= np.maximum(np.linalg.norm(embeds, axis=1, keepdims=True), 1e-12)
 
     args.model_dir.mkdir(parents=True, exist_ok=True)
@@ -122,20 +160,29 @@ def main() -> int:
     # The bundle describes itself, like models/v5/model_meta.json does for the text model.
     # These are two separate models with separate versions: the text one scores words, this one
     # scores pictures, and neither is a fallback for the other.
+    fam = dict(FAMILIES[args.family])
+    if args.scoring:
+        fam["scoring"] = args.scoring
+        fam["version"] += f"-{args.scoring}"
     meta = {
-        "version": BUNDLE_VERSION,
+        "version": fam["version"],
         "kind": "image",
         "task": "zero-shot image classification against config/visual_policy.yaml",
-        "base_model": BASE_MODEL,
-        "architecture": "CLIP ViT-B/32, vision encoder only (512-d projected embeddings)",
-        "image_size": 224,
+        "base_model": fam["base_model"],
+        "architecture": fam["arch"],
+        "scoring": fam["scoring"],
+        "image_size": fam["image_size"],
+        "fit": fam["fit"],
         "serving_files": ["vision_model.onnx", "prompts.npz"],
         "policy_file": args.policy.name,
         "policy_digest": digest,
         "labels": {n: ("unsafe: " + categories[n]) if n in categories else "safe"
                    for n in sorted(by_label)},
         "prompt_counts": dict(sorted(by_label.items())),
-        "recommended_thresholds": {"reject_min": 0.90},
+        # Thresholds are per-family and NOT comparable: a softmax 0.90 (one label beating the
+        # others) and a sigmoid 0.90 (one label confident on its own) are different statements.
+        # Re-measure with scripts/eval_clip_images.py after changing family.
+        "recommended_thresholds": {"reject_min": 0.90 if args.family == "clip" else None},
         "note": ("The text encoder is NOT needed to serve and is not part of the serving set - "
                  "this script runs it offline to bake prompts.npz. Re-run after any change to "
                  "the policy file; app/clip.py scores against whatever is in prompts.npz."),
@@ -149,11 +196,18 @@ def main() -> int:
              prompts=np.array(prompts),
              category_labels=np.array(list(categories)),
              categories=np.array(list(categories.values())),
-             policy_digest=np.array(digest))
+             policy_digest=np.array(digest),
+             scoring=np.array(fam["scoring"]),
+             logit_scale=np.array(fam["logit_scale"], dtype=np.float32),
+             logit_bias=np.array(fam["logit_bias"], dtype=np.float32),
+             image_size=np.array(fam["image_size"], dtype=np.int32),
+             fit=np.array(fam["fit"]),
+             mean=np.array(fam["mean"], dtype=np.float32),
+             std=np.array(fam["std"], dtype=np.float32))
 
     print(f"{out}  ({out.stat().st_size / 1024:.0f} KB)")
-    print(f"  {BUNDLE_VERSION}: {len(prompts)} prompts, {embeds.shape[1]}-d, "
-          f"from {args.policy.name} ({digest})")
+    print(f"  {fam['version']}: {len(prompts)} prompts, {embeds.shape[1]}-d, "
+          f"{fam['scoring']} scoring, from {args.policy.name} ({digest})")
     for name, count in sorted(by_label.items()):
         mark = f"unsafe -> {categories[name]}" if name in categories else "safe"
         print(f"    {name:10} {count:3} prompts   {mark}")

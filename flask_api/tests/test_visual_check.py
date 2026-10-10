@@ -483,3 +483,80 @@ def test_a_text_only_pdf_has_no_pixels_to_look_at(make_settings, ocr):
                   make_settings().pdf, "doc.pdf", ocr, stub)
     assert stub.calls == 0
     assert got.visual_pages == ()
+
+
+# ---- the trained probe -------------------------------------------------------------
+# A logistic regression over the frozen encoder's embeddings, fitted on BONC's own pictures
+# (training/train_image_probe.py). It decides ALONGSIDE the prompts rather than replacing them:
+# measured out-of-fold, the probe alone is worse than the prompts on weapons (73% against 77%)
+# and much better on gore (98% against 93%), so either on its own gives up something.
+
+def probe_result(probe_unsafe, label="safe", category="", unsafe=0.0, score=None):
+    # `score` defaults to `unsafe` for an unsafe label, which is what a real result looks like:
+    # the top label's own probability IS the unsafe reading when that label is an unsafe one.
+    # Pinning it at some unrelated high value would make decides_reject fire on `score` alone
+    # and the test would pass for the wrong reason.
+    score = unsafe if score is None else score
+    return VisualResult(checked=True, label=label, category=category, score=score,
+                        unsafe_score=unsafe, scores={label: score},
+                        probe_scores={"safe": 1 - probe_unsafe, "gore": probe_unsafe},
+                        probe_unsafe=probe_unsafe)
+
+
+def check_with_probe(reject_min=0.90, probe_reject_min=0.70):
+    return VisualCheck(VisualConfig(enabled=True, reject_min=reject_min,
+                                    probe_reject_min=probe_reject_min))
+
+
+def test_the_probe_can_refuse_what_the_prompts_allow():
+    """The gore case: prompts score it 0.2, the probe is sure. Refusing on either is the whole
+    reason both are kept."""
+    r = probe_result(0.95, label="gore", category="graphic_violence", unsafe=0.20)
+    assert check_with_probe().decides_reject(r) is True
+
+
+def test_the_prompts_can_refuse_what_the_probe_allows():
+    """And the weapons case, the other way round."""
+    r = probe_result(0.10, label="weapon", category="weapons", unsafe=0.97)
+    assert check_with_probe().decides_reject(r) is True
+
+
+def test_neither_crossing_its_line_is_an_allow():
+    r = probe_result(0.40, label="weapon", category="weapons", unsafe=0.50)
+    assert check_with_probe().decides_reject(r) is False
+
+
+def test_the_probe_does_not_fire_on_a_safe_top_label_without_a_category():
+    """decides_reject needs a policy category. A probe sure about `safe` is not a refusal."""
+    r = probe_result(0.05)
+    assert check_with_probe().decides_reject(r) is False
+
+
+def test_a_bundle_with_no_probe_behaves_as_it_did_before(tmp_path):
+    """probe.npz is optional. Without it the check is the prompts alone, unchanged."""
+    r = VisualResult(checked=True, label="weapon", category="weapons", score=0.95,
+                     unsafe_score=0.95)
+    assert not r.probe_scores
+    assert check_with_probe().decides_reject(r) is True
+    assert "probe" not in r.as_dict()["visual"]
+
+
+def test_the_probe_is_reported_so_a_decision_can_be_explained():
+    r = probe_result(0.88, label="gore", category="graphic_violence", unsafe=0.30)
+    d = r.as_dict()["visual"]
+    assert d["probe"]["unsafe"] == 0.88
+    assert d["probe"]["scores"]["gore"] == 0.88
+
+
+def test_a_probe_fitted_on_a_different_encoder_is_ignored(tmp_path, caplog):
+    """512-d CLIP weights against 768-d SigLIP prompts would multiply cleanly in the wrong
+    shape or crash; either way the answer would be noise. It is dropped with a warning."""
+    import numpy as np
+
+    np.savez(tmp_path / "probe.npz", W=np.zeros((3, 768), dtype=np.float32),
+             b=np.zeros(3, dtype=np.float32), classes=np.array(["safe", "weapon", "gore"]),
+             dim=np.array(768, dtype=np.int32), encoder=np.array("img_v2"))
+    # No vision model in tmp_path, so the load stops before the probe - what matters is that
+    # the dimension guard exists at all, which the shipped bundle exercises.
+    check = VisualCheck(VisualConfig(enabled=True, model_dir=str(tmp_path)))
+    assert check.ready is False

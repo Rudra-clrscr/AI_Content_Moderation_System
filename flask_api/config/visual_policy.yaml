@@ -42,9 +42,13 @@ labels:
   sexual:
     unsafe: true
     category: sexual_content
-    # UNMEASURED. There are no sample images for this label, so unlike weapon and gore its
-    # accuracy on BONC's traffic is unknown - it is here because the policy needs it, not
-    # because it has been shown to work. Get a sample set before relying on it.
+    # RECALL UNMEASURED. images/body_parts measures the other side - this label does not fire
+    # on athletes, physiotherapy or anatomy, which is what would hurt an ordinary BONC member -
+    # but nothing here shows it catches what it is named for. Treat its recall as unknown.
+    #
+    # It cannot be measured by scraping, and docs/measuring_the_sexual_label.md sets out the
+    # two routes that do work: a licensed research dataset requested from its authors, or a
+    # reference classifier run over BONC's own uploads, which needs no such dataset at all.
     prompts:
       - a photo of a nude person
       - a pornographic photo
