@@ -57,6 +57,71 @@ SETS: dict[str, list[str]] = {
         "human face portrait", "hairdresser salon", "spa treatment room",
         "orthopedic brace leg", "walking stick hand", "wheelchair user", "first aid training",
     ],
+    # Weapons from sources other than CCTV video. images/flag is 300 frames from a handful of
+    # clips, which is why the probe memorises it (95% on a random split) and generalises poorly
+    # (73% when the split is grouped by clip). What is missing is variety: different lighting,
+    # framing, backgrounds and weapon types, including the catalogue-style shots a member would
+    # actually upload if they were listing one.
+    "weapons": [
+        "handgun pistol", "revolver firearm", "semi automatic pistol", "assault rifle",
+        "hunting rifle", "shotgun firearm", "combat knife", "hunting knife blade",
+        "machete blade", "dagger weapon", "person aiming handgun", "person holding rifle",
+        "gun shop display", "firearms for sale counter", "pistol on table",
+        "rifle leaning against wall", "knife collection display", "switchblade knife",
+        "soldier carrying rifle", "police officer with firearm",
+        # Not only firearms. A lathi, a talwar and an iron rod are what a weapon listing or a
+        # violent photograph actually looks like here, and none of them resemble a pistol.
+        "lathi stick police", "bamboo stick weapon", "talwar sword india",
+        "kirpan sword", "sickle farm tool", "iron rod weapon", "axe weapon",
+        "club blunt weapon", "spear weapon", "crossbow weapon",
+    ],
+
+    # Fighting and assault, as distinct from the crowd confrontation `unrest` describes.
+    "violence": [
+        "two men fighting street", "bar fight brawl", "street brawl crowd",
+        "person punching another", "assault attack victim", "wrestling fight real",
+        "kicking a person on ground", "beating with stick", "mob attacking person",
+        "scuffle between protesters", "hooligans fighting", "boxing knockout punch",
+    ],
+    # Menace: the weapon or gesture aimed AT someone, rather than merely present.
+    "threats": [
+        "man pointing gun at camera", "threatening with knife", "raised fist threatening",
+        "menacing gesture man", "pointing finger angrily", "intimidating posture man",
+        "robber pointing weapon", "threatening gesture crowd", "angry man shouting face",
+        "person brandishing weapon",
+    ],
+    # Couples. The counterweights are in visual_policy.yaml - handshakes, team photos and
+    # colleagues greeting, which are two people close together without being a couple.
+    "romance": [
+        "couple kissing", "romantic couple embrace", "couple holding hands date",
+        "engagement proposal couple", "couple on beach sunset", "wedding couple kiss",
+        "lovers hugging", "valentine couple", "couple dancing romantic",
+        "honeymoon couple",
+    ],
+    # Fashion and glamour photography: clothed, but posed for display. The term list is
+    # deliberately fashion-oriented and _EXCLUDE_SEXUAL still applies, so this collects
+    # catalogue and runway material and not explicit content.
+    "revealing": [
+        "fashion model runway dress", "swimwear fashion shoot", "bikini beach fashion",
+        "glamour photography model", "lingerie fashion catalogue", "model posing studio",
+        "evening gown model", "fashion week model", "crop top fashion", "beachwear model",
+    ],
+    # Children. Collected for ONE purpose: to check that the `minor` label actually refuses
+    # them, because an unvalidated child-image filter on a live platform is worse than a known
+    # broken one. Ordinary freely-licensed photographs, gitignored like every other set here
+    # and not redistributed.
+    # The CHILD AS SUBJECT, which is what the policy refuses. The first pull used broad terms
+    # ("children playing park", "family with children") and collected mostly the incidental
+    # case the policy ALLOWS - so the probe's class was noise against a safe set full of the
+    # same thing. Those images now live in minors_incidental and count as safe, giving the
+    # probe both sides of the distinction for the first time.
+    "minors": [
+        "child portrait photograph", "baby portrait studio", "toddler portrait",
+        "child face close up", "young girl portrait", "young boy portrait",
+        "infant portrait photograph", "child headshot", "smiling child portrait",
+        "portrait of a schoolboy", "portrait of a schoolgirl", "child looking at camera",
+    ],
+
     # Crowds with anger in them. The motive is not "no politics" - a tariff discussion is
     # ordinary B2B talk - it is that violence and anger should not be promoted on a networking
     # platform. So what is wanted here is confrontation, not every gathering.
@@ -66,6 +131,10 @@ SETS: dict[str, list[str]] = {
         "labour strike picket line", "tear gas demonstration", "barricade confrontation",
         "mob violence street", "farmers protest march", "anti government demonstration",
         "police baton charge", "burning tyres protest", "crowd throwing stones",
+        "student protest university", "trade union demonstration", "sit in protest road",
+        "candlelight vigil protest", "placards rally street", "water cannon protesters",
+        "riot aftermath burnt", "crowd confrontation police line", "general strike march",
+        "demonstration banner city", "protest camp occupation",
     ],
     # Crowds that are NOT angry, and which a careless prompt would refuse: this is the
     # counterweight set, and it matters more than the positives. A trade fair, a queue and a
@@ -77,6 +146,10 @@ SETS: dict[str, list[str]] = {
         "wedding procession india", "religious procession festival", "temple festival crowd",
         "graduation ceremony", "music concert audience", "marathon runners crowd",
         "street food market crowd", "railway station platform crowd", "parade marching band",
+        "conference delegates hall", "factory workers assembly line", "office open plan staff",
+        "warehouse workers loading", "farmers market stalls", "bus queue commuters",
+        "school assembly students", "charity run participants", "cultural dance festival",
+        "trade show booth visitors", "job fair candidates", "village fair crowd",
     ],
 }
 
@@ -90,7 +163,22 @@ _EXCLUDE_SEXUAL = (
 # and filtering on those threw away four fifths of that set on the first run.
 _EXCLUDE_GRAPHIC = r"autopsy|corpse|cadaver|wound|blood|injur|surgery|amputat"
 _EXCLUDE_BY_SET = {
+    # Weapons: drop the diagram/heraldry noise Commons is full of ("coat of arms with sword"),
+    # and anything graphic, which belongs to the gore set and would muddy both.
+    "weapons": re.compile(_EXCLUDE_SEXUAL + r"|coat of arms|heraldr|diagram|patent|"
+                          r"map|stamp|coin|coat-of-arms|coats of arms|" + _EXCLUDE_GRAPHIC, re.I),
     "unrest": re.compile(_EXCLUDE_SEXUAL, re.I),
+    # Violence and threats are documentary photographs, routinely categorised with "injury"
+    # or "blood" - filtering on those would gut these sets the way it gutted `unrest`.
+    "violence": re.compile(_EXCLUDE_SEXUAL, re.I),
+    "threats": re.compile(_EXCLUDE_SEXUAL, re.I),
+    # Fashion, not explicit material. The sexual exclusions stay on and do the work.
+    "revealing": re.compile(_EXCLUDE_SEXUAL, re.I),
+    "romance": re.compile(_EXCLUDE_SEXUAL, re.I),
+    # Children: the sexual exclusions are non-negotiable here, plus anything medical or
+    # graphic, which has no place in a set whose only job is to test a blocklist.
+    "minors": re.compile(_EXCLUDE_SEXUAL + "|" + _EXCLUDE_GRAPHIC + r"|malnutrition|refugee camp|"
+                         r"war|victim|abuse|orphan", re.I),
     "crowds_safe": re.compile(_EXCLUDE_SEXUAL + r"|riot|protest|clash|violen", re.I),
 }
 _EXCLUDE = re.compile(_EXCLUDE_SEXUAL + "|" + _EXCLUDE_GRAPHIC, re.I)
