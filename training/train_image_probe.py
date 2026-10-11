@@ -35,30 +35,58 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "flask_api"))
 
-EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+# .avif included: Unsplash and other stock sources serve it by default now, and leaving it out
+# silently skipped 73 supplied images - the run came back with byte-identical metrics and no
+# warning, which is the worst way for a dataset to shrink.
+EXTS = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp", ".gif", ".tif", ".tiff"}
 
 # directory -> class. The classes are the policy's own labels, so a probe can stand in for the
 # prompts without anything downstream changing.
 SETS = {
+    # Weapons from two very different sources on purpose: `flag` is 300 frames from a handful
+    # of CCTV-style clips (easy, near-duplicate), `weapons` is 200 varied stills including
+    # lathis, talwars and sickles. The second is what generalisation actually looks like.
     "flag": "weapon",
+    "weapons": "weapon",
     "graphic_injury_gore_500/images/graphic_injury_gore": "gore",
+    # Confrontation, fighting and menace share a policy category (violence_or_unrest) and are
+    # pooled into one class: separately they are 218/147/86, together 451, and the probe needs
+    # examples more than it needs a distinction the policy does not make.
+    "unrest": "unrest",
+    "violence": "unrest",
+    "threats": "unrest",
+    "romance": "romantic",
+    "revealing": "revealing",
+    # The two sides of the policy's distinction, for the first time: 135 pictures OF a child
+    # against 167 where children are merely present. If `minor` is learnable at all, it is
+    # learnable from this contrast and not from the unsafe class alone.
+    # Kept as safe: children present but not the subject is explicitly allowed, and these
+    # broaden the safe class. images/minors (child portraits) has no class and is skipped -
+    # the `minor` label is carried by its prompts.
+    "minors_incidental": "safe",
     "allow": "safe",
     "BONC_Positive": "safe",
     "body_parts": "safe",
-    # Dense crowds that are NOT confrontation: trade fairs, queues, wedding and temple
-    # processions. Without these in the safe half the probe would learn "crowd = unrest",
-    # which on an Indian B2B platform would refuse a great deal of ordinary business life.
     "crowds_safe": "safe",
 }
-# `unrest` is deliberately NOT a probe class, though images/unrest is collected and the policy
-# has the label. Measured: adding it cost 13 of 90 safe crowds and 10 of 105 body parts at the
-# shipped threshold, against 4 and 3 without it, and gained nothing on weapons or gore. 90
-# examples are not enough to separate a protest crowd from a trade-fair crowd - the difference
-# is in posture and expression, not in the scene. The prompts carry that label alone until
-# there are enough examples to beat them.
+# Three classes, not seven. unrest, romantic, revealing and minor were tried twice and removed
+# both times: they left weapons and gore exactly where they were (94% / 99%) while taking safe
+# refusals from 15 in 458 to 145 in 588, and at the loosest settings they refused real BONC
+# listings. Balanced class weights made it worse; rewording the prompts changed nothing at all,
+# because the probe never sees the prompts.
 #
-# The safe crowds stay in the training set regardless: they make the `safe` class broader,
-# which is worth having whether or not `unrest` is ever learned.
+# The reason is what those labels ask. "A child as the SUBJECT, not incidentally present" and
+# "revealing as a GLAMOUR SHOT, not a product photo" are distinctions of framing and intent.
+# CLIP's text encoder can express them - "posing for the camera" against "product shot on a
+# plain background" - but a linear probe over one global image embedding cannot: a graduation
+# crowd and a child portrait share their features, as do an athlete and a swimwear model.
+# Those labels stay with the prompts, which is where the distinction is expressible.
+# Three classes. `minor` was tried a third time, with the contrast the policy actually draws:
+# 135 pictures OF a child against 167 where children are merely present. It still fails, and
+# this run says exactly why - recall 82% at precision 62%, refusing 39 to 62 of the 167
+# INCIDENTAL images and starting to refuse real BONC listings. The probe detects "a child is
+# present", which is not the rule. Subject-versus-incidental is a question about framing, and a
+# linear model over one global embedding has no way to ask it.
 CLASSES = ["safe", "weapon", "gore"]
 
 
@@ -151,6 +179,9 @@ def main() -> int:
     ap.add_argument("--device", default="auto")
     ap.add_argument("--C", type=float, default=1.0, help="inverse regularisation strength")
     ap.add_argument("--folds", type=int, default=5)
+    ap.add_argument("--class-weight", choices=["balanced", "none"], default="balanced",
+                    help="balanced upweights small classes, which with seven of them makes the "
+                         "smallest ones aggressive enough to refuse ordinary content")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -168,7 +199,8 @@ def main() -> int:
     cv = GroupKFold(n_splits=folds)
     oof = np.zeros((len(X), len(CLASSES)), dtype=np.float32)
     for tr, te in cv.split(X, y, groups):
-        clf = LogisticRegression(C=args.C, max_iter=3000, class_weight="balanced")
+        clf = LogisticRegression(C=args.C, max_iter=3000,
+                                 class_weight=None if args.class_weight == "none" else "balanced")
         clf.fit(X[tr], y[tr])
         oof[te] = clf.predict_proba(X[te])
 
@@ -234,7 +266,8 @@ def main() -> int:
                   f"{f:5}/{nf:<5}{f/nf:5.1%}  {detail}")
 
     # Final model on everything, for serving.
-    clf = LogisticRegression(C=args.C, max_iter=3000, class_weight="balanced")
+    clf = LogisticRegression(C=args.C, max_iter=3000,
+                                 class_weight=None if args.class_weight == "none" else "balanced")
     clf.fit(X, y)
     out = args.out or (args.encoder / "probe.npz")
     np.savez(out, W=clf.coef_.astype(np.float32), b=clf.intercept_.astype(np.float32),

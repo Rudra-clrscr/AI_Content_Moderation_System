@@ -13,6 +13,13 @@
 
 version: 1
 
+# PER-LABEL THRESHOLDS. A label may set its own `reject_min`; without one it uses
+# media.visual.reject_min from settings.yaml. The scores are NOT comparable between labels -
+# measured medians on each label's own image set run from 0.57 (violence) to 0.97 (minors) -
+# so a single bar either lets the low scorers through untouched or refuses ordinary pictures
+# in order to catch them. Each bar below is set from where that label's own set actually sits.
+# Re-measure with scripts/eval_clip_images.py after changing any of them.
+
 # Phrasings are lower case and start "a photo of ..." where it reads naturally: that is the
 # shape of the captions CLIP was trained on, and it scores better than a bare noun.
 labels:
@@ -42,6 +49,7 @@ labels:
   sexual:
     unsafe: true
     category: sexual_content
+    reject_min: 0.80   # nudity scores p25 0.81 / p50 0.93; 0.80 keeps the whole distribution
     # RECALL UNMEASURED. images/body_parts measures the other side - this label does not fire
     # on athletes, physiotherapy or anatomy, which is what would hurt an ordinary BONC member -
     # but nothing here shows it catches what it is named for. Treat its recall as unknown.
@@ -58,6 +66,7 @@ labels:
   unrest:
     unsafe: true
     category: violence_or_unrest
+    reject_min: 0.70   # unrest p25 0.62 / p50 0.89; 0.90 was cutting through the middle of its own set
     # The motive is not "no politics" - a post about a tariff or a transport strike's effect on
     # deliveries is ordinary B2B talk. It is that violence and anger should not be PROMOTED on
     # a networking platform, so what this looks for is confrontation: riots, baton charges,
@@ -74,6 +83,96 @@ labels:
       - a photo of a crowd throwing stones
       - a photo of a police baton charge on a crowd
       - a photo of a street barricade with protesters
+
+  revealing:
+    unsafe: true
+    category: revealing_clothing
+    reject_min: 0.80   # revealing p25 0.31 / p50 0.80; below 0.80 it starts taking swimwear and athletes
+    # NOT the same as `sexual`, which is nudity and explicit material. This is clothed but
+    # posed for display - glamour and modelling shots that have no place on a trade platform.
+    #
+    # It collides head-on with the safe prompts that fixed the body-part false positives:
+    # a swimmer, an athlete and someone in sportswear are all "wearing little". The line drawn
+    # here is the SCENE, not the amount of skin - a competition, a pool and a gym are activity;
+    # a model posing to camera is display. That is the same rule that has already cost recall
+    # three times in this file, applied before rather than after.
+    prompts:
+      - a glamour photo of a model posing in revealing clothes
+      - a photo of a woman posing in lingerie for the camera
+      - a studio photo of a model in a low cut outfit
+      - a posed photo of someone showing off their body
+      - a bikini model posing for a photoshoot
+      - a fashion model on a runway in a revealing outfit
+      - a seductive pose for a photoshoot
+
+  manhandling:
+    unsafe: true
+    category: violence_or_unrest
+    reject_min: 0.60   # violence p50 0.57, threats p50 0.69 - the lowest-scoring labels, and the ones a single 0.90 bar silenced completely
+    # Force used on a person, short of the open confrontation `unrest` describes. Same policy
+    # category on purpose: to the author it is the same message, and to the Data team the same
+    # bucket. Overlaps with `unrest` by design - a baton charge is both.
+    prompts:
+      #
+      # Narrowed after measuring: "a person being restrained or pinned down" matched
+      # physiotherapy and massage and doubled the body-part false positives, 5 to 10 in 105.
+      # Hands on a patient and hands holding someone down look alike; what separates them is
+      # the struggle, so each prompt now names it.
+      - a photo of a person being grabbed roughly by the arm
+      - a photo of someone being dragged away against their will
+      - a photo of security guards restraining a struggling person
+      - a photo of one person shoving another in anger
+      - a photo of a struggling person held back by several people
+      - a photo of police forcibly detaining someone
+      # Fighting and menace were being caught only incidentally, by prompts meant for crowds
+      # and for restraint - 41% and 44% of their own image sets. Neither describes two people
+      # throwing punches, or a weapon aimed at the camera, so neither scored them well.
+      - a photo of two people fighting with fists
+      - a photo of a street brawl between men
+      - a photo of someone punching another person in the face
+      - a photo of a person kicking someone on the ground
+      - a photo of a person aiming a gun at the camera
+      - a photo of someone threatening another with a knife
+      - a photo of a man raising a fist to threaten
+      - a photo of an angry man shouting into someone's face
+
+  romantic:
+    unsafe: true
+    category: romantic_content
+    reject_min: 0.75   # romance p25 0.58 / p50 0.89
+    prompts:
+      - a photo of a couple kissing
+      - a photo of a couple embracing romantically
+      - a romantic photo of two people in love
+      - a photo of a couple on a romantic date
+      - an intimate photo of a couple lying together
+
+  minor:
+    unsafe: true
+    category: minors
+    reject_min: 0.85   # minors p25 0.80 / p50 0.97; the one label where a miss costs more than a false positive
+    # Pictures of children are refused outright. BONC is a trade platform: a child has no
+    # business reason to appear in a listing, a profile or an article, so there is nothing to
+    # weigh up. Refusing the whole category removes a class of risk rather than trying to judge
+    # it case by case, which is the right trade when the downside is this asymmetric.
+    #
+    # This is the one label where a false NEGATIVE costs more than a false positive, so it is
+    # deliberately broad. A refused photograph of an adult who looks young is an inconvenience;
+    # the other error is not.
+    #
+    # THE CHILD HAS TO BE THE SUBJECT. A graduation ceremony, a school event with parents or a
+    # family firm's team photo may all contain children incidentally, and those are ordinary
+    # business life - refusing them would take out a chunk of the platform. So the prompts
+    # describe a picture that is OF a child: portraits, close-ups, a child posed for the
+    # camera. "a family photograph with children" and "a photo of a child with an adult" were
+    # tried and removed for catching exactly the incidental case this is meant to allow.
+    prompts:
+      - a portrait photograph of a child
+      - a close-up photo of a child's face
+      - a photo of a child posing for the camera
+      - a studio photograph of a baby
+      - a photo of a toddler as the main subject
+      - a photo of a young child alone
 
   # Everything below is ordinary business imagery. These are the alternatives the unsafe labels
   # compete against, so the list is deliberately broad: a picture that matches none of them has
@@ -146,6 +245,26 @@ labels:
       - a pencil drawing or sketch of a human figure
       - a photo of a tattoo on skin
       - a photo of a prosthetic limb or medical brace
+      # Contact between people that is business, not romance. A handshake, a greeting and a
+      # team photo are two people close together; without these, `romantic` has nothing to
+      # compete with and every photograph of colleagues reads as a couple.
+      - a photo of two people shaking hands at a meeting
+      - a photo of colleagues greeting each other
+      - a photo of a team posing together for a group photo
+      - a photo of two businesspeople talking
+      - a photo of a salesperson helping a customer
+      # Children present but not the subject, and clothing shown as product rather than as
+      # display. These are the counterweights for `minor` and `revealing`: without them a
+      # graduation photo and a swimwear catalogue page have nothing safe to be.
+      - a photo of a graduation ceremony with families
+      - a photo of a school event with parents attending
+      - a family business team photograph
+      # "a photo of a crowd at a public event" was here and took unrest recall from 48% to
+      # 28% on its own: a protest IS a crowd at a public event. The fourth time this exact
+      # mistake has cost recall in this file. Name the scene, not the shape of it.
+      - a swimwear product photo on a plain background
+      - a clothing catalogue product shot
+      - a photo of sportswear or activewear for sale
       # Crowds that are NOT angry. This is the counterweight to `unrest`, and it matters more
       # than the unrest prompts do: a trade fair, a queue, a wedding procession and a temple
       # festival are all dense crowds, several of them with banners, raised hands and chanting.

@@ -47,9 +47,19 @@ _SIGNATURES: tuple[tuple[str, int, bytes], ...] = (
     ("image", 0, b"MM\x00*"),                   # TIFF big-endian
     ("video", 0, b"\x1a\x45\xdf\xa3"),          # Matroska / WebM
     ("video", 0, b"OggS"),
-    ("video", 4, b"ftyp"),                      # MP4 / MOV / 3GP
     ("video", 4, b"moov"),
 )
+
+# ISO base-media files all begin "....ftyp", so the major brand that follows is the only thing
+# separating a still picture from a film. Without this an AVIF reads as video, and video is
+# published unchecked (media.allow_unchecked_video): a weapon photo saved as .avif would have
+# bypassed OCR and the visual check entirely. Unsplash serves AVIF by default now, so this is
+# an ordinary upload, not an exotic one.
+_FTYP_IMAGE_BRANDS = frozenset({
+    b"avif", b"avis",                           # AVIF still and sequence
+    b"heic", b"heix", b"heim", b"heis",         # HEIF / HEIC
+    b"hevc", b"hevx", b"mif1", b"msf1",
+})
 
 
 class MediaError(Exception):
@@ -98,6 +108,8 @@ def detect_kind(data: bytes, filename: str = "") -> str:
     for kind, offset, magic in _SIGNATURES:
         if head[offset:offset + len(magic)] == magic:
             return kind
+    if head[4:8] == b"ftyp":                        # ISO base media: the brand decides
+        return "image" if head[8:12] in _FTYP_IMAGE_BRANDS else "video"
     if head[:4] == b"RIFF" and len(head) >= 12:     # RIFF containers: WEBP is an image, AVI a video
         return {b"WEBP": "image", b"AVI ": "video"}.get(head[8:12], "unknown")
     return "unknown"

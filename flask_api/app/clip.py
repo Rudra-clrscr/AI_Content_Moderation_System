@@ -195,6 +195,7 @@ class VisualCheck:
         self._session = None
         self._labels: list[str] = []          # one entry per prompt row
         self._categories: dict[str, str] = {}
+        self._thresholds: dict[str, float] = {}   # per-label reject_min, falling back to config
         self._scoring = SOFTMAX
         self._scale, self._bias = LOGIT_SCALE, 0.0
         self._image_size = IMAGE_SIZE
@@ -248,6 +249,9 @@ class VisualCheck:
                 self._labels = [str(x) for x in data["labels"]]
                 self._categories = dict(zip((str(x) for x in data["category_labels"]),
                                             (str(x) for x in data["categories"])))
+                if "threshold_labels" in data.files:
+                    self._thresholds = {str(k): float(v) for k, v in
+                                        zip(data["threshold_labels"], data["threshold_values"])}
                 if embeds.shape[0] != len(self._labels):
                     raise ValueError(f"{embeds.shape[0]} embeddings for {len(self._labels)} labels")
                 # Normalised at build time, but a re-normalise here is cheap insurance against a
@@ -324,6 +328,7 @@ class VisualCheck:
             return {"enabled": True, "ready": True, "labels": sorted(set(self._labels)),
                     "prompts": len(self._labels), "reject_min": self.config.reject_min,
                     "provider": self._provider, "scoring": self._scoring,
+                    "label_thresholds": dict(sorted(self._thresholds.items())),
                     "probe": bool(self._probe), "probe_reject_min": self.config.probe_reject_min}
         return {"enabled": self.config.enabled, "ready": False, "reason": self._unavailable}
 
@@ -434,8 +439,20 @@ class VisualCheck:
         `reject_min`. A picture that is 0.5 weapon and 0.5 gore is obviously a problem but
         neither label is confident, so the unsafe total is checked too.
         """
-        if not result.checked or not result.category:
+        if not result.checked:
             return False
         if result.probe_scores and result.probe_unsafe >= self.config.probe_reject_min:
             return True
-        return max(result.score, result.unsafe_score) >= self.config.reject_min
+        # Every unsafe label judged at its own bar, not just the winner: the scores are not
+        # comparable across labels (a median `minor` is 0.97, a median `violence` 0.57), so one
+        # bar either lets violence through or refuses ordinary pictures to catch it.
+        for label, score in result.scores.items():
+            if label in self._categories and score >= self._thresholds.get(
+                    label, self.config.reject_min):
+                return True
+        # And the original rule still stands underneath. It carries two cases the loop cannot:
+        # a result from a bundle with no per-label bars, and a picture split across labels -
+        # 0.5 weapon with 0.45 gore clears neither bar alone but is obviously not publishable.
+        if result.category:
+            return max(result.score, result.unsafe_score) >= self.config.reject_min
+        return False

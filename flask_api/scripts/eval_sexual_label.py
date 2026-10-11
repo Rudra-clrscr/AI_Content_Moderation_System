@@ -31,7 +31,10 @@ sys.path.insert(0, str(ROOT))
 
 from app.clip import VisualCheck, VisualConfig  # noqa: E402
 
-EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+# .avif included: Unsplash and other stock sources serve it by default now, and leaving it out
+# silently skipped 73 supplied images - the run came back with byte-identical metrics and no
+# warning, which is the worst way for a dataset to shrink.
+EXTS = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp", ".gif", ".tif", ".tiff"}
 # The reference ViT's own preprocessing, from its preprocessor_config.json. Not CLIP's.
 REF_SIZE = 224
 REF_MEAN = REF_STD = 0.5

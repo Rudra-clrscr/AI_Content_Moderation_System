@@ -198,3 +198,49 @@ def test_decisions_for_files_are_recorded(make_settings, ocr):
     upload(c, png(), "product.png")
     upload(c, text_image(["Earn 50000 per week from home."]), "flyer.png")
     assert [r["decision"] for r in sink.results] == ["allow", "reject"]
+
+
+# ---- ISO base-media brands ---------------------------------------------------------
+# AVIF, HEIC, MP4 and MOV all begin "....ftyp" and are told apart only by the brand that
+# follows. Treating the whole family as video published AVIF images completely unchecked:
+# media.allow_unchecked_video is on, so a weapon photo saved as .avif skipped OCR and the
+# visual check both. Unsplash serves AVIF by default, so this was an ordinary upload.
+
+def ftyp(brand: bytes) -> bytes:
+    return b"\x00\x00\x00\x20ftyp" + brand + b"\x00" * 48
+
+
+@pytest.mark.parametrize("brand, kind", [
+    (b"avif", "image"),     # AVIF still
+    (b"avis", "image"),     # AVIF sequence
+    (b"heic", "image"),
+    (b"mif1", "image"),
+    (b"isom", "video"),     # ordinary MP4
+    (b"mp42", "video"),
+    (b"qt  ", "video"),     # QuickTime
+    (b"3gp5", "video"),
+])
+def test_iso_media_brand_decides_image_or_video(brand, kind):
+    assert detect_kind(ftyp(brand)) == kind
+
+
+def test_an_unknown_ftyp_brand_is_treated_as_video():
+    """Fail safe for this family: an unrecognised brand is far more likely to be some video
+    container than a still, and video has the stricter path."""
+    assert detect_kind(ftyp(b"zzzz")) == "video"
+
+
+def test_a_real_avif_is_moderated_rather_than_waved_through(make_settings, ocr):
+    """The hole end to end: before the brand check this returned a video result with
+    checked: false and nothing was looked at."""
+    pytest.importorskip("PIL")
+    from PIL import Image, features
+    if not (hasattr(features, "check") and features.check("avif")):
+        pytest.skip("Pillow on this host cannot encode AVIF")
+    import io as _io
+    buf = _io.BytesIO()
+    Image.new("RGB", (64, 64), (200, 30, 30)).save(buf, format="AVIF")
+    data = buf.getvalue()
+    assert detect_kind(data) == "image"
+    body = upload(client(make_settings, ocr=ocr), data, "photo.avif").get_json()
+    assert body["media"]["kind"] == "image"

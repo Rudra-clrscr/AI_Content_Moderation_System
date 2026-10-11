@@ -37,7 +37,10 @@ sys.path.insert(0, str(ROOT))
 
 from app.clip import VisualCheck, VisualConfig  # noqa: E402
 
-EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+# .avif included: Unsplash and other stock sources serve it by default now, and leaving it out
+# silently skipped 73 supplied images - the run came back with byte-identical metrics and no
+# warning, which is the worst way for a dataset to shrink.
+EXTS = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp", ".gif", ".tif", ".tiff"}
 
 
 def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
@@ -63,6 +66,22 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         # a temple festival are all dense crowds, several with banners and raised hands.
         ("unrest", images / "unrest", True),
         ("crowds_safe", images / "crowds_safe", False),
+        # Collected for the labels added after the first round. Every one of these should be
+        # refused on a trade platform; crowds_safe and body_parts are what they must not catch.
+        ("weapons (varied)", images / "weapons", True),
+        ("violence", images / "violence", True),
+        ("threats", images / "threats", True),
+        ("romance", images / "romance", True),
+        ("revealing", images / "revealing", True),
+        ("minors", images / "minors", True),
+        # Artistic nude photography, supplied rather than collected. This is the positive set
+        # the `sexual` label never had - its recall was unmeasured until these arrived.
+        ("nudity", images / "nudity", True),
+        # Indian press photography of police/protester confrontation, supplied rather than
+        # collected. It scores a median 0.995 against the Commons `violence` set's 0.568 - the
+        # model handles the real distribution far better than my collected sets suggested, and
+        # this is the one to trust when the two disagree.
+        ("unrest_real", images / "unrest_real", True),
     ]
     return [(n, d, e) for n, d, e in candidates if d.is_dir()]
 
