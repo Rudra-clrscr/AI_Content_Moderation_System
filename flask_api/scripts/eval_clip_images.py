@@ -77,6 +77,11 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         # Artistic nude photography, supplied rather than collected. This is the positive set
         # the `sexual` label never had - its recall was unmeasured until these arrived.
         ("nudity", images / "nudity", True),
+        # Indian press photography of police/protester confrontation, supplied rather than
+        # collected. It scores a median 0.995 against the Commons `violence` set's 0.568 - the
+        # model handles the real distribution far better than my collected sets suggested, and
+        # this is the one to trust when the two disagree.
+        ("unrest_real", images / "unrest_real", True),
     ]
     return [(n, d, e) for n, d, e in candidates if d.is_dir()]
 
