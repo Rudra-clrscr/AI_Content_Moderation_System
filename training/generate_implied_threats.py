@@ -161,6 +161,44 @@ NEGATIVE_FRAMES = [
     "Do not waste our time with another revised quotation for {thing}.",
 ]
 
+# SECOND-PERSON COMPLAINTS. The gap that sank round 8: every negative above is about a THING
+# ("the quality on that order was poor"), and the model learned that "your" plus anything
+# negative means menace. It then refused "Your after-sales service has been appalling" and
+# "Nobody at your office answers the phone" - ordinary, publishable complaints about the
+# recipient. These say the same kind of thing directly to the person, with no menace in them.
+SECOND_PERSON_NEGATIVES = [
+    "Your after-sales service has been appalling throughout.",
+    "Your driver was rude to our staff and we have reported it.",
+    "Nobody at your office answers the phone and it is costing us money.",
+    "Your quality has dropped noticeably over the last three consignments.",
+    "Your packing is careless and half the stock arrives broken.",
+    "Your team missed the deadline again without telling us.",
+    "Your invoice is wrong for the third month running.",
+    "Your delivery was late again and we had to explain it to our customer.",
+    "Your sales staff promised something your factory cannot deliver.",
+    "Your prices have gone up twice this quarter with no notice.",
+    "Your warehouse sent the wrong grade entirely.",
+    "Your response times have become unacceptable.",
+    "Your documentation is incomplete and customs rejected it.",
+    "Your samples do not match what you shipped.",
+    "Your people were unhelpful when we called about this.",
+    "Your service has been the worst of any supplier we use.",
+    "Your last shipment was short by two cartons and nobody responded.",
+    "Your quality control clearly is not working.",
+    "Your attitude on that call was unprofessional.",
+    "Your company has handled this very badly from the start.",
+    "We are disappointed with your handling of this order.",
+    "We expected better from your team.",
+    "We have had nothing but problems with your deliveries.",
+    "We cannot keep absorbing your mistakes.",
+    "I am not happy with your explanation at all.",
+    "Frankly your performance on this contract has been poor.",
+    "Your staff need better training on this product.",
+    "Your transport partner damaged the goods again.",
+    "Your billing department has not replied in two weeks.",
+    "Your website lists stock you do not actually have.",
+]
+
 HINGLISH_NEGATIVES = [
     "Bhai {thing} ka rate thoda kam karo, competition hai market mein.",
     "{one_cap} time par nahi aaya, isliye problem ho gayi.",
@@ -246,6 +284,8 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=HERE.parent / "res" / "implied_threats.csv")
     ap.add_argument("--threats", type=int, default=40_000)
     ap.add_argument("--negatives", type=int, default=25_000)
+    ap.add_argument("--second-person", type=int, default=20_000,
+                    help="complaints aimed at the recipient, the class round 8 refused")
     ap.add_argument("--seed", type=int, default=4)
     args = ap.parse_args()
 
@@ -271,6 +311,10 @@ def main() -> int:
 
     made_t = emit(THREAT_FRAMES, HINGLISH_THREATS, args.threats, 1, "threat_implied")
     made_n = emit(NEGATIVE_FRAMES, HINGLISH_NEGATIVES, args.negatives, 0, "firm_business")
+    # A third of the negatives are now second-person complaints, wrapped in the same ordinary
+    # message furniture as everything else so the model cannot key on sentence shape.
+    made_s = emit(SECOND_PERSON_NEGATIVES, HINGLISH_NEGATIVES,
+                  args.second_person, 0, "second_person_complaint")
 
     rng.shuffle(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -282,6 +326,7 @@ def main() -> int:
     print(f"{args.out}: {len(rows):,} rows")
     print(f"  {made_t:,} implied threats (label 1)")
     print(f"  {made_n:,} firm business language (label 0)")
+    print(f"  {made_s:,} second-person complaints (label 0)")
     print(f"  {len(banned)} held-out eval texts excluded")
     if made_t < args.threats or made_n < args.negatives:
         print("  NOTE: ran out of distinct combinations before reaching the target; the "

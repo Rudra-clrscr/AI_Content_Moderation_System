@@ -13,6 +13,13 @@
 
 version: 1
 
+# PER-LABEL THRESHOLDS. A label may set its own `reject_min`; without one it uses
+# media.visual.reject_min from settings.yaml. The scores are NOT comparable between labels -
+# measured medians on each label's own image set run from 0.57 (violence) to 0.97 (minors) -
+# so a single bar either lets the low scorers through untouched or refuses ordinary pictures
+# in order to catch them. Each bar below is set from where that label's own set actually sits.
+# Re-measure with scripts/eval_clip_images.py after changing any of them.
+
 # Phrasings are lower case and start "a photo of ..." where it reads naturally: that is the
 # shape of the captions CLIP was trained on, and it scores better than a bare noun.
 labels:
@@ -42,6 +49,7 @@ labels:
   sexual:
     unsafe: true
     category: sexual_content
+    reject_min: 0.80   # nudity scores p25 0.81 / p50 0.93; 0.80 keeps the whole distribution
     # RECALL UNMEASURED. images/body_parts measures the other side - this label does not fire
     # on athletes, physiotherapy or anatomy, which is what would hurt an ordinary BONC member -
     # but nothing here shows it catches what it is named for. Treat its recall as unknown.
@@ -58,6 +66,7 @@ labels:
   unrest:
     unsafe: true
     category: violence_or_unrest
+    reject_min: 0.70   # unrest p25 0.62 / p50 0.89; 0.90 was cutting through the middle of its own set
     # The motive is not "no politics" - a post about a tariff or a transport strike's effect on
     # deliveries is ordinary B2B talk. It is that violence and anger should not be PROMOTED on
     # a networking platform, so what this looks for is confrontation: riots, baton charges,
@@ -78,6 +87,7 @@ labels:
   revealing:
     unsafe: true
     category: revealing_clothing
+    reject_min: 0.80   # revealing p25 0.31 / p50 0.80; below 0.80 it starts taking swimwear and athletes
     # NOT the same as `sexual`, which is nudity and explicit material. This is clothed but
     # posed for display - glamour and modelling shots that have no place on a trade platform.
     #
@@ -98,6 +108,7 @@ labels:
   manhandling:
     unsafe: true
     category: violence_or_unrest
+    reject_min: 0.60   # violence p50 0.57, threats p50 0.69 - the lowest-scoring labels, and the ones a single 0.90 bar silenced completely
     # Force used on a person, short of the open confrontation `unrest` describes. Same policy
     # category on purpose: to the author it is the same message, and to the Data team the same
     # bucket. Overlaps with `unrest` by design - a baton charge is both.
@@ -113,10 +124,22 @@ labels:
       - a photo of one person shoving another in anger
       - a photo of a struggling person held back by several people
       - a photo of police forcibly detaining someone
+      # Fighting and menace were being caught only incidentally, by prompts meant for crowds
+      # and for restraint - 41% and 44% of their own image sets. Neither describes two people
+      # throwing punches, or a weapon aimed at the camera, so neither scored them well.
+      - a photo of two people fighting with fists
+      - a photo of a street brawl between men
+      - a photo of someone punching another person in the face
+      - a photo of a person kicking someone on the ground
+      - a photo of a person aiming a gun at the camera
+      - a photo of someone threatening another with a knife
+      - a photo of a man raising a fist to threaten
+      - a photo of an angry man shouting into someone's face
 
   romantic:
     unsafe: true
     category: romantic_content
+    reject_min: 0.75   # romance p25 0.58 / p50 0.89
     prompts:
       - a photo of a couple kissing
       - a photo of a couple embracing romantically
@@ -127,6 +150,7 @@ labels:
   minor:
     unsafe: true
     category: minors
+    reject_min: 0.85   # minors p25 0.80 / p50 0.97; the one label where a miss costs more than a false positive
     # Pictures of children are refused outright. BONC is a trade platform: a child has no
     # business reason to appear in a listing, a profile or an article, so there is nothing to
     # weigh up. Refusing the whole category removes a class of risk rather than trying to judge

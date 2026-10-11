@@ -63,8 +63,13 @@ def policy_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
 
 
-def load_policy(path: Path) -> tuple[list[str], list[str], dict[str, str]]:
-    """(prompts, label_per_prompt, {unsafe label: policy category})."""
+def load_policy(path: Path) -> tuple[list[str], list[str], dict[str, str], dict[str, float]]:
+    """(prompts, label_per_prompt, {unsafe label: category}, {label: its own reject_min}).
+
+    A label may set its own `reject_min`. The scores are not comparable between labels - a
+    median `minor` sits at 0.97 and a median `violence` at 0.57 - so one bar for all of them
+    either lets violence through or refuses ordinary pictures to catch it.
+    """
     import yaml
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -72,7 +77,7 @@ def load_policy(path: Path) -> tuple[list[str], list[str], dict[str, str]]:
     if not labels:
         raise SystemExit(f"{path} has no `labels`")
 
-    prompts, per_prompt, categories = [], [], {}
+    prompts, per_prompt, categories, thresholds = [], [], {}, {}
     for name, spec in labels.items():
         texts = [str(t).strip() for t in (spec.get("prompts") or []) if str(t).strip()]
         if not texts:
@@ -80,6 +85,8 @@ def load_policy(path: Path) -> tuple[list[str], list[str], dict[str, str]]:
         if spec.get("unsafe"):
             category = str(spec.get("category") or name)
             categories[str(name)] = category
+            if spec.get("reject_min") is not None:
+                thresholds[str(name)] = float(spec["reject_min"])
         for t in texts:
             prompts.append(t)
             per_prompt.append(str(name))
@@ -89,7 +96,7 @@ def load_policy(path: Path) -> tuple[list[str], list[str], dict[str, str]]:
     if not safe:
         raise SystemExit(f"{path} has no safe labels - the unsafe ones would have nothing to be "
                          "judged against and every picture would look unsafe")
-    return prompts, per_prompt, categories
+    return prompts, per_prompt, categories, thresholds
 
 
 def main() -> int:
@@ -126,7 +133,7 @@ def main() -> int:
         print(f"{out} matches {args.policy.name} ({digest})")
         return 0
 
-    prompts, per_prompt, categories = load_policy(args.policy)
+    prompts, per_prompt, categories, thresholds = load_policy(args.policy)
     text_model = args.model_dir / "text_model.onnx"
     tokenizer = args.model_dir / "tokenizer.json"
     for p in (text_model, tokenizer):
@@ -196,6 +203,8 @@ def main() -> int:
              prompts=np.array(prompts),
              category_labels=np.array(list(categories)),
              categories=np.array(list(categories.values())),
+             threshold_labels=np.array(list(thresholds)),
+             threshold_values=np.array(list(thresholds.values()), dtype=np.float32),
              policy_digest=np.array(digest),
              scoring=np.array(fam["scoring"]),
              logit_scale=np.array(fam["logit_scale"], dtype=np.float32),
