@@ -399,6 +399,63 @@ and 10 of 105 body parts while gaining nothing on weapons or gore, because the d
 between a protest crowd and a trade-fair crowd is posture and expression rather than the scene.
 More images of both, then re-fit, is the route to improving it.
 
+`physique` (*category* `physique_display`) is the newest label, and it draws two lines at once:
+
+1. **A member showing off their own body is not a business posting**; a gym, an equipment
+   supplier or a supplement seller promoting itself is.
+2. **Promoting a business does not launder the picture.** A gym flyer, a fitness poster and a
+   supplement banner are all legitimate B2B postings, and they are still refused when they are
+   built around a bare chest. How much body the advert puts on the page does not stop mattering
+   because a company paid for the layout.
+
+Measured on 72 gym physique photographs against 49 gym business pictures, both supplied:
+**99% caught (71/72), 5 of 49 refused.** Those five do not divide the way a false-positive
+count suggests, so they are worth reading individually:
+
+| | |
+|---|---|
+| 1 | pre-existing `manhandling` false positive on a cable-machine banner — not this label |
+| 3 | gym posters built around a **shirtless** man. Rule 2 says refuse them; they are in the allowed folder, and by the policy they are in the wrong one |
+| 1 | borderline — a sleeveless top rather than a bare chest, physique-forward pose |
+
+Rule 1 is a question about who a picture is addressed to, not what is in it: the blocked set
+contains fully clothed mirror selfies and the allowed set contains a muscular model in a vest
+demonstrating a chest press. Neither skin nor the room separates them. That is the same framing
+question `minor` asks and it is answered the same way — **in the prompts, not the probe.** A
+linear model over one global embedding cannot ask who a picture is for.
+
+The single miss is a shirtless man in front of a gym mirror, which *"a photo of people
+training together in a gym"* wins because the reflection makes two of him.
+
+**One safe prompt was the whole problem, twice over.** A reported upload — a shirtless man on a
+lat pulldown — published cleanly, and the reason was not the AVIF path (`detect_kind` reads it
+as an image and the picture was scored) but *"a product photo of a gym machine with a person
+demonstrating it"*. At 0.284 cosine it was the best match in the file, above every `physique`
+prompt, because it described the picture exactly and said nothing about what he was wearing.
+A 0.017 lead in cosine is 0.84 against 0.15 once the softmax has multiplied it by 100, which
+is the thing to remember about tuning this file: the margins that decide a verdict are in the
+third decimal place of a similarity.
+
+It is now two prompts, *"a gym machine in a showroom"* and *"a person in a gym t-shirt on an
+exercise machine"* — the same statement about the equipment, plus one about the clothes. That
+took the label from 92% to 99% and moved nothing else: `allow` 5/200, `BONC_Positive` 0/63,
+`body_parts` 19/105, `crowds_safe` 8/220, weapons 83%, minors 96%, nudity 95%, all identical.
+
+The bar is **0.55**. 0.55 and 0.60 give identical numbers on every set here, so the lower one
+is taken for the margin: that reported upload lands at 0.614, and 0.014 is not a gap to build
+on.
+
+One safe prompt changed to make this work: *"a photo of a person lifting weights in a gym"* is
+now plural, *"people training together in a gym"*. In the singular it was the best match for a
+solo physique shot and held the label to 83%; the body-part false positives it was added for
+are not affected (that 105-image set went from 20 refused to 19 on the swap).
+
+Six safe prompts were also added for trades the list had nothing for — construction,
+laboratories, farming, hospitality, electrical, presentations. The safe list is what the unsafe
+labels are judged against, and `test_there_are_safe_labels_to_be_judged_against` had started
+failing: 65 safe prompts against 66 unsafe ones. A picture matching no safe prompt has nothing
+to be safe *as*. It cost one `unrest` image, 129 to 128, and nothing else moved.
+
 The grouping matters more than it sounds: with a random split the weapons figure reads 95% and
 the honest one is 73%. 300 frames from a handful of videos are easy to memorise and hard to
 generalise from, and the probe alone does **not** beat the prompts on weapons (73% against
@@ -410,11 +467,12 @@ as well as CLIP's softmax. SigLIP was measured and **not** adopted: with its own
 calibration it reaches 57% weapons / 68% gore at matched false positives, and with softmax it
 is roughly level with CLIP for about four times the compute (196 vision tokens against 49).
 
-**What it does not do.** The prompts are zero-shot, so a label with no probe class behind it is
-only as good as its wordings. The `sexual` label still has **no positive samples** —
-what is measured is the side that would hurt BONC, a clinic or a sportswear seller being
-refused, not whether it catches what it is named for. Treat its recall as unknown. There is
-still no counterfeit detector, and video is still not looked at.
+**What it does not do.** The prompts are zero-shot, so a label with no probe class behind it
+is only as good as its wordings, and most of these labels are measured on sets collected for
+the purpose rather than on BONC's traffic. `violence` at 47% and `threats` at 37% are the
+clearest example: on 84 real press photographs of the same thing the labels reach 99%, so
+those two figures describe the collected sets, not the service. There is still no counterfeit
+detector, and video is still not looked at.
 
 **Failure behaviour differs by cause, on purpose.** Missing model or `enabled: false` →
 the check is simply off, results say `visual_content_checked: false`, and the service behaves

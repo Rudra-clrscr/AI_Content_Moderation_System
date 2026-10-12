@@ -42,11 +42,23 @@ highlight_on_reject: true
 max_highlight_sentences: 5
 
 # Human-readable names for rule categories, used in reject messages.
+# An unmapped category reaches the author verbatim - "our community policies on
+# physique_display" - so every category a rule or the visual policy can emit belongs here.
 categories:
   abuse: abusive language
   profanity: profanity
   fraud: fraud and scams
   spam: spam
+  # From config/visual_policy.yaml, by way of app/api.py::_visual_reject. These were missing
+  # and the raw label was being shown.
+  weapons: weapons
+  graphic_violence: graphic violence
+  sexual_content: sexual content
+  violence_or_unrest: violence
+  revealing_clothing: revealing clothing
+  romantic_content: romantic content
+  physique_display: personal physique photos
+  minors: pictures of children
 
 # Instruction shown next to each highlighted match, by rule id.
 rules:
@@ -54,6 +66,13 @@ rules:
     Payments must go through BONC. Remove requests to pay by crypto, gift cards
     or money-transfer services.
   profanity.wordlist: Remove the profanity. Keep posts professional.
+  # Visual refusals come through as `visual.<label>`. This one needs saying, because there IS
+  # an allowed version of what the author just tried and they will otherwise re-upload it.
+  visual.physique: >-
+    BONC is a trade platform, so personal workout and physique photos don't belong in a
+    posting. If you're promoting a gym, equipment or supplements, show the business - the
+    premises, the equipment, a class or your advert - and keep bare-chested bodybuilder
+    imagery out of the banner.
   abuse.targeted: Remove insults aimed at a person or business.
   abuse.blocklist: Remove abusive language.
   scam.advance_fee: Remove guaranteed-return or advance-fee claims.
