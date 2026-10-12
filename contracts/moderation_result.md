@@ -408,8 +408,8 @@ More images of both, then re-fit, is the route to improving it.
    built around a bare chest. How much body the advert puts on the page does not stop mattering
    because a company paid for the layout.
 
-Measured on 71 gym physique photographs against 49 gym business pictures, both supplied:
-**96% caught (68/71), 5 of 49 refused.** Those five do not divide the way a false-positive
+Measured on 72 gym physique photographs against 49 gym business pictures, both supplied:
+**99% caught (71/72), 5 of 49 refused.** Those five do not divide the way a false-positive
 count suggests, so they are worth reading individually:
 
 | | |
@@ -424,8 +424,26 @@ demonstrating a chest press. Neither skin nor the room separates them. That is t
 question `minor` asks and it is answered the same way — **in the prompts, not the probe.** A
 linear model over one global embedding cannot ask who a picture is for.
 
-The three misses are shirtless men mid-lift, where the safe gym prompts win on the scene and
-are right to.
+The single miss is a shirtless man in front of a gym mirror, which *"a photo of people
+training together in a gym"* wins because the reflection makes two of him.
+
+**One safe prompt was the whole problem, twice over.** A reported upload — a shirtless man on a
+lat pulldown — published cleanly, and the reason was not the AVIF path (`detect_kind` reads it
+as an image and the picture was scored) but *"a product photo of a gym machine with a person
+demonstrating it"*. At 0.284 cosine it was the best match in the file, above every `physique`
+prompt, because it described the picture exactly and said nothing about what he was wearing.
+A 0.017 lead in cosine is 0.84 against 0.15 once the softmax has multiplied it by 100, which
+is the thing to remember about tuning this file: the margins that decide a verdict are in the
+third decimal place of a similarity.
+
+It is now two prompts, *"a gym machine in a showroom"* and *"a person in a gym t-shirt on an
+exercise machine"* — the same statement about the equipment, plus one about the clothes. That
+took the label from 92% to 99% and moved nothing else: `allow` 5/200, `BONC_Positive` 0/63,
+`body_parts` 19/105, `crowds_safe` 8/220, weapons 83%, minors 96%, nudity 95%, all identical.
+
+The bar is **0.55**. 0.55 and 0.60 give identical numbers on every set here, so the lower one
+is taken for the margin: that reported upload lands at 0.614, and 0.014 is not a gap to build
+on.
 
 One safe prompt changed to make this work: *"a photo of a person lifting weights in a gym"* is
 now plural, *"people training together in a gym"*. In the singular it was the best match for a

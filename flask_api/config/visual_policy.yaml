@@ -152,9 +152,12 @@ labels:
   physique:
     unsafe: true
     category: physique_display
-    reject_min: 0.60   # gym_neg p25 0.74 / p50 0.87. No real BONC listing scores above 0.25
+    reject_min: 0.55   # gym_neg p25 0.78 / p50 0.90. No real BONC listing scores above 0.25
                        # on this label, so the bar is set by the gym sets alone and sits well
-                       # clear of the traffic it has to leave alone.
+                       # clear of the traffic it has to leave alone. 0.55 and 0.60 give
+                       # IDENTICAL numbers on every set here, so the lower one is taken for the
+                       # margin: a reported real upload (a shirtless man on a lat pulldown)
+                       # lands at 0.614, which is 0.014 over 0.60 and not a gap to rely on.
     # A member showing off their own body is not a business posting; a gym, an equipment
     # supplier or a supplement seller promoting itself is. That is the whole distinction, and
     # it is about who the picture is FOR rather than what is in it: `gym_neg` contains fully
@@ -171,14 +174,16 @@ labels:
     # much body the advert puts on the page, and the answer does not change with who posted it.
     # The last two prompts carry that, and they are the difference between 92% and 96%.
     #
-    # Measured: 96% of gym_neg (68/71) with 5 of 49 gym_positive refused. Those five are worth
-    # reading one by one, because only one is a plain mistake:
+    # Measured: 99% of gym_neg (71/72) with 5 of 49 gym_positive refused. Those five are worth
+    # reading one by one, because none is a plain mistake:
     #   - 1 pre-existing `manhandling` false positive on a cable-machine banner, not this label
     #   - 3 gym posters built around a SHIRTLESS man ("NEVER QUIT", "Shape Your Body" x2),
     #     which the rule above says to refuse - they sit in the allowed folder, and by the
     #     policy they are in the wrong one
     #   - 1 borderline: a sleeveless top rather than a bare chest, physique-forward pose
-    # The three misses are shirtless men mid-lift, where the safe gym prompts legitimately win.
+    #
+    # The single miss is a shirtless man in front of a gym mirror, which "a photo of people
+    # training together in a gym" wins because the reflection makes two of him.
     prompts:
       - a bodybuilder flexing his muscles
       - a muscular man posing shirtless to show his body
@@ -297,7 +302,14 @@ labels:
       - a photo of people training together in a gym
       - a photo of a person running on a track
       - a photo of a treadmill or exercise bike
-      - a product photo of a gym machine with a person demonstrating it
+      # NOT "a product photo of a gym machine with a person demonstrating it", which stood
+      # here and was the single best match - 0.284, above every `physique` prompt - for a
+      # SHIRTLESS man on a lat pulldown. It described the picture perfectly and knew nothing
+      # about what he was wearing, and a 0.017 cosine lead becomes 0.84 against 0.15 once the
+      # softmax has multiplied it by 100. These two say the same thing about the equipment and
+      # about the clothes, which is the distinction the policy actually draws.
+      - a photo of a gym machine in a showroom
+      - a photo of a person in a gym t-shirt on an exercise machine
       - an advertisement poster for a gym or fitness centre
       - a photo of a group fitness class in a studio
       - a photo of a swimmer in a swimming pool
