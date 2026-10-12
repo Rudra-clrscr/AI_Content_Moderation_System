@@ -112,7 +112,7 @@ labels:
     category: violence_or_unrest
     reject_min: 0.60   # RE-DERIVED. The old note here read "violence p50 0.57, threats p50
                        # 0.69", from two sets that were audited picture by picture and found
-                       # to be mostly neither - see images/README_sets.md. On what is left,
+                       # to be mostly neither - see docs/image_sets.md. On what is left,
                        # `unrest_real` (84 supplied press photographs) sits at 99% caught for
                        # EVERY bar from 0.45 to 0.70, so this bar does not trade recall at all;
                        # it trades false positives, and 0.60 is where `allow` drops from 7 to 5.

@@ -536,7 +536,7 @@ the aggregates, like `non_graphic`. Read the other way, the model *refused* 67 a
 so a good share of those refusals were false positives hiding inside a recall figure: the
 finding is not that the model was weak there, but that nobody knew which way the error ran.
 `unrest_real` — 84 supplied press photographs of the same category — measures **99%**, and is
-what to trust when they disagree. `images/README_sets.md` records the audit.
+what to trust when they disagree. `docs/image_sets.md` records the audit.
 
 There is still no counterfeit detector, and video is still not looked at.
 

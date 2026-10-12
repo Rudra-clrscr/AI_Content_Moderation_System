@@ -85,7 +85,7 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         #
         # So they are reported and excluded from both recall and false positives, like
         # `non_graphic`. `unrest_real` is the trustworthy measure for this category at 99%.
-        # images/README_sets.md has the audit.
+        # docs/image_sets.md has the audit.
         ("violence", images / "violence", None),
         ("threats", images / "threats", None),
         ("romance", images / "romance", True),
