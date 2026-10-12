@@ -399,7 +399,59 @@ and 10 of 105 body parts while gaining nothing on weapons or gore, because the d
 between a protest crowd and a trade-fair crowd is posture and expression rather than the scene.
 More images of both, then re-fit, is the route to improving it.
 
-`physique` (*category* `physique_display`) is the newest label, and it draws two lines at once:
+`wedding` (*category* `wedding_content`) refuses wedding photography outright, on the same
+reasoning as `romantic`: a networking platform is not where a member posts their wedding album.
+
+It is the easiest label in this file by a distance. A mandap, a garland exchange, a sacred fire
+and a red lehenga are a visual vocabulary with no business equivalent, so nine prompts separate
+it perfectly — **205 of 205** on the supplied set, whose score distribution starts at **p25
+0.909** while the whole of `crowds_safe` tops out at 0.403. Nothing sits between 0.41 and 0.90
+except a single nikah photograph at 0.55, so the bar is placed in that void: **0.50**, with
+0.45 through 0.51 giving identical numbers on every other set.
+
+That perfection took two rounds, and the second is the more interesting one. A **Sikh** wedding
+has no mandap, no sacred fire, no garland exchange and no white dress, so the first nine
+prompts described a Hindu or Western ceremony and nothing else. A supplied Anand Karaj scored
+**0.115**, and the prompt beating it was `"a photo of a religious procession or temple
+festival"` from the safe list — which is fair, because a gurdwara ceremony *is* a religious
+gathering. Two prompts naming the scene (the couple before the Guru Granth Sahib, a groom in a
+turban) fixed it at no cost at all. Naming the *venue* instead — "a sikh wedding ceremony in a
+gurdwara", "a punjabi wedding couple" — was tried and dropped: both refused an ordinary crowd,
+because the festivals held in those buildings look like the weddings held in them.
+
+**The risk was never the weddings — it was the event trades.** A caterer, a decorator, a
+florist, a banquet hall and a lighting hire firm are ordinary BONC members who sell *into*
+weddings, and nothing in the safe list described any of them. Six prompts now do (banquet hall,
+buffet, flower arrangement, stage lighting, crockery, marquee), and they are why the label costs
+nothing measurable: `BONC_Positive` stays **0/62**, `crowds_safe` **8/206**, `allow` **5/200**,
+`body_parts` **19/105**. `romance` went *up*, 57% to 62%.
+
+*(`BONC_Positive` is 62 distinct pictures, not the 63 files it holds — two are byte-identical.
+It was quoted as 0/63 for most of this branch's life. `eval_clip_images.py` now de-duplicates
+every set by content hash, which is also what stopped `minors` from reporting 282 images once
+the walk went recursive and found `minors/kid_neg/`: 73 of its 74 files are byte-identical to
+pictures already in `minors/`, and counting them twice would have let a tenth of that set vote
+twice in its own recall figure.)*
+
+Two things had to be unpicked to make the rule coherent:
+
+- *"a photo of a wedding procession"* was in the **safe** list, added as an `unrest`
+  counterweight. It said the opposite of the new rule and was removed; `crowds_safe` is
+  unchanged without it, because the trade fairs, queues, temple festivals and parades beside it
+  carry that job on their own.
+- **14 of the 220 `crowds_safe` images were wedding processions**, collected as `allow`. Under
+  the rule they are positives, so leaving them there would have scored the policy as wrong
+  every time it was right. They moved to `images/weddings_commons` with their licence, source
+  URL, attribution and SHA256 intact.
+
+That split set catches only **2 of 14**, and the reason is worth stating rather than fixing:
+looking at them, most are not legibly weddings at all — two are historical miniature paintings
+of processions, one is a decorated car on a road, several are night street scenes. The one
+unambiguous wedding photograph in it (a bride's portrait) scores 0.855. It is the same pattern
+as the collected `violence` set: Commons is diverse without being representative, and chasing
+that 14% would mean learning to refuse street crowds and museum artwork.
+
+`physique` (*category* `physique_display`) draws two lines at once:
 
 1. **A member showing off their own body is not a business posting**; a gym, an equipment
    supplier or a supplement seller promoting itself is.
@@ -469,10 +521,24 @@ is roughly level with CLIP for about four times the compute (196 vision tokens a
 
 **What it does not do.** The prompts are zero-shot, so a label with no probe class behind it
 is only as good as its wordings, and most of these labels are measured on sets collected for
-the purpose rather than on BONC's traffic. `violence` at 47% and `threats` at 37% are the
-clearest example: on 84 real press photographs of the same thing the labels reach 99%, so
-those two figures describe the collected sets, not the service. There is still no counterfeit
-detector, and video is still not looked at.
+the purpose rather than on BONC's traffic.
+
+`violence` and `threats` were the clearest example and are now a different kind of example.
+They reported 47% and 38%, the two weakest figures here, and were quoted as the model's
+weakness. Every picture in both was then looked at. **`threats` is about twenty photographs of
+metal bands on stage**, plus manuscripts, candlelit vigils, Victorian engravings, a wild boar
+and a crown; perhaps ten of its 86 are threatening. **`violence` is mostly boxing, wrestling
+and MMA** — sport — with an FBI award handshake, Christmas markets, military swimming drills
+and a meerkat among the rest.
+
+Neither set can measure recall, so both are registered as mixed-expectation and excluded from
+the aggregates, like `non_graphic`. Read the other way, the model *refused* 67 and 31 of them,
+so a good share of those refusals were false positives hiding inside a recall figure: the
+finding is not that the model was weak there, but that nobody knew which way the error ran.
+`unrest_real` — 84 supplied press photographs of the same category — measures **99%**, and is
+what to trust when they disagree. `docs/image_sets.md` records the audit.
+
+There is still no counterfeit detector, and video is still not looked at.
 
 **Failure behaviour differs by cause, on purpose.** Missing model or `enabled: false` →
 the check is simply off, results say `visual_content_checked: false`, and the service behaves

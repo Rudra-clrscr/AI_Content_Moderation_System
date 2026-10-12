@@ -110,7 +110,16 @@ labels:
   manhandling:
     unsafe: true
     category: violence_or_unrest
-    reject_min: 0.60   # violence p50 0.57, threats p50 0.69 - the lowest-scoring labels, and the ones a single 0.90 bar silenced completely
+    reject_min: 0.60   # RE-DERIVED. The old note here read "violence p50 0.57, threats p50
+                       # 0.69", from two sets that were audited picture by picture and found
+                       # to be mostly neither - see docs/image_sets.md. On what is left,
+                       # `unrest_real` (84 supplied press photographs) sits at 99% caught for
+                       # EVERY bar from 0.45 to 0.70, so this bar does not trade recall at all;
+                       # it trades false positives, and 0.60 is where `allow` drops from 7 to 5.
+                       #
+                       # Still the loosest label in the file. It catches 76 of the 293 refusals
+                       # on the weapons set, whose pictures it does not describe, so a figure
+                       # credited to `weapon` is partly this.
     # Force used on a person, short of the open confrontation `unrest` describes. Same policy
     # category on purpose: to the author it is the same message, and to the Data team the same
     # bucket. Overlaps with `unrest` by design - a baton charge is both.
@@ -148,6 +157,56 @@ labels:
       - a romantic photo of two people in love
       - a photo of a couple on a romantic date
       - an intimate photo of a couple lying together
+
+  wedding:
+    unsafe: true
+    category: wedding_content
+    reject_min: 0.50   # the widest separation in this file by a distance: the supplied set's
+                       # p25 is 0.909 and the whole of crowds_safe tops out at 0.403. There is
+                       # nothing at all between 0.41 and 0.90 except one nikah photograph at
+                       # 0.55, so the bar is placed in that void rather than by a sweep. 0.45
+                       # to 0.51 give IDENTICAL numbers on every other set; 0.50 is the round
+                       # number in the middle of the empty stretch.
+    # Weddings are personal life, not trade. Same call `romantic` makes, and for the same
+    # reason - a networking platform is not where a member posts their wedding album.
+    #
+    # Unlike almost every other label here, this one is EASY: a mandap, a garland exchange, a
+    # sacred fire and a red lehenga are a visual vocabulary with no business equivalent, so the
+    # prompts separate it perfectly (155/155 supplied) without taking anything else.
+    #
+    # The one picture that ever sat near the line is a nikah under a glass marquee, and what
+    # held it down was `a photo of a decorated event tent or marquee` from the safe list below
+    # - the counterweight doing exactly its job on a picture that happens to be both. Lowering
+    # the bar into the void was the cheaper answer than arguing with it.
+    #
+    # THE REAL RISK IS THE EVENT TRADES, not the weddings. A caterer, a decorator, a florist, a
+    # banquet hall and a lighting hire firm are ordinary BONC members who sell INTO weddings,
+    # and nothing in the safe list described any of them. Six prompts there now do, and they
+    # are the reason this label costs nothing: BONC_Positive stays 0/63 and crowds_safe 8/206.
+    #
+    # "a photo of a wedding procession" was REMOVED from the safe list, where it had been added
+    # as an `unrest` counterweight - it said the opposite of this rule. Removing it cost
+    # nothing (crowds_safe unchanged at 8), because the trade fairs, queues, temple festivals
+    # and parades beside it carry that job on their own.
+    prompts:
+      - a photo of a bride and groom at their wedding
+      - a wedding ceremony with a bride in a red lehenga
+      - a photo of an indian wedding mandap decorated with flowers
+      - a photo of a hindu wedding ceremony around a sacred fire
+      - a photo of a couple exchanging garlands at a wedding
+      - a wedding photograph of a bride and groom posing together
+      - a photo of a bride in a white wedding dress
+      - a photo of a wedding reception stage decorated with flowers
+      - a photo of an indian wedding baraat procession in the street
+      # An Anand Karaj has none of the above: no mandap, no sacred fire, no garland exchange,
+      # no white dress. A supplied Sikh wedding scored 0.115 and the prompt beating it was
+      # `a photo of a religious procession or temple festival` from the safe list, which is
+      # fair - a gurdwara ceremony IS a religious gathering. These two name the scene instead
+      # of the venue. "a sikh wedding ceremony in a gurdwara" and "a photo of a punjabi
+      # wedding couple" were tried and dropped: both cost an ordinary crowd, because naming
+      # the building and the region catches the festivals held in them.
+      - a photo of a bride and groom sitting before the guru granth sahib
+      - a photo of a groom wearing a turban at his wedding
 
   physique:
     unsafe: true
@@ -255,6 +314,15 @@ labels:
       - a photo of a hotel room or restaurant interior
       - a photo of solar panels or electrical equipment
       - a photo of a person giving a presentation to a room
+      # The event trades, which the `wedding` label runs straight at. A banquet hall, a buffet,
+      # a flower arrangement and a lighting rig are what a caterer, a decorator or a venue
+      # actually photographs, and none of them had anything in this list to be.
+      - a photo of an empty banquet hall set up with tables and chairs
+      - a photo of a flower arrangement or a florist's shop
+      - a photo of catering food laid out on a buffet table
+      - a photo of stage lighting and event equipment
+      - a photo of crockery, cutlery or glassware
+      - a photo of a decorated event tent or marquee
       # A hand holding something, which is the pose the weapon prompts describe. Without these
       # an outstretched arm holding a black wallet scores 0.985 weapon: the object is right, the
       # pose is what CLIP matches on, and only a safe label in the same pose competes with it.
@@ -323,6 +391,21 @@ labels:
       - a pencil drawing or sketch of a human figure
       - a photo of a tattoo on skin
       - a photo of a prosthetic limb or medical brace
+      # Raised and outstretched arms. `manhandling` was refusing 7 of the 105 body-part
+      # pictures and the list of what it caught says why: a conference speaker with a hand up,
+      # a singer holding a microphone, silhouettes on a beach, an ink drawing of two figures,
+      # a karate class, a first-aid drill, and A DIAGRAM OF THE BONES OF AN ARM. Every
+      # `manhandling` prompt describes where someone's arms are - raising a fist, grabbing an
+      # arm, fighting with fists - so anything with an arm up is a candidate.
+      #
+      # That is the "name the scene, not the pose" rule biting the one label whose comment
+      # already warns about it. These five name the scenes, and take body_parts from 19 to 14
+      # and incidental children from 44 to 42, for one image each on `romance` and `unrest`.
+      - a photo of a martial arts class practising
+      - a photo of a singer performing with a microphone
+      - a diagram of the bones of the arm or leg
+      - a photo of first aid training on a volunteer
+      - a photo of a speaker at a podium with a raised hand
       # Contact between people that is business, not romance. A handshake, a greeting and a
       # team photo are two people close together; without these, `romantic` has nothing to
       # compete with and every photograph of colleagues reads as a couple.
@@ -353,7 +436,9 @@ labels:
       - a photo of a busy market street
       - a photo of a queue of customers outside a shop
       - a photo of a crowded railway station platform
-      - a photo of a wedding procession
+      # "a photo of a wedding procession" stood here as an `unrest` counterweight and was
+      # removed when weddings became a refusal - it said the opposite of the `wedding` label.
+      # crowds_safe is unchanged at 8 of 206 without it.
       - a photo of a religious procession or temple festival
       - a photo of a sports crowd cheering in a stadium
       - a photo of a parade with a marching band

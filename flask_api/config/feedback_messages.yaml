@@ -58,6 +58,7 @@ categories:
   revealing_clothing: revealing clothing
   romantic_content: romantic content
   physique_display: personal physique photos
+  wedding_content: wedding photos
   minors: pictures of children
 
 # Instruction shown next to each highlighted match, by rule id.
@@ -68,6 +69,10 @@ rules:
   profanity.wordlist: Remove the profanity. Keep posts professional.
   # Visual refusals come through as `visual.<label>`. This one needs saying, because there IS
   # an allowed version of what the author just tried and they will otherwise re-upload it.
+  visual.wedding: >-
+    Wedding photos are personal rather than business, so they can't be published here. If
+    you're in the events trade, show what you sell - the venue, the catering, the decor, the
+    equipment.
   visual.physique: >-
     BONC is a trade platform, so personal workout and physique photos don't belong in a
     posting. If you're promoting a gym, equipment or supplements, show the business - the
