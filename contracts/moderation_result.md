@@ -399,7 +399,41 @@ and 10 of 105 body parts while gaining nothing on weapons or gore, because the d
 between a protest crowd and a trade-fair crowd is posture and expression rather than the scene.
 More images of both, then re-fit, is the route to improving it.
 
-`physique` (*category* `physique_display`) is the newest label, and it draws two lines at once:
+`wedding` (*category* `wedding_content`) refuses wedding photography outright, on the same
+reasoning as `romantic`: a networking platform is not where a member posts their wedding album.
+
+It is the easiest label in this file by a distance. A mandap, a garland exchange, a sacred fire
+and a red lehenga are a visual vocabulary with no business equivalent, so nine prompts separate
+it almost perfectly — **52 of 52** on the supplied set, whose score distribution starts at
+**p25 0.996** while the whole of `crowds_safe` tops out at 0.403. Any bar from 0.45 to 0.60
+gives identical numbers on every set here, so 0.60 is placed by that gap rather than by a sweep.
+
+**The risk was never the weddings — it was the event trades.** A caterer, a decorator, a
+florist, a banquet hall and a lighting hire firm are ordinary BONC members who sell *into*
+weddings, and nothing in the safe list described any of them. Six prompts now do (banquet hall,
+buffet, flower arrangement, stage lighting, crockery, marquee), and they are why the label costs
+nothing measurable: `BONC_Positive` stays **0/63**, `crowds_safe` **8/206**, `allow` **5/200**,
+`body_parts` **19/105**. `romance` went *up*, 57% to 62%.
+
+Two things had to be unpicked to make the rule coherent:
+
+- *"a photo of a wedding procession"* was in the **safe** list, added as an `unrest`
+  counterweight. It said the opposite of the new rule and was removed; `crowds_safe` is
+  unchanged without it, because the trade fairs, queues, temple festivals and parades beside it
+  carry that job on their own.
+- **14 of the 220 `crowds_safe` images were wedding processions**, collected as `allow`. Under
+  the rule they are positives, so leaving them there would have scored the policy as wrong
+  every time it was right. They moved to `images/weddings_commons` with their licence, source
+  URL, attribution and SHA256 intact.
+
+That split set catches only **2 of 14**, and the reason is worth stating rather than fixing:
+looking at them, most are not legibly weddings at all — two are historical miniature paintings
+of processions, one is a decorated car on a road, several are night street scenes. The one
+unambiguous wedding photograph in it (a bride's portrait) scores 0.855. It is the same pattern
+as the collected `violence` set: Commons is diverse without being representative, and chasing
+that 14% would mean learning to refuse street crowds and museum artwork.
+
+`physique` (*category* `physique_display`) draws two lines at once:
 
 1. **A member showing off their own body is not a business posting**; a gym, an equipment
    supplier or a supplement seller promoting itself is.

@@ -149,6 +149,41 @@ labels:
       - a photo of a couple on a romantic date
       - an intimate photo of a couple lying together
 
+  wedding:
+    unsafe: true
+    category: wedding_content
+    reject_min: 0.60   # the widest separation in this file by a distance: the supplied set's
+                       # p25 is 0.996 and the whole of crowds_safe tops out at 0.403. Anything
+                       # from 0.45 to 0.60 gives identical numbers on every set, so the bar is
+                       # placed by the gap rather than by a sweep, above the ordinary crowds
+                       # and far below the weddings.
+    # Weddings are personal life, not trade. Same call `romantic` makes, and for the same
+    # reason - a networking platform is not where a member posts their wedding album.
+    #
+    # Unlike almost every other label here, this one is EASY: a mandap, a garland exchange, a
+    # sacred fire and a red lehenga are a visual vocabulary with no business equivalent, so the
+    # prompts separate it almost perfectly (52/52 supplied) without taking anything else.
+    #
+    # THE REAL RISK IS THE EVENT TRADES, not the weddings. A caterer, a decorator, a florist, a
+    # banquet hall and a lighting hire firm are ordinary BONC members who sell INTO weddings,
+    # and nothing in the safe list described any of them. Six prompts there now do, and they
+    # are the reason this label costs nothing: BONC_Positive stays 0/63 and crowds_safe 8/206.
+    #
+    # "a photo of a wedding procession" was REMOVED from the safe list, where it had been added
+    # as an `unrest` counterweight - it said the opposite of this rule. Removing it cost
+    # nothing (crowds_safe unchanged at 8), because the trade fairs, queues, temple festivals
+    # and parades beside it carry that job on their own.
+    prompts:
+      - a photo of a bride and groom at their wedding
+      - a wedding ceremony with a bride in a red lehenga
+      - a photo of an indian wedding mandap decorated with flowers
+      - a photo of a hindu wedding ceremony around a sacred fire
+      - a photo of a couple exchanging garlands at a wedding
+      - a wedding photograph of a bride and groom posing together
+      - a photo of a bride in a white wedding dress
+      - a photo of a wedding reception stage decorated with flowers
+      - a photo of an indian wedding baraat procession in the street
+
   physique:
     unsafe: true
     category: physique_display
@@ -255,6 +290,15 @@ labels:
       - a photo of a hotel room or restaurant interior
       - a photo of solar panels or electrical equipment
       - a photo of a person giving a presentation to a room
+      # The event trades, which the `wedding` label runs straight at. A banquet hall, a buffet,
+      # a flower arrangement and a lighting rig are what a caterer, a decorator or a venue
+      # actually photographs, and none of them had anything in this list to be.
+      - a photo of an empty banquet hall set up with tables and chairs
+      - a photo of a flower arrangement or a florist's shop
+      - a photo of catering food laid out on a buffet table
+      - a photo of stage lighting and event equipment
+      - a photo of crockery, cutlery or glassware
+      - a photo of a decorated event tent or marquee
       # A hand holding something, which is the pose the weapon prompts describe. Without these
       # an outstretched arm holding a black wallet scores 0.985 weapon: the object is right, the
       # pose is what CLIP matches on, and only a safe label in the same pose competes with it.
@@ -353,7 +397,9 @@ labels:
       - a photo of a busy market street
       - a photo of a queue of customers outside a shop
       - a photo of a crowded railway station platform
-      - a photo of a wedding procession
+      # "a photo of a wedding procession" stood here as an `unrest` counterweight and was
+      # removed when weddings became a refusal - it said the opposite of the `wedding` label.
+      # crowds_safe is unchanged at 8 of 206 without it.
       - a photo of a religious procession or temple festival
       - a photo of a sports crowd cheering in a stadium
       - a photo of a parade with a marching band

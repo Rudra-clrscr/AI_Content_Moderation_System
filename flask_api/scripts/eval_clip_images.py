@@ -96,6 +96,14 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         # `minor` draws, and the hardest pair of sets in here.
         ("gym_neg (physique display)", images / "gym_neg", True),
         ("gym_positive (gym business)", images / "gym_positive", False),
+        # Weddings. Personal life, not trade - the same call the `romantic` label makes, and
+        # the folder is supplied Indian wedding photography: mandaps, garlands, the fire
+        # ceremony, couples in traditional dress.
+        ("weddings", images / "weddings" / "wedding image", True),
+        # 14 wedding processions that were collected INTO crowds_safe as `unrest`
+        # counterweights and labelled allow. The wedding rule makes them positives; they were
+        # split out rather than left to score the policy as wrong every time it is right.
+        ("weddings_commons", images / "weddings_commons", True),
     ]
     return [(n, d, e) for n, d, e in candidates if d.is_dir()]
 
