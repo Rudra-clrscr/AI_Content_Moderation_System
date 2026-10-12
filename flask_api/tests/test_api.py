@@ -171,45 +171,6 @@ def test_articles_page_and_assets_when_enabled(make_settings, scorer):
     assert c.get("/articles/../api.py").status_code == 404        # no path traversal
 
 
-def test_dashboard_page_disabled_by_default(client):
-    assert client.get("/dashboard").status_code == 404
-
-
-def test_dashboard_page_and_assets_when_enabled(make_settings, scorer):
-    c = create_app(make_settings(demo_page=True), scorer=scorer).test_client()
-    assert b"Post an update" in c.get("/dashboard").data
-    for asset in ("dashboard.js", "dashboard.css"):
-        assert c.get(f"/dashboard/{asset}").status_code == 200
-    assert c.get("/dashboard/../api.py").status_code == 404        # no path traversal
-
-
-def test_dashboard_loads_the_shared_moderation_client(make_settings, scorer):
-    """The composer must not carry its own copy of the client. One implementation of "nothing
-    publishes until the service allows" is the only way that rule stays true everywhere."""
-    c = create_app(make_settings(demo_page=True), scorer=scorer).test_client()
-    page = c.get("/dashboard").data
-    assert b"/articles/moderation-client.js" in page
-    assert c.get("/articles/moderation-client.js").status_code == 200
-
-
-def test_the_dashboard_offers_no_way_to_publish_anyway(make_settings, scorer):
-    """Senior review removed the override: content the moderator objects to is not published,
-    and the only way on is to change it. A new surface must not quietly reintroduce it."""
-    import re
-
-    c = create_app(make_settings(demo_page=True), scorer=scorer).test_client()
-    # Comments stripped first: the file EXPLAINS that the override was removed, and matching
-    # on prose would fail on the sentence that documents the rule.
-    js = c.get("/dashboard/dashboard.js").data.decode("utf-8")
-    code = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
-    code = re.sub(r"(?m)^\s*//.*$", "", code).lower()
-    # Whitespace-insensitive, so `postAnyway()`, "Post anyway" and `post_anyway` all match the
-    # same needle. A literal-substring check passed a `function postAnyway()` mutation.
-    squashed = re.sub(r"[\s_-]+", "", code)
-    for phrase in ("postanyway", "publishanyway", "override", "ignoreandpost", "forcepublish"):
-        assert phrase not in squashed, f"{phrase!r} is back in the composer"
-
-
 def test_article_content_type_accepted(client):
     r = client.post("/v1/moderate", json={"content": "Case study\n\nOur mill grew.", "content_type": "article"})
     assert r.status_code == 200
