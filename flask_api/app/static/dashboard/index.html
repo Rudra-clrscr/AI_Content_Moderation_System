@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard · BONC Business Dashboard</title>
+<!-- Tokens, buttons, cards, the modal and the moderation popup all come from the Articles
+     stylesheet, so the two pages are one product. dashboard.css adds only the shell. -->
+<link rel="stylesheet" href="/articles/articles.css">
+<link rel="stylesheet" href="/dashboard/dashboard.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="logo" href="/dashboard" aria-label="BONC Network">
+      <span class="logo-word"><span class="b">B</span><span class="o">O</span><span class="n">N</span><span class="c">C</span></span>
+      <span class="logo-sub">Network</span>
+    </a>
+    <div class="topbar-actions">
+      <button class="btn btn-outline" type="button" id="list-product-btn">List Your Product</button>
+      <div class="who">
+        <span class="avatar" aria-hidden="true">BT</span>
+        <span class="who-name"><b>Bhavani Textiles</b><span>Surat, Gujarat</span></span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<nav class="sitenav" aria-label="Primary">
+  <div class="sitenav-inner">
+    <a href="/dashboard" aria-current="page">Dashboard</a>
+    <a href="#products">My Products</a>
+    <a href="#business">My Business</a>
+    <a href="/articles">Articles</a>
+    <a href="/articles#video">Videos</a>
+    <a href="/articles#request">Requests</a>
+    <a href="/articles#proposal">Proposals</a>
+    <a href="#groups">My Groups</a>
+    <a href="#community">Community</a>
+  </div>
+</nav>
+
+<main class="shell">
+
+  <div class="search">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" aria-hidden="true">
+      <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+    </svg>
+    <input type="search" placeholder="Search products, services or businesses" aria-label="Search">
+    <button class="ai-pill" type="button">AI</button>
+  </div>
+
+  <div class="page-head">
+    <div>
+      <h1>Dashboard</h1>
+      <p class="subtitle">Everything you publish is checked before it goes out.</p>
+    </div>
+  </div>
+
+  <!-- Counts come from what this browser has actually posted, so they move when you use the
+       page. There is no platform behind it; see dashboard.js. -->
+  <section class="tiles" id="tiles" aria-label="Overview"></section>
+
+  <div class="cols">
+    <div class="stack">
+
+      <!-- ---------------- composer: the wired piece ---------------- -->
+      <section class="card composer" aria-labelledby="composer-h">
+        <div class="card-head">
+          <h2 id="composer-h">Post an update</h2>
+          <span class="count" id="count">0 / 5000</span>
+        </div>
+        <label class="sr-only" for="post-text">What do you want to post?</label>
+        <textarea id="post-text" maxlength="5000"
+                  placeholder="Share an update, an offer or something you are looking for."></textarea>
+
+        <ul class="files" id="files"></ul>
+
+        <div class="composer-row">
+          <div class="composer-tools">
+            <label class="chip" for="post-file">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M12 3v12M7 8l5-5 5 5"/>
+              </svg>
+              Add image or PDF
+            </label>
+            <input type="file" id="post-file" multiple hidden
+                   accept="image/*,application/pdf,.pdf,.avif,.webp">
+            <label class="sr-only" for="post-type">Posting as</label>
+            <select class="chip" id="post-type" aria-label="Posting as">
+              <option value="post">Post</option>
+              <option value="product_listing">Product listing</option>
+              <option value="advertisement">Advertisement</option>
+              <option value="business_profile">Business profile</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="publish-btn" type="button">Publish</button>
+        </div>
+
+        <div id="strip" hidden></div>
+      </section>
+
+      <!-- ---------------- what this browser has posted ---------------- -->
+      <section class="card" aria-labelledby="feed-h">
+        <div class="card-head">
+          <h2 id="feed-h">Your recent activity</h2>
+          <button class="btn-link" type="button" id="clear-btn">Clear</button>
+        </div>
+        <ul class="feed" id="feed"></ul>
+      </section>
+
+      <section class="card" id="products" aria-labelledby="products-h">
+        <div class="card-head">
+          <h2 id="products-h">My products</h2>
+          <button class="btn btn-outline" type="button" id="add-product-btn">Add product</button>
+        </div>
+        <ul class="rows" id="products-list"></ul>
+      </section>
+
+    </div>
+
+    <div class="stack">
+      <!-- The moderation service, visible. A dashboard that hides whether the checker is up is
+           how an outage becomes "everything I post is fine". -->
+      <section class="card" aria-labelledby="svc-h">
+        <div class="card-head"><h2 id="svc-h">Moderation service</h2></div>
+        <ul class="kv" id="svc">
+          <li><span class="k">Status</span><span class="v" id="svc-status"><span class="dot"></span>checking…</span></li>
+        </ul>
+      </section>
+
+      <section class="card" aria-labelledby="last-h">
+        <div class="card-head"><h2 id="last-h">Last decision</h2></div>
+        <ul class="kv" id="last"><li><span class="k">Nothing yet</span><span class="v"></span></li></ul>
+      </section>
+
+      <section class="card" id="business" aria-labelledby="biz-h">
+        <div class="card-head"><h2 id="biz-h">My business</h2></div>
+        <ul class="kv">
+          <li><span class="k">Name</span><span class="v">Bhavani Textiles</span></li>
+          <li><span class="k">Category</span><span class="v">Home furnishing</span></li>
+          <li><span class="k">GSTIN</span><span class="v">24AAAPL1234C1ZV</span></li>
+          <li><span class="k">Members since</span><span class="v">March 2024</span></li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script src="/articles/moderation-client.js"></script>
+<script src="/dashboard/dashboard.js"></script>
+</body>
+</html>

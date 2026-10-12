@@ -330,6 +330,23 @@ def articles_page(name: str = "index.html"):
     return send_from_directory(_ARTICLES_DIR, name)
 
 
+_DASHBOARD_DIR = Path(__file__).parent / "static" / "dashboard"
+
+
+@bp.get("/dashboard")
+@bp.get("/dashboard/<path:name>")
+def dashboard_page(name: str = "index.html"):
+    """The Business Dashboard shell the surface tabs live inside (front-end reference).
+
+    Its composer is the part that matters: text goes to /v1/moderate and every attachment to
+    /v1/moderate/media, and nothing is published unless all of them allow. Enabled with
+    DEMO_PAGE=1, like /demo and /articles.
+    """
+    if not _svc().settings.demo_page:
+        return _error(404, "not_found", "demo pages disabled (set DEMO_PAGE=1)")
+    return send_from_directory(_DASHBOARD_DIR, name)
+
+
 @bp.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
