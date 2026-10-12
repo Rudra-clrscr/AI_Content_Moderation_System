@@ -27,6 +27,7 @@ a threshold is not worth trusting until someone has looked at what sits either s
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import sys
 import time
@@ -41,6 +42,11 @@ from app.clip import VisualCheck, VisualConfig  # noqa: E402
 # silently skipped 73 supplied images - the run came back with byte-identical metrics and no
 # warning, which is the worst way for a dataset to shrink.
 EXTS = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp", ".gif", ".tif", ".tiff"}
+# ...and a suffix is still only what a file is CALLED. A supplied folder arrived with a JPEG
+# saved under an Instagram caption for a filename and no extension at all, which EXTS would
+# have dropped as quietly as .avif was dropped. Anything that is not obviously metadata is
+# handed to PIL, which knows from the bytes; what it refuses is counted and reported.
+NOT_IMAGES = {".csv", ".txt", ".json", ".md", ".yaml", ".yml", ".zip", ".db", ".ini"}
 
 
 def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
@@ -99,7 +105,7 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         # Weddings. Personal life, not trade - the same call the `romantic` label makes, and
         # the folder is supplied Indian wedding photography: mandaps, garlands, the fire
         # ceremony, couples in traditional dress.
-        ("weddings", images / "weddings" / "wedding image", True),
+        ("weddings", images / "weddings", True),
         # 14 wedding processions that were collected INTO crowds_safe as `unrest`
         # counterweights and labelled allow. The wedding rule makes them positives; they were
         # split out rather than left to score the policy as wrong every time it is right.
@@ -108,18 +114,40 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
     return [(n, d, e) for n, d, e in candidates if d.is_dir()]
 
 
+def image_files(directory: Path) -> list[Path]:
+    """Every distinct image under `directory`, including subfolders.
+
+    Recursive because supplied sets arrive foldered - `weddings/wedding image/dedwe/` and
+    `.../hhggukgkg/` held 111 of 163 pictures, and a flat `iterdir()` would have measured the
+    52 in the top folder and said nothing about the rest.
+
+    De-duplicated by content hash because recursion immediately found the other half of that
+    problem: `minors/kid_neg/` is 73 files that are byte-identical to pictures already in
+    `minors/`. Counting them twice would not shrink the set, it would silently weight it - a
+    recall figure where a tenth of the images vote twice is not the figure anyone thinks they
+    are reading. First path wins, so the shallower copy is the one that is scored.
+    """
+    seen: dict[str, Path] = {}
+    for path in sorted(directory.rglob("*")):
+        if not path.is_file() or path.suffix.lower() in NOT_IMAGES:
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        seen.setdefault(digest, path)
+    return list(seen.values())
+
+
 def score_dir(check: VisualCheck, directory: Path,
               limit: int = 0) -> list[tuple[Path, float, str, dict, bool]]:
     from PIL import Image
 
-    out = []
-    paths = sorted(p for p in directory.iterdir() if p.suffix.lower() in EXTS)
+    out, unreadable = [], []
+    paths = image_files(directory)
     for path in (paths[:limit] if limit else paths):
         try:
             with Image.open(path) as im:
                 result = check.classify(im)
         except Exception as e:                      # a corrupt sample must not stop the sweep
-            print(f"  skipped {path.name}: {type(e).__name__}", file=sys.stderr)
+            unreadable.append(f"{path.name}: {type(e).__name__}")
             continue
         if not result.checked:
             raise SystemExit("the visual check is not loaded - is visual.enabled on, and have "
@@ -129,6 +157,12 @@ def score_dir(check: VisualCheck, directory: Path,
         # `decides_reject` is the only thing that knows all of them.
         out.append((path, result.unsafe_score, result.label, result.scores,
                     check.decides_reject(result)))
+    # Loudly, and with the count: a set that quietly shrinks is the bug this file has already
+    # been bitten by twice.
+    if unreadable:
+        print(f"  {directory.name}: {len(unreadable)} of {len(paths)} unreadable", file=sys.stderr)
+        for line in unreadable[:5]:
+            print(f"    {line}", file=sys.stderr)
     return out
 
 

@@ -152,17 +152,23 @@ labels:
   wedding:
     unsafe: true
     category: wedding_content
-    reject_min: 0.60   # the widest separation in this file by a distance: the supplied set's
-                       # p25 is 0.996 and the whole of crowds_safe tops out at 0.403. Anything
-                       # from 0.45 to 0.60 gives identical numbers on every set, so the bar is
-                       # placed by the gap rather than by a sweep, above the ordinary crowds
-                       # and far below the weddings.
+    reject_min: 0.50   # the widest separation in this file by a distance: the supplied set's
+                       # p25 is 0.909 and the whole of crowds_safe tops out at 0.403. There is
+                       # nothing at all between 0.41 and 0.90 except one nikah photograph at
+                       # 0.55, so the bar is placed in that void rather than by a sweep. 0.45
+                       # to 0.51 give IDENTICAL numbers on every other set; 0.50 is the round
+                       # number in the middle of the empty stretch.
     # Weddings are personal life, not trade. Same call `romantic` makes, and for the same
     # reason - a networking platform is not where a member posts their wedding album.
     #
     # Unlike almost every other label here, this one is EASY: a mandap, a garland exchange, a
     # sacred fire and a red lehenga are a visual vocabulary with no business equivalent, so the
-    # prompts separate it almost perfectly (52/52 supplied) without taking anything else.
+    # prompts separate it perfectly (155/155 supplied) without taking anything else.
+    #
+    # The one picture that ever sat near the line is a nikah under a glass marquee, and what
+    # held it down was `a photo of a decorated event tent or marquee` from the safe list below
+    # - the counterweight doing exactly its job on a picture that happens to be both. Lowering
+    # the bar into the void was the cheaper answer than arguing with it.
     #
     # THE REAL RISK IS THE EVENT TRADES, not the weddings. A caterer, a decorator, a florist, a
     # banquet hall and a lighting hire firm are ordinary BONC members who sell INTO weddings,
@@ -183,6 +189,15 @@ labels:
       - a photo of a bride in a white wedding dress
       - a photo of a wedding reception stage decorated with flowers
       - a photo of an indian wedding baraat procession in the street
+      # An Anand Karaj has none of the above: no mandap, no sacred fire, no garland exchange,
+      # no white dress. A supplied Sikh wedding scored 0.115 and the prompt beating it was
+      # `a photo of a religious procession or temple festival` from the safe list, which is
+      # fair - a gurdwara ceremony IS a religious gathering. These two name the scene instead
+      # of the venue. "a sikh wedding ceremony in a gurdwara" and "a photo of a punjabi
+      # wedding couple" were tried and dropped: both cost an ordinary crowd, because naming
+      # the building and the region catches the festivals held in them.
+      - a photo of a bride and groom sitting before the guru granth sahib
+      - a photo of a groom wearing a turban at his wedding
 
   physique:
     unsafe: true

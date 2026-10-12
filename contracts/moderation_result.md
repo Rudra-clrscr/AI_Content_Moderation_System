@@ -404,16 +404,34 @@ reasoning as `romantic`: a networking platform is not where a member posts their
 
 It is the easiest label in this file by a distance. A mandap, a garland exchange, a sacred fire
 and a red lehenga are a visual vocabulary with no business equivalent, so nine prompts separate
-it almost perfectly — **52 of 52** on the supplied set, whose score distribution starts at
-**p25 0.996** while the whole of `crowds_safe` tops out at 0.403. Any bar from 0.45 to 0.60
-gives identical numbers on every set here, so 0.60 is placed by that gap rather than by a sweep.
+it perfectly — **205 of 205** on the supplied set, whose score distribution starts at **p25
+0.909** while the whole of `crowds_safe` tops out at 0.403. Nothing sits between 0.41 and 0.90
+except a single nikah photograph at 0.55, so the bar is placed in that void: **0.50**, with
+0.45 through 0.51 giving identical numbers on every other set.
+
+That perfection took two rounds, and the second is the more interesting one. A **Sikh** wedding
+has no mandap, no sacred fire, no garland exchange and no white dress, so the first nine
+prompts described a Hindu or Western ceremony and nothing else. A supplied Anand Karaj scored
+**0.115**, and the prompt beating it was `"a photo of a religious procession or temple
+festival"` from the safe list — which is fair, because a gurdwara ceremony *is* a religious
+gathering. Two prompts naming the scene (the couple before the Guru Granth Sahib, a groom in a
+turban) fixed it at no cost at all. Naming the *venue* instead — "a sikh wedding ceremony in a
+gurdwara", "a punjabi wedding couple" — was tried and dropped: both refused an ordinary crowd,
+because the festivals held in those buildings look like the weddings held in them.
 
 **The risk was never the weddings — it was the event trades.** A caterer, a decorator, a
 florist, a banquet hall and a lighting hire firm are ordinary BONC members who sell *into*
 weddings, and nothing in the safe list described any of them. Six prompts now do (banquet hall,
 buffet, flower arrangement, stage lighting, crockery, marquee), and they are why the label costs
-nothing measurable: `BONC_Positive` stays **0/63**, `crowds_safe` **8/206**, `allow` **5/200**,
+nothing measurable: `BONC_Positive` stays **0/62**, `crowds_safe` **8/206**, `allow` **5/200**,
 `body_parts` **19/105**. `romance` went *up*, 57% to 62%.
+
+*(`BONC_Positive` is 62 distinct pictures, not the 63 files it holds — two are byte-identical.
+It was quoted as 0/63 for most of this branch's life. `eval_clip_images.py` now de-duplicates
+every set by content hash, which is also what stopped `minors` from reporting 282 images once
+the walk went recursive and found `minors/kid_neg/`: 73 of its 74 files are byte-identical to
+pictures already in `minors/`, and counting them twice would have let a tenth of that set vote
+twice in its own recall figure.)*
 
 Two things had to be unpicked to make the rule coherent:
 
