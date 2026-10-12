@@ -3,6 +3,28 @@
 `images/` is gitignored. This file is not — it is the record of which sets a number may
 honestly be quoted from, because two of them cannot support one and said nothing about it.
 
+## Explicit images were found in the `minors` set
+
+**18 files were quarantined out of `images/minors/` to `images/_quarantine_explicit/`.** They
+are explicit close-ups, in a folder of children's photographs. They were used for scoring only:
+the probe is fitted on `safe`/`weapon`/`gore`, `prompts.npz` holds text embeddings and no image
+data, so nothing shipped ever contained them.
+
+**Every one with a provenance row traces to a single search term: `"child face close up"`.** On
+Commons, "close up" plus a body returns anatomical and pornographic close-ups, and the
+collector's filters read titles and categories — they cannot see pixels. The term is removed.
+
+Fifteen were found by the reference classifier in `models/nsfw_ref`; three were found by eye
+during the manual audit, **including one the classifier scores 0.000** — it is certain that
+file is ordinary and it is not. That number is why `collect_commons_images.py` now says in as
+many words that its pixel gate is a net and not a guarantee.
+
+The gate is measured, not guessed: on the audited set the highest score among pictures that
+belong there is 0.351 and the lowest among the quarantined ones is 0.760, so the ceiling sits
+at 0.40. Tested, it rejects 17 of the 18 and none of 60 legitimate portraits.
+
+Three of the eighteen came from `minors/kid_neg/`, which was supplied rather than collected.
+
 ## The audit, and why it happened
 
 `violence` (147) and `threats` (86) were collected from Wikimedia Commons by search term and
@@ -38,6 +60,26 @@ engraving.
 - **`unrest_real`** (84 supplied Indian press photographs of police-protester confrontation) is
   the trustworthy measure for this category, at **99%**. When it and the collected sets
   disagree, it wins.
+
+## The other four sets, audited the same way
+
+Every remaining collected set was then reviewed picture by picture. None is as bad as the two
+above, and none is clean:
+
+| set | n | genuine | what the rest is |
+|---|---|---|---|
+| `revealing` | 135 | **~79%** | archival garment photographs, Victorian fashion plates, clothed headshots |
+| `minors` | 193 | **~79%** | classical **busts and sculptures** of youths, adult portraits, a photographer's paper label |
+| `romance` | 121 | **~69%** | sunset beaches and landscapes — the term pulled *romantic scenery* — monuments, two cats, a nebula, a telegram |
+| `unrest` | 218 | **~67%** | memorials, commemorative plaques, buildings, press conferences, engravings |
+
+All four stay registered as recall sets. The contamination is ordinary noise rather than a
+different subject, which is what separates them from `violence` and `threats`: a set that is
+70% right measures something, a set that is 15% right measures nothing. Expect the true recall
+on each to be somewhat higher than the headline, since a chunk of every denominator is not the
+thing being counted.
+
+`minors` was reviewed over 192 of its 194 files.
 
 ## The pattern, which is not limited to these two
 
