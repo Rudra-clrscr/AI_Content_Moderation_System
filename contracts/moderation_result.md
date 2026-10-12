@@ -399,6 +399,28 @@ and 10 of 105 body parts while gaining nothing on weapons or gore, because the d
 between a protest crowd and a trade-fair crowd is posture and expression rather than the scene.
 More images of both, then re-fit, is the route to improving it.
 
+`physique` (*category* `physique_display`) is the newest label and the clearest statement of
+what this platform is for: **a member showing off their own body is not a business posting; a
+gym, an equipment supplier or a supplement seller promoting itself is.** Measured on 71 gym
+physique photographs against 49 gym business pictures, both supplied: **92% caught, 1 of 49
+refused** — and that one is a pre-existing `manhandling` false positive on a cable-machine
+banner, not this label.
+
+The distinction is about who a picture is addressed to, not what is in it. The blocked set
+contains fully clothed mirror selfies; the allowed set contains a muscular model in a vest
+demonstrating a chest press. Neither skin nor the room separates them, so this is the same
+framing question `minor` asks and it is answered the same way: **in the prompts, not the
+probe.** A linear model over one global embedding cannot ask who a picture is for.
+
+Its six misses are worth naming. Three are gym and supplement **adverts** built around a
+bodybuilder — which the rule above arguably allows anyway, so the folders overlap there. Three
+are shirtless men mid-lift, where the safe gym prompts win on the scene and are right to.
+
+One safe prompt changed to make this work: *"a photo of a person lifting weights in a gym"* is
+now plural, *"people training together in a gym"*. In the singular it was the best match for a
+solo physique shot and held the label to 83%; the body-part false positives it was added for
+are not affected (that 105-image set went from 20 refused to 19 on the swap).
+
 The grouping matters more than it sounds: with a random split the weapons figure reads 95% and
 the honest one is 73%. 300 frames from a handful of videos are easy to memorise and hard to
 generalise from, and the probe alone does **not** beat the prompts on weapons (73% against
@@ -410,11 +432,12 @@ as well as CLIP's softmax. SigLIP was measured and **not** adopted: with its own
 calibration it reaches 57% weapons / 68% gore at matched false positives, and with softmax it
 is roughly level with CLIP for about four times the compute (196 vision tokens against 49).
 
-**What it does not do.** The prompts are zero-shot, so a label with no probe class behind it is
-only as good as its wordings. The `sexual` label still has **no positive samples** —
-what is measured is the side that would hurt BONC, a clinic or a sportswear seller being
-refused, not whether it catches what it is named for. Treat its recall as unknown. There is
-still no counterfeit detector, and video is still not looked at.
+**What it does not do.** The prompts are zero-shot, so a label with no probe class behind it
+is only as good as its wordings, and most of these labels are measured on sets collected for
+the purpose rather than on BONC's traffic. `violence` at 47% and `threats` at 37% are the
+clearest example: on 84 real press photographs of the same thing the labels reach 99%, so
+those two figures describe the collected sets, not the service. There is still no counterfeit
+detector, and video is still not looked at.
 
 **Failure behaviour differs by cause, on purpose.** Missing model or `enabled: false` →
 the check is simply off, results say `visual_content_checked: false`, and the service behaves

@@ -82,11 +82,21 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         # model handles the real distribution far better than my collected sets suggested, and
         # this is the one to trust when the two disagree.
         ("unrest_real", images / "unrest_real", True),
+        # Gym pictures, supplied, split by the member's INTENT rather than by what is in frame.
+        # gym_positive is the gym as a business - adverts, franchise promos, equipment product
+        # shots, facility interiors. gym_neg is the same gym with the body as the subject -
+        # mirror selfies, flexing, a bodybuilder posing. Several gym_neg images are fully
+        # clothed and several gym_positive ones show a muscular model in a vest, so skin does
+        # not separate them and neither does the room. This is the same framing distinction
+        # `minor` draws, and the hardest pair of sets in here.
+        ("gym_neg (physique display)", images / "gym_neg", True),
+        ("gym_positive (gym business)", images / "gym_positive", False),
     ]
     return [(n, d, e) for n, d, e in candidates if d.is_dir()]
 
 
-def score_dir(check: VisualCheck, directory: Path, limit: int = 0) -> list[tuple[Path, float, str, dict]]:
+def score_dir(check: VisualCheck, directory: Path,
+              limit: int = 0) -> list[tuple[Path, float, str, dict, bool]]:
     from PIL import Image
 
     out = []
@@ -101,7 +111,11 @@ def score_dir(check: VisualCheck, directory: Path, limit: int = 0) -> list[tuple
         if not result.checked:
             raise SystemExit("the visual check is not loaded - is visual.enabled on, and have "
                              "fetch_clip.py and build_clip_prompts.py been run?")
-        out.append((path, result.unsafe_score, result.label, result.scores))
+        # The shipped verdict travels with the score. The sweep below moves one global bar,
+        # which is not how the service decides any more - each label has its own, and
+        # `decides_reject` is the only thing that knows all of them.
+        out.append((path, result.unsafe_score, result.label, result.scores,
+                    check.decides_reject(result)))
     return out
 
 
@@ -148,10 +162,10 @@ def main() -> int:
     for name, (scored, expected) in results.items():
         if not scored:
             continue
-        vals = sorted(s for _, s, _, _ in scored)
+        vals = sorted(s for _, s, _, _, _ in scored)
         n = len(vals)
         counts: dict[str, int] = {}
-        for _, _, label, _ in scored:
+        for _, _, label, _, _ in scored:
             counts[label] = counts.get(label, 0) + 1
         top = ", ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])[:3])
         want = {True: "unsafe", False: "safe", None: "mixed"}[expected]
@@ -180,7 +194,7 @@ def main() -> int:
             if not scored:
                 row.append(f"{'-':>16}")
                 continue
-            hits = sum(1 for _, s, _, _ in scored if s >= thr)
+            hits = sum(1 for _, s, _, _, _ in scored if s >= thr)
             rates[name] = hits / len(scored)
             row.append(f"{hits:>6}/{len(scored):<4} {rates[name]:>4.0%}")
         fp = max((rates.get(n, 0.0) for n in clean), default=0.0)
@@ -192,6 +206,23 @@ def main() -> int:
     if best:
         print(f"\nhighest recall with at most 1% false positives on real uploads: "
               f"reject_min = {best[0]:.3f}  (recall {best[1]:.0%}, FP {best[2]:.1%})")
+
+    # ---- what the service would actually do ----
+    # The sweep above moves one bar across every label. Production stopped doing that when the
+    # per-label `reject_min` landed, so a row of it describes a configuration nothing runs.
+    # This is the shipped rule: each label at its own bar, the combined unsafe score underneath
+    # it, and the probe alongside. It is where the figures in config/visual_policy.yaml and
+    # contracts/moderation_result.md come from.
+    print("\nSHIPPED DECISION (per-label bars + probe)")
+    print(f"{'set':24} {'n':>5}  {'expect':>7}  {'refused':>12}")
+    for name, (scored, expected) in results.items():
+        if not scored:
+            continue
+        rej = sum(1 for *_, r in scored if r)
+        want = {True: "unsafe", False: "safe", None: "mixed"}[expected]
+        flag = "" if expected is None else ("  <- recall" if expected else "  <- refusals")
+        print(f"{name:24} {len(scored):5}  {want:>7}  {rej:5}/{len(scored):<4} "
+              f"{rej / len(scored):>4.0%}{flag}")
 
     # ---- the ones to look at ----
     if args.dump:
@@ -205,7 +236,7 @@ def main() -> int:
             worst = sorted(scored, key=lambda r: r[1], reverse=(expected is False))[: args.dump]
             folder = dump_dir / name.split()[0]
             folder.mkdir(parents=True, exist_ok=True)
-            for path, score, label, _ in worst:
+            for path, score, label, _, _ in worst:
                 shutil.copy(path, folder / f"{score:.3f}_{label}_{path.name}")
         print(f"\nworst cases written to {dump_dir}")
     return 0

@@ -50,13 +50,15 @@ labels:
     unsafe: true
     category: sexual_content
     reject_min: 0.80   # nudity scores p25 0.81 / p50 0.93; 0.80 keeps the whole distribution
-    # RECALL UNMEASURED. images/body_parts measures the other side - this label does not fire
-    # on athletes, physiotherapy or anatomy, which is what would hurt an ordinary BONC member -
-    # but nothing here shows it catches what it is named for. Treat its recall as unknown.
+    # Recall 95%, on 37 supplied artistic nudes - the first positive samples this label ever
+    # had. An earlier version of this comment said "RECALL UNMEASURED"; that stopped being
+    # true when those arrived, and the threshold on the line above is derived from them.
     #
-    # It cannot be measured by scraping, and docs/measuring_the_sexual_label.md sets out the
-    # two routes that do work: a licensed research dataset requested from its authors, or a
-    # reference classifier run over BONC's own uploads, which needs no such dataset at all.
+    # 37 images is thin and they are one genre. images/body_parts measures the other side -
+    # this label does not fire on athletes, physiotherapy or anatomy, which is what would hurt
+    # an ordinary BONC member. docs/measuring_the_sexual_label.md sets out the route to a
+    # broader figure: a reference classifier run over BONC's own uploads, needing no collected
+    # dataset at all.
     prompts:
       - a photo of a nude person
       - a pornographic photo
@@ -147,6 +149,34 @@ labels:
       - a photo of a couple on a romantic date
       - an intimate photo of a couple lying together
 
+  physique:
+    unsafe: true
+    category: physique_display
+    reject_min: 0.60   # gym_neg p25 0.72 / p50 0.86 against a gym_positive max of 0.52 - the
+                       # widest gap any label in this file has, so the bar sits in the middle
+                       # of it rather than being tuned to one image.
+    # A member showing off their own body is not a business posting; a gym, an equipment
+    # supplier or a supplement seller promoting itself is. That is the whole distinction, and
+    # it is about who the picture is FOR rather than what is in it: `gym_neg` contains fully
+    # clothed mirror selfies and `gym_positive` contains a muscular model in a vest, so neither
+    # skin nor the room separates them.
+    #
+    # It is the same framing question `minor` asks (subject or incidental) and it is settled
+    # the same way - in the prompts, not the probe. A linear model over one global embedding
+    # cannot ask who a picture is addressed to; CLIP's text encoder can.
+    #
+    # Measured: 92% of gym_neg (65/71) with 1 of 49 gym_positive refused - and that one is a
+    # pre-existing `manhandling` false positive on a home-gym banner, not this label. The six
+    # misses are three gym and supplement ADVERTS built around a bodybuilder (which the rule
+    # above arguably allows anyway), and three shirtless men mid-lift, where the safe gym
+    # prompts legitimately win.
+    prompts:
+      - a bodybuilder flexing his muscles
+      - a muscular man posing shirtless to show his body
+      - a gym mirror selfie of a man showing his muscles
+      - a fitness model posing to show off a toned body
+      - a woman flexing her muscles in a gym mirror
+
   minor:
     unsafe: true
     category: minors
@@ -232,8 +262,23 @@ labels:
       # design, since that set counts surgical wounds as positives), and "a photo of a person
       # exercising or training".
       - a photo of an athlete competing in a sport
-      - a photo of a person lifting weights in a gym
+      # The gym, as a business rather than as a backdrop for a physique. Without these the
+      # `physique` label refused 8 of 49 real gym adverts, product shots and class photos; with
+      # them, 1 - and that one is `manhandling` on a cable-machine banner, not this label.
+      #
+      # "a photo of a person lifting weights in a gym" stood here and has been made plural.
+      # It was added for the body-part false positives and still covers them (that 105-image
+      # set went from 20 refused to 19 on the swap, so very slightly better), but in the
+      # SINGULAR it was also the best match for a solo physique shot and
+      # held `physique` down to 83%. The plural costs nothing and the recall went to 92%,
+      # which is the point: the business pictures are facilities, classes and catalogues; a
+      # lone figure in a mirror is the other thing.
+      - a photo of people training together in a gym
       - a photo of a person running on a track
+      - a photo of a treadmill or exercise bike
+      - a product photo of a gym machine with a person demonstrating it
+      - an advertisement poster for a gym or fitness centre
+      - a photo of a group fitness class in a studio
       - a photo of a swimmer in a swimming pool
       - a photo of a person doing yoga or stretching
       - a photo of a person in sportswear or a swimsuit

@@ -114,6 +114,63 @@ def test_unsafe_split_across_two_labels_still_counts():
     assert check_with().decides_reject(r) is True
 
 
+# ---- one bar per label -------------------------------------------------------------
+# The scores are not comparable between labels: a median `minor` sits at 0.97 and a median
+# `physique` at 0.86 against a global bar of 0.90, so `physique` would never fire on its own.
+# Its bar is 0.60, which is the furthest below the global one any label goes, and the path that
+# makes that work had no test.
+
+
+def check_with_bars(bars, reject_min=0.90):
+    """A check with the per-label bars a built bundle would have carried.
+
+    They normally arrive from prompts.npz, which needs the 352 MB vision model to load. The
+    decision under test is the arithmetic in `decides_reject`, not the loading, so the two maps
+    `_load` populates are set here directly.
+    """
+    check = VisualCheck(VisualConfig(enabled=True, reject_min=reject_min))
+    check._categories = {"physique": "physique_display", "weapon": "weapons"}
+    check._thresholds = dict(bars)
+    return check
+
+
+def test_a_label_below_the_global_bar_is_still_acted_on_at_its_own():
+    """0.75 physique is well under the shared 0.90 and well over its own 0.60. Without the
+    per-label rule this picture publishes, which is what `physique` scores looked like before
+    it had its own bar."""
+    r = VisualResult(checked=True, label="physique", category="physique_display", score=0.75,
+                     unsafe_score=0.75, scores={"physique": 0.75, "safe": 0.25})
+    assert check_with_bars({"physique": 0.60}).decides_reject(r) is True
+
+
+def test_a_label_under_its_own_bar_is_not_acted_on():
+    r = VisualResult(checked=True, label="physique", category="physique_display", score=0.52,
+                     unsafe_score=0.52, scores={"physique": 0.52, "safe": 0.48})
+    assert check_with_bars({"physique": 0.60}).decides_reject(r) is False
+
+
+def test_a_label_with_no_bar_of_its_own_falls_back_to_the_global_one():
+    r = VisualResult(checked=True, label="weapon", category="weapons", score=0.75,
+                     unsafe_score=0.75, scores={"weapon": 0.75, "safe": 0.25})
+    assert check_with_bars({"physique": 0.60}).decides_reject(r) is False
+
+
+def test_a_losing_label_over_its_own_bar_still_refuses():
+    """The top label is `safe` at 0.45 and nothing else wins, but 0.40 physique is over 0.60's
+    neighbour - checking only the winner would publish a picture the policy names."""
+    r = VisualResult(checked=True, label="safe", score=0.35, unsafe_score=0.65,
+                     scores={"safe": 0.35, "physique": 0.62, "weapon": 0.03})
+    assert check_with_bars({"physique": 0.60}).decides_reject(r) is True
+
+
+def test_a_bar_on_a_safe_label_never_refuses():
+    """`safe` is not in `_categories`, so no bar can make it a refusal. A stray `reject_min` on
+    a safe label is a policy mistake, not a licence to block every ordinary photograph."""
+    r = VisualResult(checked=True, label="safe", score=0.99, unsafe_score=0.01,
+                     scores={"safe": 0.99, "physique": 0.01})
+    assert check_with_bars({"safe": 0.10, "physique": 0.60}).decides_reject(r) is False
+
+
 def test_an_unchecked_result_is_never_a_reject():
     """Nothing was looked at, so there is nothing to reject on - the caller refuses it for
     being unchecked instead, which is a different message to the author."""
@@ -273,6 +330,43 @@ def test_there_are_safe_labels_to_be_judged_against():
     assert safe_prompts >= unsafe_prompts, (
         f"{safe_prompts} safe prompts against {unsafe_prompts} unsafe ones - the safe set should "
         "cover at least as much ground, or ordinary pictures start scoring unsafe")
+
+
+def test_every_visual_category_has_a_readable_name():
+    """feedback.py falls back to the raw category when it is not in the map, so a new label
+    reaches the author as "our community policies on physique_display". It fails nowhere."""
+    import yaml
+
+    from app.config import PROJECT_ROOT
+
+    raw = yaml.safe_load(
+        (PROJECT_ROOT / "config" / "feedback_messages.yaml").read_text(encoding="utf-8"))
+    named = raw.get("categories") or {}
+    for name, spec in shipped_policy().items():
+        if spec.get("unsafe"):
+            category = spec["category"]
+            assert category in named, (
+                f"visual label {name!r} emits category {category!r}, which has no readable name "
+                "in feedback_messages.yaml - the author would be shown the raw string")
+
+
+def test_every_per_label_bar_is_a_probability():
+    """A bar outside (0, 1] is either dead (above 1, never fires) or an accident that refuses
+    everything (<= 0). Neither fails loudly - the policy just behaves differently."""
+    for name, spec in shipped_policy().items():
+        bar = spec.get("reject_min")
+        if bar is None:
+            continue
+        assert isinstance(bar, (int, float)) and not isinstance(bar, bool),             f"{name!r} reject_min is {bar!r}, not a number"
+        assert 0.0 < float(bar) <= 1.0, f"{name!r} reject_min {bar} is not a probability"
+
+
+def test_only_unsafe_labels_carry_a_bar():
+    """build_clip_prompts.py only reads `reject_min` inside `if spec.get("unsafe")`, so one on a
+    safe label is silently ignored - exactly the shape of mistake that looks like it works."""
+    for name, spec in shipped_policy().items():
+        if spec.get("reject_min") is not None:
+            assert spec.get("unsafe"), f"safe label {name!r} sets a reject_min that is ignored"
 
 
 def test_no_prompt_is_repeated_within_or_across_labels():
