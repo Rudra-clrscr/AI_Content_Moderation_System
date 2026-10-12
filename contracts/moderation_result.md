@@ -399,27 +399,44 @@ and 10 of 105 body parts while gaining nothing on weapons or gore, because the d
 between a protest crowd and a trade-fair crowd is posture and expression rather than the scene.
 More images of both, then re-fit, is the route to improving it.
 
-`physique` (*category* `physique_display`) is the newest label and the clearest statement of
-what this platform is for: **a member showing off their own body is not a business posting; a
-gym, an equipment supplier or a supplement seller promoting itself is.** Measured on 71 gym
-physique photographs against 49 gym business pictures, both supplied: **92% caught, 1 of 49
-refused** — and that one is a pre-existing `manhandling` false positive on a cable-machine
-banner, not this label.
+`physique` (*category* `physique_display`) is the newest label, and it draws two lines at once:
 
-The distinction is about who a picture is addressed to, not what is in it. The blocked set
-contains fully clothed mirror selfies; the allowed set contains a muscular model in a vest
-demonstrating a chest press. Neither skin nor the room separates them, so this is the same
-framing question `minor` asks and it is answered the same way: **in the prompts, not the
-probe.** A linear model over one global embedding cannot ask who a picture is for.
+1. **A member showing off their own body is not a business posting**; a gym, an equipment
+   supplier or a supplement seller promoting itself is.
+2. **Promoting a business does not launder the picture.** A gym flyer, a fitness poster and a
+   supplement banner are all legitimate B2B postings, and they are still refused when they are
+   built around a bare chest. How much body the advert puts on the page does not stop mattering
+   because a company paid for the layout.
 
-Its six misses are worth naming. Three are gym and supplement **adverts** built around a
-bodybuilder — which the rule above arguably allows anyway, so the folders overlap there. Three
-are shirtless men mid-lift, where the safe gym prompts win on the scene and are right to.
+Measured on 71 gym physique photographs against 49 gym business pictures, both supplied:
+**96% caught (68/71), 5 of 49 refused.** Those five do not divide the way a false-positive
+count suggests, so they are worth reading individually:
+
+| | |
+|---|---|
+| 1 | pre-existing `manhandling` false positive on a cable-machine banner — not this label |
+| 3 | gym posters built around a **shirtless** man. Rule 2 says refuse them; they are in the allowed folder, and by the policy they are in the wrong one |
+| 1 | borderline — a sleeveless top rather than a bare chest, physique-forward pose |
+
+Rule 1 is a question about who a picture is addressed to, not what is in it: the blocked set
+contains fully clothed mirror selfies and the allowed set contains a muscular model in a vest
+demonstrating a chest press. Neither skin nor the room separates them. That is the same framing
+question `minor` asks and it is answered the same way — **in the prompts, not the probe.** A
+linear model over one global embedding cannot ask who a picture is for.
+
+The three misses are shirtless men mid-lift, where the safe gym prompts win on the scene and
+are right to.
 
 One safe prompt changed to make this work: *"a photo of a person lifting weights in a gym"* is
 now plural, *"people training together in a gym"*. In the singular it was the best match for a
 solo physique shot and held the label to 83%; the body-part false positives it was added for
 are not affected (that 105-image set went from 20 refused to 19 on the swap).
+
+Six safe prompts were also added for trades the list had nothing for — construction,
+laboratories, farming, hospitality, electrical, presentations. The safe list is what the unsafe
+labels are judged against, and `test_there_are_safe_labels_to_be_judged_against` had started
+failing: 65 safe prompts against 66 unsafe ones. A picture matching no safe prompt has nothing
+to be safe *as*. It cost one `unrest` image, 129 to 128, and nothing else moved.
 
 The grouping matters more than it sounds: with a random split the weapons figure reads 95% and
 the honest one is 73%. 300 frames from a handful of videos are easy to memorise and hard to

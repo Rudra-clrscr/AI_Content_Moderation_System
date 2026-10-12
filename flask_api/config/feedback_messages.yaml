@@ -71,7 +71,8 @@ rules:
   visual.physique: >-
     BONC is a trade platform, so personal workout and physique photos don't belong in a
     posting. If you're promoting a gym, equipment or supplements, show the business - the
-    premises, the equipment, a class or your advert.
+    premises, the equipment, a class or your advert - and keep bare-chested bodybuilder
+    imagery out of the banner.
   abuse.targeted: Remove insults aimed at a person or business.
   abuse.blocklist: Remove abusive language.
   scam.advance_fee: Remove guaranteed-return or advance-fee claims.
