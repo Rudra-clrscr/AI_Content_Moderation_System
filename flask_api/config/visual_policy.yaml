@@ -110,7 +110,16 @@ labels:
   manhandling:
     unsafe: true
     category: violence_or_unrest
-    reject_min: 0.60   # violence p50 0.57, threats p50 0.69 - the lowest-scoring labels, and the ones a single 0.90 bar silenced completely
+    reject_min: 0.60   # RE-DERIVED. The old note here read "violence p50 0.57, threats p50
+                       # 0.69", from two sets that were audited picture by picture and found
+                       # to be mostly neither - see images/README_sets.md. On what is left,
+                       # `unrest_real` (84 supplied press photographs) sits at 99% caught for
+                       # EVERY bar from 0.45 to 0.70, so this bar does not trade recall at all;
+                       # it trades false positives, and 0.60 is where `allow` drops from 7 to 5.
+                       #
+                       # Still the loosest label in the file. It catches 76 of the 293 refusals
+                       # on the weapons set, whose pictures it does not describe, so a figure
+                       # credited to `weapon` is partly this.
     # Force used on a person, short of the open confrontation `unrest` describes. Same policy
     # category on purpose: to the author it is the same message, and to the Data team the same
     # bucket. Overlaps with `unrest` by design - a baton charge is both.
@@ -382,6 +391,21 @@ labels:
       - a pencil drawing or sketch of a human figure
       - a photo of a tattoo on skin
       - a photo of a prosthetic limb or medical brace
+      # Raised and outstretched arms. `manhandling` was refusing 7 of the 105 body-part
+      # pictures and the list of what it caught says why: a conference speaker with a hand up,
+      # a singer holding a microphone, silhouettes on a beach, an ink drawing of two figures,
+      # a karate class, a first-aid drill, and A DIAGRAM OF THE BONES OF AN ARM. Every
+      # `manhandling` prompt describes where someone's arms are - raising a fist, grabbing an
+      # arm, fighting with fists - so anything with an arm up is a candidate.
+      #
+      # That is the "name the scene, not the pose" rule biting the one label whose comment
+      # already warns about it. These five name the scenes, and take body_parts from 19 to 14
+      # and incidental children from 44 to 42, for one image each on `romance` and `unrest`.
+      - a photo of a martial arts class practising
+      - a photo of a singer performing with a microphone
+      - a diagram of the bones of the arm or leg
+      - a photo of first aid training on a volunteer
+      - a photo of a speaker at a podium with a raised hand
       # Contact between people that is business, not romance. A handshake, a greeting and a
       # team photo are two people close together; without these, `romantic` has nothing to
       # compete with and every photograph of colleagues reads as a couple.

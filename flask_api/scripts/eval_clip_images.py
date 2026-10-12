@@ -75,8 +75,19 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         # Collected for the labels added after the first round. Every one of these should be
         # refused on a trade platform; crowds_safe and body_parts are what they must not catch.
         ("weapons (varied)", images / "weapons", True),
-        ("violence", images / "violence", True),
-        ("threats", images / "threats", True),
+        # AUDITED PICTURE BY PICTURE AND DEMOTED TO `None`. Both were collected from Commons
+        # by search term and reported 47% and 38% - the two weakest figures in the policy, and
+        # quoted as the model's weakness everywhere. Looking at them, `threats` is about twenty
+        # photographs of metal bands on stage plus manuscripts, vigils, engravings, a wild boar
+        # and a crown; `violence` is mostly boxing, wrestling and MMA, with an FBI award
+        # handshake, Christmas markets, swimming drills and a meerkat. Perhaps ten and
+        # twenty-five respectively are the thing they are named for.
+        #
+        # So they are reported and excluded from both recall and false positives, like
+        # `non_graphic`. `unrest_real` is the trustworthy measure for this category at 99%.
+        # images/README_sets.md has the audit.
+        ("violence", images / "violence", None),
+        ("threats", images / "threats", None),
         ("romance", images / "romance", True),
         ("revealing", images / "revealing", True),
         ("minors", images / "minors", True),

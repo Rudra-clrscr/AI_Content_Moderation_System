@@ -521,10 +521,24 @@ is roughly level with CLIP for about four times the compute (196 vision tokens a
 
 **What it does not do.** The prompts are zero-shot, so a label with no probe class behind it
 is only as good as its wordings, and most of these labels are measured on sets collected for
-the purpose rather than on BONC's traffic. `violence` at 47% and `threats` at 37% are the
-clearest example: on 84 real press photographs of the same thing the labels reach 99%, so
-those two figures describe the collected sets, not the service. There is still no counterfeit
-detector, and video is still not looked at.
+the purpose rather than on BONC's traffic.
+
+`violence` and `threats` were the clearest example and are now a different kind of example.
+They reported 47% and 38%, the two weakest figures here, and were quoted as the model's
+weakness. Every picture in both was then looked at. **`threats` is about twenty photographs of
+metal bands on stage**, plus manuscripts, candlelit vigils, Victorian engravings, a wild boar
+and a crown; perhaps ten of its 86 are threatening. **`violence` is mostly boxing, wrestling
+and MMA** — sport — with an FBI award handshake, Christmas markets, military swimming drills
+and a meerkat among the rest.
+
+Neither set can measure recall, so both are registered as mixed-expectation and excluded from
+the aggregates, like `non_graphic`. Read the other way, the model *refused* 67 and 31 of them,
+so a good share of those refusals were false positives hiding inside a recall figure: the
+finding is not that the model was weak there, but that nobody knew which way the error ran.
+`unrest_real` — 84 supplied press photographs of the same category — measures **99%**, and is
+what to trust when they disagree. `images/README_sets.md` records the audit.
+
+There is still no counterfeit detector, and video is still not looked at.
 
 **Failure behaviour differs by cause, on purpose.** Missing model or `enabled: false` →
 the check is simply off, results say `visual_content_checked: false`, and the service behaves
