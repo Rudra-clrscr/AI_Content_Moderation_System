@@ -74,6 +74,11 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         ("romance", images / "romance", True),
         ("revealing", images / "revealing", True),
         ("minors", images / "minors", True),
+        # Children present but NOT the subject: graduations, school events with parents, family
+        # firm team photos. The `minor` rule allows these on purpose, so this is the set that
+        # prices it - and it was the one set the probe experiments used but this script did not,
+        # which left the headline cost of that label unmeasurable from here.
+        ("minors_incidental", images / "minors_incidental", False),
         # Artistic nude photography, supplied rather than collected. This is the positive set
         # the `sexual` label never had - its recall was unmeasured until these arrived.
         ("nudity", images / "nudity", True),
