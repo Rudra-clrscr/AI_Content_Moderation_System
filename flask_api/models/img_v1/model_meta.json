@@ -1,0 +1,46 @@
+{
+  "version": "clip-vit-b32-bonc-img-v1",
+  "kind": "image",
+  "task": "zero-shot image classification against config/visual_policy.yaml",
+  "base_model": "Xenova/clip-vit-base-patch32",
+  "architecture": "CLIP ViT-B/32, vision encoder only (512-d projected embeddings)",
+  "scoring": "softmax",
+  "image_size": 224,
+  "fit": "crop",
+  "serving_files": [
+    "vision_model.onnx",
+    "prompts.npz"
+  ],
+  "policy_file": "visual_policy.yaml",
+  "policy_digest": "0cb6413f6bb6c105",
+  "labels": {
+    "gore": "unsafe: graphic_violence",
+    "manhandling": "unsafe: violence_or_unrest",
+    "minor": "unsafe: minors",
+    "physique": "unsafe: physique_display",
+    "revealing": "unsafe: revealing_clothing",
+    "romantic": "unsafe: romantic_content",
+    "safe": "safe",
+    "sexual": "unsafe: sexual_content",
+    "unrest": "unsafe: violence_or_unrest",
+    "weapon": "unsafe: weapons",
+    "wedding": "unsafe: wedding_content"
+  },
+  "prompt_counts": {
+    "gore": 6,
+    "manhandling": 14,
+    "minor": 6,
+    "physique": 7,
+    "revealing": 7,
+    "romantic": 5,
+    "safe": 82,
+    "sexual": 4,
+    "unrest": 10,
+    "weapon": 7,
+    "wedding": 11
+  },
+  "recommended_thresholds": {
+    "reject_min": 0.9
+  },
+  "note": "The text encoder is NOT needed to serve and is not part of the serving set - this script runs it offline to bake prompts.npz. Re-run after any change to the policy file; app/clip.py scores against whatever is in prompts.npz."
+}

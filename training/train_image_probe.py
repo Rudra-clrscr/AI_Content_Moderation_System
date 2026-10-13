@@ -50,11 +50,19 @@ SETS = {
     "weapons": "weapon",
     "graphic_injury_gore_500/images/graphic_injury_gore": "gore",
     # Confrontation, fighting and menace share a policy category (violence_or_unrest) and are
-    # pooled into one class: separately they are 218/147/86, together 451, and the probe needs
-    # examples more than it needs a distinction the policy does not make.
+    # pooled into one class.
+    #
+    # `violence` and `threats` USED TO FEED THIS CLASS and no longer do. Both were audited
+    # picture by picture (docs/image_sets.md): `threats` is about twenty photographs of metal
+    # bands on stage plus manuscripts, vigils and a wild boar, and `violence` is mostly boxing,
+    # wrestling and MMA with an FBI award handshake and a meerkat. Roughly 12% and 17% are the
+    # thing they are named for. Pooling them in bought 233 rows of mislabelled training data
+    # and would teach this class that a metal gig is a riot.
+    #
+    # `unrest_real` replaces them: 84 Indian press photographs of police-protester
+    # confrontation, supplied rather than scraped, which the prompts already score at 99%.
     "unrest": "unrest",
-    "violence": "unrest",
-    "threats": "unrest",
+    "unrest_real": "unrest",
     "romance": "romantic",
     "revealing": "revealing",
     # The two sides of the policy's distinction, for the first time: 135 pictures OF a child
@@ -63,31 +71,46 @@ SETS = {
     # Kept as safe: children present but not the subject is explicitly allowed, and these
     # broaden the safe class. images/minors (child portraits) has no class and is skipped -
     # the `minor` label is carried by its prompts.
+    # Both sides of the policy's distinction. `minors` is pictures OF a child, which is what
+    # the rule refuses; `minors_incidental` is children merely present, which it allows, and
+    # those stay in `safe` so the contrast is in the training data rather than assumed.
+    "minors": "minor",
     "minors_incidental": "safe",
     "allow": "safe",
     "BONC_Positive": "safe",
     "body_parts": "safe",
     "crowds_safe": "safe",
 }
-# Three classes, not seven. unrest, romantic, revealing and minor were tried twice and removed
-# both times: they left weapons and gore exactly where they were (94% / 99%) while taking safe
-# refusals from 15 in 458 to 145 in 588, and at the loosest settings they refused real BONC
-# listings. Balanced class weights made it worse; rewording the prompts changed nothing at all,
-# because the probe never sees the prompts.
+# THE CLASSES, AND A CORRECTION.
 #
-# The reason is what those labels ask. "A child as the SUBJECT, not incidentally present" and
-# "revealing as a GLAMOUR SHOT, not a product photo" are distinctions of framing and intent.
-# CLIP's text encoder can express them - "posing for the camera" against "product shot on a
-# plain background" - but a linear probe over one global image embedding cannot: a graduation
-# crowd and a child portrait share their features, as do an athlete and a swimwear model.
-# Those labels stay with the prompts, which is where the distinction is expressible.
-# Three classes. `minor` was tried a third time, with the contrast the policy actually draws:
-# 135 pictures OF a child against 167 where children are merely present. It still fails, and
-# this run says exactly why - recall 82% at precision 62%, refusing 39 to 62 of the 167
-# INCIDENTAL images and starting to refuse real BONC listings. The probe detects "a child is
-# present", which is not the rule. Subject-versus-incidental is a question about framing, and a
-# linear model over one global embedding has no way to ask it.
-CLASSES = ["safe", "weapon", "gore"]
+# This list said `["safe", "weapon", "gore"]` while the shipped models/img_v1/probe.npz held
+# FOUR - safe, weapon, gore, minor. A `minor` experiment trained the 4-class file at 10:06 and
+# this line was edited back to three at 10:07 without re-running it, so the artifact and its
+# trainer disagreed for weeks. Anyone who retrained got a materially different model and no
+# warning. `--classes` and the check in main() exist so that cannot happen again quietly.
+#
+# The older comment here said `minor` "still fails", measured as a standalone detector: recall
+# 82% at precision 62%, refusing 39 to 62 of the 167 incidental images. That measurement was
+# right and the conclusion drawn from it was wrong, because it asked the wrong question. The
+# probe does not decide a label on its own - `decides_reject` refuses when EITHER the prompts
+# or `1 - P(safe)` crosses its line. Measured that way, the accidental fourth class is worth:
+#
+#     set          4-class   without `minor`
+#     minors         96%          67%
+#     revealing      69%          44%
+#     nudity         95%          73%
+#     body_parts     13% refused  10% refused
+#
+# A class trained on child portraits against incidental children generalises to "a human body
+# fills the frame", which is why it lifts `revealing` and `nudity` by twenty points - something
+# a child detector has no business doing. It earns its place; it is just not doing the job its
+# name suggests.
+#
+# The default is therefore the four that ship. `unrest`, `romantic` and `revealing` are the
+# next candidates and `--classes` is how to try them: they have real data now that `violence`
+# and `threats` no longer pollute `unrest`. `wedding` and `physique` are deliberately absent -
+# the prompts score them 100% and 99%, so a probe class could only add false positives.
+CLASSES = ["safe", "weapon", "gore", "minor"]
 
 
 def group_of(path: Path, groups: dict[str, str]) -> str:
@@ -171,6 +194,7 @@ def embed_all(encoder: Path, images: Path, device: str):
 
 
 def main() -> int:
+    global CLASSES                      # --classes rebinds it; see the block after parse_args
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--encoder", type=Path, default=ROOT / "flask_api" / "models" / "img_v1")
@@ -179,11 +203,31 @@ def main() -> int:
     ap.add_argument("--device", default="auto")
     ap.add_argument("--C", type=float, default=1.0, help="inverse regularisation strength")
     ap.add_argument("--folds", type=int, default=5)
+    ap.add_argument("--classes", default=",".join(CLASSES),
+                    help="comma-separated, must include `safe`. Default is what ships; try "
+                         "adding unrest,romantic,revealing and compare before believing it.")
     ap.add_argument("--class-weight", choices=["balanced", "none"], default="balanced",
                     help="balanced upweights small classes, which with seven of them makes the "
                          "smallest ones aggressive enough to refuse ordinary content")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    # Rebind before embed_all, which filters SETS against CLASSES. Done here rather than
+    # threading a parameter through nine call sites, and done LOUDLY: the artifact and this
+    # list silently disagreeing for weeks is the reason the flag exists.
+    chosen = [c.strip() for c in args.classes.split(",") if c.strip()]
+    if "safe" not in chosen:
+        print("--classes must include `safe`: the unsafe reading is 1 - P(safe)", file=sys.stderr)
+        return 2
+    unknown = [c for c in chosen if c not in set(SETS.values())]
+    if unknown:
+        print(f"no training data mapped to {unknown} in SETS - nothing would be learned",
+              file=sys.stderr)
+        return 2
+    if chosen != CLASSES:
+        print(f"classes overridden: {CLASSES} -> {chosen}")
+    CLASSES = chosen
+    print(f"training a {len(CLASSES)}-class probe: {CLASSES}")
 
     import numpy as np
     from sklearn.linear_model import LogisticRegression
