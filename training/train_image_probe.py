@@ -34,6 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "flask_api"))
+sys.path.insert(0, str(ROOT / "flask_api" / "scripts"))
 
 # .avif included: Unsplash and other stock sources serve it by default now, and leaving it out
 # silently skipped 73 supplied images - the run came back with byte-identical metrics and no
@@ -75,6 +76,19 @@ SETS = {
     # the rule refuses; `minors_incidental` is children merely present, which it allows, and
     # those stay in `safe` so the contrast is in the training data rather than assumed.
     "minors": "minor",
+    # The labels added after the first probe round, now that they have supplied data behind
+    # them. `physique` and `wedding` score 99% and 100% on prompts alone, so a class here can
+    # only ever add false positives - they are mapped so --classes can TEST that rather than
+    # assert it. `sexual` has 37 images of one genre, which is thin for a class.
+    "gym_neg": "physique",
+    "gym_positive": "safe",
+    "weddings": "wedding",
+    "nudity": "sexual",
+    # `manhandling` has NO training data and cannot be a class. Its only sources were
+    # images/violence and images/threats, and the audit found those are ~17% and ~12% the
+    # thing they are named for - mostly boxing, wrestling and photographs of metal bands on
+    # stage. A class fitted on them would learn that a gig is an assault. It stays with its 14
+    # prompts, which catch 99% of real press photography of confrontation.
     "minors_incidental": "safe",
     "allow": "safe",
     "BONC_Positive": "safe",
@@ -171,6 +185,7 @@ def embed_all(encoder: Path, images: Path, device: str):
     from PIL import Image
 
     from app.clip import VisualCheck, VisualConfig
+    from eval_clip_images import image_files
 
     # Absolute: VisualCheck resolves a relative model_dir against the app root, which would
     # turn "flask_api/models/img_v1" into "flask_api/flask_api/models/img_v1".
@@ -189,7 +204,16 @@ def embed_all(encoder: Path, images: Path, device: str):
         if not folder.is_dir():
             print(f"  {rel}: missing, skipped")
             continue
-        files = sorted(p for p in folder.iterdir() if p.suffix.lower() in EXTS)
+        # Recursive, by bytes, de-duplicated - the same walk eval_clip_images.py uses, imported
+        # rather than re-implemented because the two drifting apart is how this file came to
+        # train on a different set of pictures than the one being measured.
+        #
+        # iterdir() + a suffix filter stood here and did two things quietly. It MISSED every
+        # foldered set: images/weddings holds its 205 pictures in `wedding image/dedwe/` and
+        # friends, so this read 0 and the run crashed on an empty class. And it de-duplicated
+        # nothing, so the 73 files in minors/kid_neg that are byte-identical to pictures
+        # already in minors/ were trained on twice - a tenth of that class voting double.
+        files = image_files(folder)
         for p in files:
             try:
                 with Image.open(p) as im:
@@ -252,6 +276,16 @@ def main() -> int:
     print(f"\n{len(X)} embeddings, {X.shape[1]}-d, "
           f"{len(set(groups))} groups, classes {dict(zip(*np.unique(y, return_counts=True)))}")
 
+    # A class with no rows makes LogisticRegression learn k-1 classes while everything
+    # downstream indexes k, which surfaces as an opaque broadcast error 200 lines later.
+    present = set(np.unique(y).tolist())
+    empty = [c for i, c in enumerate(CLASSES) if i not in present]
+    if empty:
+        print(f"\nno training images found for {empty} - every set mapped to them in SETS is "
+              f"missing or unreadable. Drop them from --classes, or fix the folders.",
+              file=sys.stderr)
+        return 2
+
     # Grouped cross-validation: the honest estimate, because neighbouring video frames would
     # otherwise appear on both sides and flatter the model.
     folds = min(args.folds, len(set(groups)))
@@ -261,7 +295,12 @@ def main() -> int:
         clf = LogisticRegression(C=args.C, max_iter=3000,
                                  class_weight=None if args.class_weight == "none" else "balanced")
         clf.fit(X[tr], y[tr])
-        oof[te] = clf.predict_proba(X[te])
+        # Scatter by clf.classes_ rather than assuming predict_proba returns one column per
+        # CLASS. A grouped split can put every row of a small class in one fold - `sexual` is
+        # 37 pictures and they share a subject group - and then that fold trains on k-1
+        # classes and returns k-1 columns. Assigning that straight into oof[te] raised an
+        # opaque broadcast error that said nothing about which class was missing.
+        oof[np.ix_(te, clf.classes_)] = clf.predict_proba(X[te])
 
     pred = oof.argmax(1)
     print(f"\ngrouped {folds}-fold cross-validation (out-of-fold):")
