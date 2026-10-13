@@ -120,16 +120,19 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # 0.70 affordable. Re-fit after adding images; delete probe.npz to
                             # fall back to prompts alone.
                             #
-                            # The probe has FOUR classes: safe, weapon, gore, minor. This
-                            # comment said "weapon and gore only" for weeks while the shipped
-                            # probe.npz held four, because a `minor` experiment wrote the file
-                            # and the trainer's CLASSES list was edited back a minute later
-                            # without re-running it. training/train_image_probe.py now matches,
-                            # and --classes makes a mismatch loud.
+                            # The probe has FIVE classes: safe, weapon, gore, minor,
+                            # revealing. This comment said "weapon and gore only" for weeks
+                            # while the shipped probe.npz held four, because a `minor`
+                            # experiment wrote the file and the trainer's CLASSES list was
+                            # edited back a minute later without re-running it.
+                            # training/train_image_probe.py now matches, and --classes makes a
+                            # mismatch loud.
                             #
-                            # That fourth class is worth a lot more than its name suggests: it
-                            # is trained on child portraits against incidental children, which
-                            # generalises to "a human body fills the frame". Every other label is
+                            # 0.70 is the shipped bar but this probe's scores are SATURATED:
+                            # 0.70, 0.80 and 0.85 give identical results on every set, so this
+                            # number is not a useful tuning knob any more. Re-sweep it if the
+                            # class list changes - the unsafe reading is 1 - P(safe), so it
+                            # shifts with the number of classes. Every other label is
                             # carried by its prompts. `unrest` was tried as a fourth class and
                             # dropped: it cost 13 of 90 safe crowds and 10 of 105 body parts
                             # and gained nothing elsewhere. 90 examples cannot separate a

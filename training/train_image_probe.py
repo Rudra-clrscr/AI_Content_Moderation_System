@@ -106,11 +106,26 @@ SETS = {
 # a child detector has no business doing. It earns its place; it is just not doing the job its
 # name suggests.
 #
-# The default is therefore the four that ship. `unrest`, `romantic` and `revealing` are the
-# next candidates and `--classes` is how to try them: they have real data now that `violence`
-# and `threats` no longer pollute `unrest`. `wedding` and `physique` are deliberately absent -
-# the prompts score them 100% and 99%, so a probe class could only add false positives.
-CLASSES = ["safe", "weapon", "gore", "minor"]
+# `revealing` was then added as a fifth, and it is the one that earns its place on its own
+# merits: 86% recall at 81% precision out-of-fold, the strongest class here after gore. It
+# exists because cleaning the explicit images out of `minors` cost 12 points of `revealing`
+# recall - that recall had been coming from contaminated training data - and this is the
+# honest way to get it back. Measured, 4 classes -> 5:
+#
+#     revealing 57% -> 97%   nudity 92% -> 100%   minors 95% -> 97%
+#     weapons   83% -> 86%   gore   99% -> 100%   romance 61% -> 64%
+#     cost: body_parts 13 -> 20 refused, crowds_safe 8 -> 12, incidental 43 -> 48
+#
+# `unrest` and `romantic` were tried alongside it (7 classes) and are NOT here: at the shipped
+# threshold they bought 6 points of weapons and cost crowds_safe 10 -> 43 and body_parts
+# 17 -> 39. `romantic` precision is 57%. At every matched false-positive rate the smaller probe
+# won. `wedding` and `physique` are absent too - the prompts score them 100% and 99%, so a
+# probe class could only add false positives.
+#
+# Note the softmax dilution: the unsafe reading is 1 - P(safe), so adding classes lowers
+# P(safe) and raises that reading for every picture. Thresholds are NOT comparable across class
+# counts, and `probe_reject_min` has to be re-swept whenever this list changes.
+CLASSES = ["safe", "weapon", "gore", "minor", "revealing"]
 
 
 def group_of(path: Path, groups: dict[str, str]) -> str:

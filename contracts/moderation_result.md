@@ -370,8 +370,9 @@ aiming a gun and outscored 30 weapon images on its own; "a person lifting weight
 does not.
 
 **A trained probe decides alongside the prompts** (*added after the first measurement round*).
-`models/img_v1/probe.npz` is a **four-class** logistic regression — `safe`, `weapon`, `gore`,
-`minor` — over the frozen encoder's embeddings, fitted by `training/train_image_probe.py` — the same shape as Layer
+`models/img_v1/probe.npz` is a **five-class** logistic regression — `safe`, `weapon`, `gore`,
+`minor`, `revealing` — over the frozen encoder's embeddings, fitted by
+`training/train_image_probe.py` — the same shape as Layer
 1.5's triage filter, and served the same way, as one matrix multiply. A picture is refused if
 the prompts cross `visual.reject_min` **or** the probe crosses `visual.probe_reject_min`; they
 make different mistakes, so together they cover more than either alone.
