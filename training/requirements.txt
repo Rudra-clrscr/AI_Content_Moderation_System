@@ -1,0 +1,25 @@
+# Training dependencies. NONE of these are needed to serve - flask_api/requirements.txt is the
+# serving set, and it is deliberately smaller. A fitted probe ships as two numpy arrays and is
+# applied with one matmul in app/clip.py, so scikit-learn never reaches a production host.
+#
+# This file exists because it didn't. `train_image_probe.py` imports scikit-learn, nothing
+# declared it, and the probe that was shipping could not be retrained in the project's own
+# environment - which is part of how models/img_v1/probe.npz and its trainer drifted apart
+# without anyone noticing.
+#
+# Two tiers. Install the first on its own if you are only refitting the image probe.
+
+# ---- image probe: train_image_probe.py --------------------------------------------------
+# Needs the CLIP encoder too, but that comes from flask_api (onnxruntime, pillow, numpy)
+# because the probe is fitted over its frozen embeddings.
+scikit-learn>=1.5              # LogisticRegression, GroupKFold, class weighting
+
+# ---- text model: the bonc-v4 pipeline ----------------------------------------------------
+# Heavy, GPU-oriented, and only needed to retrain or re-export the DeBERTa text model in
+# models/v5. Skip this tier entirely for image work.
+torch>=2.4                     # install the CUDA build from pytorch.org for GPU training
+transformers>=4.44
+datasets>=3.0
+onnx>=1.17                     # export and the INT8/MatMulNBits quantisers
+scipy>=1.14                    # sparse features in the Layer 1.5 triage filter
+pandas>=2.2

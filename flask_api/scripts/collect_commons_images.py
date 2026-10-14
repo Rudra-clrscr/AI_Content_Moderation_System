@@ -117,7 +117,11 @@ SETS: dict[str, list[str]] = {
     # probe both sides of the distinction for the first time.
     "minors": [
         "child portrait photograph", "baby portrait studio", "toddler portrait",
-        "child face close up", "young girl portrait", "young boy portrait",
+        # "child face close up" was REMOVED. Every explicit image found in this set during the
+        # audit came in under it: on Commons, "close up" plus a body returns anatomical and
+        # pornographic close-ups, and the title filters below cannot see pixels. Eighteen files
+        # had to be quarantined out of a folder of children's photographs.
+        "young girl portrait", "young boy portrait",
         "infant portrait photograph", "child headshot", "smiling child portrait",
         "portrait of a schoolboy", "portrait of a schoolgirl", "child looking at camera",
     ],
@@ -184,6 +188,69 @@ _EXCLUDE_BY_SET = {
 _EXCLUDE = re.compile(_EXCLUDE_SEXUAL + "|" + _EXCLUDE_GRAPHIC, re.I)
 
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+
+# ---- the pixel gate -------------------------------------------------------------------
+# The exclusions above read titles and categories. A picture whose title says nothing is
+# invisible to them, which is how explicit images reached a folder of children's photographs.
+# This looks at the pixels, using the reference classifier in models/nsfw_ref (the same one
+# scripts/eval_sexual_label.py uses as a referee - nothing in app/ loads it).
+#
+# Thresholds are measured, not guessed. On the audited `minors` set the highest score among
+# the pictures that belong there is 0.351 and the lowest among the quarantined ones is 0.760,
+# so 0.40 separates them with room on both sides.
+#
+# IT HAS A KNOWN HOLE. One of the eighteen quarantined files scores **0.000** - the classifier
+# is certain it is ordinary, and it is not. A score gate is therefore a net, not a guarantee,
+# and no set collected by this script should be described as reviewed because it passed.
+_NSFW_MAX = {
+    "minors": 0.40, "minors_incidental": 0.40, "crowds_safe": 0.40, "allow": 0.40,
+    "weapons": 0.60, "unrest": 0.60, "violence": 0.60, "threats": 0.60, "romance": 0.60,
+    "body_parts": 0.90,          # anatomy, physiotherapy and swimming score high and belong
+}
+# Sets that are ABOUT this material opt out, or the gate would reject what they exist to hold.
+_NSFW_EXEMPT = {"nudity", "revealing", "sexual_positive"}
+_NSFW_MODEL = ROOT / "models" / "nsfw_ref" / "model.onnx"
+
+
+def nsfw_scorer(set_name: str):
+    """A function bytes -> score, or None when this set opts out.
+
+    Raises if the model is missing: collecting pictures of children with the gate silently off
+    is worse than not collecting them, and "the file wasn't there" is exactly how that happens.
+    """
+    if set_name in _NSFW_EXEMPT:
+        print(f"  pixel gate: off for `{set_name}` (the set is about this material)")
+        return None
+    if not _NSFW_MODEL.exists():
+        raise SystemExit(f"{_NSFW_MODEL} is missing - run scripts/fetch_nsfw_reference.py "
+                         f"first. Collecting into `{set_name}` without the pixel gate is not "
+                         "something this script will do quietly.")
+    import io
+
+    import numpy as np
+    import onnxruntime as ort
+    from PIL import Image
+
+    # CPU: this export's patch-embedding Conv needs cuDNN, which is not always installed.
+    sess = ort.InferenceSession(str(_NSFW_MODEL), providers=["CPUExecutionProvider"])
+    name = sess.get_inputs()[0].name
+    ceiling = _NSFW_MAX.get(set_name, 0.60)
+    print(f"  pixel gate: on for `{set_name}`, rejecting nsfw >= {ceiling:.2f}")
+
+    def score(data: bytes) -> float:
+        try:
+            with Image.open(io.BytesIO(data)) as im:
+                arr = np.asarray(im.convert("RGB").resize((224, 224), Image.BILINEAR),
+                                 dtype=np.float32) / 255.0
+        except Exception:
+            return 1.0                      # unreadable is not the same as safe
+        x = ((arr - 0.5) / 0.5).transpose(2, 0, 1)[None]
+        logit = sess.run(None, {name: x})[0][0]
+        e = np.exp(logit - logit.max())
+        return float((e / e.sum())[1])
+
+    score.ceiling = ceiling
+    return score
 
 
 def api(params: dict) -> dict:
@@ -290,6 +357,8 @@ def main() -> int:
             rows = list(csv.DictReader(fh))
         print(f"carrying forward {len(rows)} rows already in {csv_path.name}")
     seen_hashes: set[str] = {r.get("sha256", "") for r in rows}
+    gate = nsfw_scorer(args.set_name)
+    rejected = 0
     print(f"collecting up to {args.limit} images into {folder}")
     for term in terms:
         if len(rows) >= args.limit:
@@ -308,6 +377,12 @@ def main() -> int:
             digest = hashlib.sha256(data).hexdigest()
             if digest in seen_hashes:            # Commons mirrors the same file under names
                 continue
+            if gate is not None:
+                nsfw = gate(data)
+                if nsfw >= gate.ceiling:
+                    rejected += 1
+                    print(f"    rejected by the pixel gate ({nsfw:.3f}): {hit['title'][:60]}")
+                    continue
             ext = Path(urllib.parse.urlparse(hit["url"]).path).suffix.lower()
             name = f"{digest[:16]}{ext}"
             (folder / name).write_bytes(data)
@@ -327,7 +402,11 @@ def main() -> int:
                 "width": hit["width"],
                 "height": hit["height"],
                 "sha256": digest,
-                "review_status": "search_terms_benign_not_individually_reviewed",
+                # Says what was and was not checked. The old value claimed the search
+                # terms were benign, which stopped being true, and said nothing about pixels.
+                "review_status": ("terms_filtered+pixel_gated_not_individually_reviewed"
+                                  if gate is not None else
+                                  "terms_filtered_only_not_individually_reviewed"),
             })
             taken += 1
             time.sleep(0.2)                       # be a good citizen of someone else's API
@@ -342,6 +421,11 @@ def main() -> int:
         writer.writeheader()
         writer.writerows(rows)
     print(f"\n{len(rows)} images, provenance in {csv_path}")
+    if rejected:
+        print(f"{rejected} rejected by the pixel gate")
+    if gate is not None:
+        print("The pixel gate is a net, not a guarantee: one file in the audited set scores\n"
+              "0.000 and is still not something that belongs in it. LOOK AT WHAT YOU COLLECT.")
     licences: dict[str, int] = {}
     for r in rows:
         licences[r["license"]] = licences.get(r["license"], 0) + 1

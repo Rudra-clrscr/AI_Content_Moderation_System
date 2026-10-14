@@ -16,11 +16,25 @@ flask_api/models/v4.backup_pre_v5/
 # the SHA256 RapidOCR publishes.
 flask_api/models/ocr/
 
-# The image model (app/clip.py). A separate bundle from the text model in models/v5 - CLIP
-# weights we don't redistribute, fetched and SHA256-verified by `python scripts/fetch_clip.py`.
-# prompts.npz and model_meta.json are built from config/visual_policy.yaml, which IS tracked,
-# so the policy is reviewable in git while the 352 MB encoder is not.
-flask_api/models/img_v1/
+# The image model (app/clip.py). A separate bundle from the text model in models/v5.
+#
+# The CLIP encoder (335 MB) and its text tower (242 MB) are NOT here. They are a third-party
+# download whose licence the publisher does not declare (see the note in scripts/fetch_clip.py),
+# and 577 MB in LFS would exhaust a free-tier quota on its own - every colleague's clone then
+# fails on the data limit rather than on anything we did. `python scripts/fetch_clip.py` pulls
+# them SHA256-pinned to a fixed revision, so everyone gets byte-identical weights.
+#
+# What BONC actually made IS tracked, all 383 KB of it:
+#   prompts.npz     the policy, encoded. Rebuildable from config/visual_policy.yaml, but only
+#                   if you have the text tower, so shipping it means a serving host needs
+#                   neither that download nor the tokenizer.
+#   probe.npz       9 KB, and the one thing here nobody can regenerate: it was fitted on 968
+#                   of BONC's own labelled pictures. It carries a third of the `minors` recall.
+#   model_meta.json what the bundle is, which encoder it expects, and the policy digest.
+flask_api/models/img_v1/*
+!flask_api/models/img_v1/prompts.npz
+!flask_api/models/img_v1/probe.npz
+!flask_api/models/img_v1/model_meta.json
 
 # Test output directories
 flask_api/scripts/test_generated_pdfs/

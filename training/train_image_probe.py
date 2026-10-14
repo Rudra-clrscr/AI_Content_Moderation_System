@@ -34,6 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "flask_api"))
+sys.path.insert(0, str(ROOT / "flask_api" / "scripts"))
 
 # .avif included: Unsplash and other stock sources serve it by default now, and leaving it out
 # silently skipped 73 supplied images - the run came back with byte-identical metrics and no
@@ -50,11 +51,19 @@ SETS = {
     "weapons": "weapon",
     "graphic_injury_gore_500/images/graphic_injury_gore": "gore",
     # Confrontation, fighting and menace share a policy category (violence_or_unrest) and are
-    # pooled into one class: separately they are 218/147/86, together 451, and the probe needs
-    # examples more than it needs a distinction the policy does not make.
+    # pooled into one class.
+    #
+    # `violence` and `threats` USED TO FEED THIS CLASS and no longer do. Both were audited
+    # picture by picture (docs/image_sets.md): `threats` is about twenty photographs of metal
+    # bands on stage plus manuscripts, vigils and a wild boar, and `violence` is mostly boxing,
+    # wrestling and MMA with an FBI award handshake and a meerkat. Roughly 12% and 17% are the
+    # thing they are named for. Pooling them in bought 233 rows of mislabelled training data
+    # and would teach this class that a metal gig is a riot.
+    #
+    # `unrest_real` replaces them: 84 Indian press photographs of police-protester
+    # confrontation, supplied rather than scraped, which the prompts already score at 99%.
     "unrest": "unrest",
-    "violence": "unrest",
-    "threats": "unrest",
+    "unrest_real": "unrest",
     "romance": "romantic",
     "revealing": "revealing",
     # The two sides of the policy's distinction, for the first time: 135 pictures OF a child
@@ -63,31 +72,74 @@ SETS = {
     # Kept as safe: children present but not the subject is explicitly allowed, and these
     # broaden the safe class. images/minors (child portraits) has no class and is skipped -
     # the `minor` label is carried by its prompts.
+    # Both sides of the policy's distinction. `minors` is pictures OF a child, which is what
+    # the rule refuses; `minors_incidental` is children merely present, which it allows, and
+    # those stay in `safe` so the contrast is in the training data rather than assumed.
+    "minors": "minor",
+    # The labels added after the first probe round, now that they have supplied data behind
+    # them. `physique` and `wedding` score 99% and 100% on prompts alone, so a class here can
+    # only ever add false positives - they are mapped so --classes can TEST that rather than
+    # assert it. `sexual` has 37 images of one genre, which is thin for a class.
+    "gym_neg": "physique",
+    "gym_positive": "safe",
+    "weddings": "wedding",
+    "nudity": "sexual",
+    # `manhandling` has NO training data and cannot be a class. Its only sources were
+    # images/violence and images/threats, and the audit found those are ~17% and ~12% the
+    # thing they are named for - mostly boxing, wrestling and photographs of metal bands on
+    # stage. A class fitted on them would learn that a gig is an assault. It stays with its 14
+    # prompts, which catch 99% of real press photography of confrontation.
     "minors_incidental": "safe",
     "allow": "safe",
     "BONC_Positive": "safe",
     "body_parts": "safe",
     "crowds_safe": "safe",
 }
-# Three classes, not seven. unrest, romantic, revealing and minor were tried twice and removed
-# both times: they left weapons and gore exactly where they were (94% / 99%) while taking safe
-# refusals from 15 in 458 to 145 in 588, and at the loosest settings they refused real BONC
-# listings. Balanced class weights made it worse; rewording the prompts changed nothing at all,
-# because the probe never sees the prompts.
+# THE CLASSES, AND A CORRECTION.
 #
-# The reason is what those labels ask. "A child as the SUBJECT, not incidentally present" and
-# "revealing as a GLAMOUR SHOT, not a product photo" are distinctions of framing and intent.
-# CLIP's text encoder can express them - "posing for the camera" against "product shot on a
-# plain background" - but a linear probe over one global image embedding cannot: a graduation
-# crowd and a child portrait share their features, as do an athlete and a swimwear model.
-# Those labels stay with the prompts, which is where the distinction is expressible.
-# Three classes. `minor` was tried a third time, with the contrast the policy actually draws:
-# 135 pictures OF a child against 167 where children are merely present. It still fails, and
-# this run says exactly why - recall 82% at precision 62%, refusing 39 to 62 of the 167
-# INCIDENTAL images and starting to refuse real BONC listings. The probe detects "a child is
-# present", which is not the rule. Subject-versus-incidental is a question about framing, and a
-# linear model over one global embedding has no way to ask it.
-CLASSES = ["safe", "weapon", "gore"]
+# This list said `["safe", "weapon", "gore"]` while the shipped models/img_v1/probe.npz held
+# FOUR - safe, weapon, gore, minor. A `minor` experiment trained the 4-class file at 10:06 and
+# this line was edited back to three at 10:07 without re-running it, so the artifact and its
+# trainer disagreed for weeks. Anyone who retrained got a materially different model and no
+# warning. `--classes` and the check in main() exist so that cannot happen again quietly.
+#
+# The older comment here said `minor` "still fails", measured as a standalone detector: recall
+# 82% at precision 62%, refusing 39 to 62 of the 167 incidental images. That measurement was
+# right and the conclusion drawn from it was wrong, because it asked the wrong question. The
+# probe does not decide a label on its own - `decides_reject` refuses when EITHER the prompts
+# or `1 - P(safe)` crosses its line. Measured that way, the accidental fourth class is worth:
+#
+#     set          4-class   without `minor`
+#     minors         96%          67%
+#     revealing      69%          44%
+#     nudity         95%          73%
+#     body_parts     13% refused  10% refused
+#
+# A class trained on child portraits against incidental children generalises to "a human body
+# fills the frame", which is why it lifts `revealing` and `nudity` by twenty points - something
+# a child detector has no business doing. It earns its place; it is just not doing the job its
+# name suggests.
+#
+# `revealing` was then added as a fifth, and it is the one that earns its place on its own
+# merits: 86% recall at 81% precision out-of-fold, the strongest class here after gore. It
+# exists because cleaning the explicit images out of `minors` cost 12 points of `revealing`
+# recall - that recall had been coming from contaminated training data - and this is the
+# honest way to get it back. Measured, 4 classes -> 5:
+#
+#     revealing 57% -> 97%   nudity 92% -> 100%   minors 95% -> 97%
+#     weapons   83% -> 86%   gore   99% -> 100%   romance 61% -> 64%
+#     cost: body_parts 13 -> 20 refused, crowds_safe 8 -> 12, incidental 43 -> 48
+#
+# `unrest` and `romantic` were tried alongside it (7 classes) and are NOT here: at the shipped
+# threshold they bought 6 points of weapons and cost crowds_safe 10 -> 43 and body_parts
+# 17 -> 39. `romantic` precision is 57%. At every matched false-positive rate the smaller probe
+# won. `wedding` and `physique` are absent too - the prompts score them 100% and 99%, so a
+# probe class could only add false positives.
+#
+# Note the softmax dilution: the unsafe reading is 1 - P(safe), so adding classes lowers
+# P(safe) and raises that reading for every picture. Thresholds are NOT comparable across class
+# counts, and `probe_reject_min` has to be re-swept whenever this list changes.
+CLASSES = ["safe", "weapon", "gore", "minor", "revealing"]
 
 
 def group_of(path: Path, groups: dict[str, str]) -> str:
@@ -133,6 +185,7 @@ def embed_all(encoder: Path, images: Path, device: str):
     from PIL import Image
 
     from app.clip import VisualCheck, VisualConfig
+    from eval_clip_images import image_files
 
     # Absolute: VisualCheck resolves a relative model_dir against the app root, which would
     # turn "flask_api/models/img_v1" into "flask_api/flask_api/models/img_v1".
@@ -151,7 +204,16 @@ def embed_all(encoder: Path, images: Path, device: str):
         if not folder.is_dir():
             print(f"  {rel}: missing, skipped")
             continue
-        files = sorted(p for p in folder.iterdir() if p.suffix.lower() in EXTS)
+        # Recursive, by bytes, de-duplicated - the same walk eval_clip_images.py uses, imported
+        # rather than re-implemented because the two drifting apart is how this file came to
+        # train on a different set of pictures than the one being measured.
+        #
+        # iterdir() + a suffix filter stood here and did two things quietly. It MISSED every
+        # foldered set: images/weddings holds its 205 pictures in `wedding image/dedwe/` and
+        # friends, so this read 0 and the run crashed on an empty class. And it de-duplicated
+        # nothing, so the 73 files in minors/kid_neg that are byte-identical to pictures
+        # already in minors/ were trained on twice - a tenth of that class voting double.
+        files = image_files(folder)
         for p in files:
             try:
                 with Image.open(p) as im:
@@ -171,6 +233,7 @@ def embed_all(encoder: Path, images: Path, device: str):
 
 
 def main() -> int:
+    global CLASSES                      # --classes rebinds it; see the block after parse_args
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--encoder", type=Path, default=ROOT / "flask_api" / "models" / "img_v1")
@@ -179,11 +242,31 @@ def main() -> int:
     ap.add_argument("--device", default="auto")
     ap.add_argument("--C", type=float, default=1.0, help="inverse regularisation strength")
     ap.add_argument("--folds", type=int, default=5)
+    ap.add_argument("--classes", default=",".join(CLASSES),
+                    help="comma-separated, must include `safe`. Default is what ships; try "
+                         "adding unrest,romantic,revealing and compare before believing it.")
     ap.add_argument("--class-weight", choices=["balanced", "none"], default="balanced",
                     help="balanced upweights small classes, which with seven of them makes the "
                          "smallest ones aggressive enough to refuse ordinary content")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    # Rebind before embed_all, which filters SETS against CLASSES. Done here rather than
+    # threading a parameter through nine call sites, and done LOUDLY: the artifact and this
+    # list silently disagreeing for weeks is the reason the flag exists.
+    chosen = [c.strip() for c in args.classes.split(",") if c.strip()]
+    if "safe" not in chosen:
+        print("--classes must include `safe`: the unsafe reading is 1 - P(safe)", file=sys.stderr)
+        return 2
+    unknown = [c for c in chosen if c not in set(SETS.values())]
+    if unknown:
+        print(f"no training data mapped to {unknown} in SETS - nothing would be learned",
+              file=sys.stderr)
+        return 2
+    if chosen != CLASSES:
+        print(f"classes overridden: {CLASSES} -> {chosen}")
+    CLASSES = chosen
+    print(f"training a {len(CLASSES)}-class probe: {CLASSES}")
 
     import numpy as np
     from sklearn.linear_model import LogisticRegression
@@ -192,6 +275,16 @@ def main() -> int:
     X, y, groups, paths = embed_all(args.encoder, args.images, args.device)
     print(f"\n{len(X)} embeddings, {X.shape[1]}-d, "
           f"{len(set(groups))} groups, classes {dict(zip(*np.unique(y, return_counts=True)))}")
+
+    # A class with no rows makes LogisticRegression learn k-1 classes while everything
+    # downstream indexes k, which surfaces as an opaque broadcast error 200 lines later.
+    present = set(np.unique(y).tolist())
+    empty = [c for i, c in enumerate(CLASSES) if i not in present]
+    if empty:
+        print(f"\nno training images found for {empty} - every set mapped to them in SETS is "
+              f"missing or unreadable. Drop them from --classes, or fix the folders.",
+              file=sys.stderr)
+        return 2
 
     # Grouped cross-validation: the honest estimate, because neighbouring video frames would
     # otherwise appear on both sides and flatter the model.
@@ -202,7 +295,12 @@ def main() -> int:
         clf = LogisticRegression(C=args.C, max_iter=3000,
                                  class_weight=None if args.class_weight == "none" else "balanced")
         clf.fit(X[tr], y[tr])
-        oof[te] = clf.predict_proba(X[te])
+        # Scatter by clf.classes_ rather than assuming predict_proba returns one column per
+        # CLASS. A grouped split can put every row of a small class in one fold - `sexual` is
+        # 37 pictures and they share a subject group - and then that fold trains on k-1
+        # classes and returns k-1 columns. Assigning that straight into oof[te] raised an
+        # opaque broadcast error that said nothing about which class was missing.
+        oof[np.ix_(te, clf.classes_)] = clf.predict_proba(X[te])
 
     pred = oof.argmax(1)
     print(f"\ngrouped {folds}-fold cross-validation (out-of-fold):")
