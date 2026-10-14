@@ -10,6 +10,7 @@ from flask import Flask
 from app.config import Settings, load_settings
 from app.feedback import Feedback
 from app.gate import Gate
+from app.levels import ModerationLevels
 from app.model import ModelRegistry, Scorer
 from app.pipeline import ModerationRequest, Pipeline
 from app.sinks import ResultSink, build_sink
@@ -26,6 +27,7 @@ FetchResult = Callable[[str], dict]
 class Services:
     settings: Settings
     pipeline: Pipeline
+    levels: ModerationLevels
     models: ModelRegistry
     sink: ResultSink
     enqueue: Enqueue | None = None
@@ -68,6 +70,7 @@ def create_app(
 
     app.extensions["moderation"] = Services(
         settings=settings,
+        levels=ModerationLevels.from_yaml(settings.moderation_levels_file),
         pipeline=Pipeline(Gate.from_yaml(settings.gate_patterns_file), models,
                           settings.thresholds, settings.latency_budget_ms, settings.targeted,
                           Feedback.from_yaml(settings.feedback_messages_file), settings.sentence_scan,

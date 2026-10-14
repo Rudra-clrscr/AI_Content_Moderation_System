@@ -130,4 +130,7 @@ def test_rating_does_not_disturb_the_rest_of_the_payload(client):
 
 
 def test_schema_version_announces_the_new_field():
-    assert SCHEMA_VERSION == "1.7"
+    # 1.7 added feedback.severity and media.visual. 1.8 adds the per-feature `moderation`
+    # block and the `disabled` value for decided_by - a result that was never checked, which
+    # a consumer must be able to tell apart from one that was checked and allowed.
+    assert SCHEMA_VERSION == "1.8"

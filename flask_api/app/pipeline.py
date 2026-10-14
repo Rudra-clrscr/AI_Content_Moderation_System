@@ -24,7 +24,7 @@ from app.triage import TriageFilter
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "1.7"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3: sentence_scores, decided_by "sentence"
+SCHEMA_VERSION = "1.8"  # 1.8: per-feature moderation levels; decided_by "disabled"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3: sentence_scores, decided_by "sentence"
                         # 1.4: word windows in sentence_scores ("kind"), word_scores, issues[].words
                         # 1.5: sentence_scores[].by ("prefilter" = scored by the linear pre-filter, not the model)
                         # 1.6: media.text_readable - whether OCR read an attachment's writing, as
@@ -61,6 +61,7 @@ class Stage(str, Enum):
     MODEL = "model"        # decided by the whole-text model score
     TARGETED = "targeted"  # decided by a sentence aimed at someone, scored separately
     SENTENCE = "sentence"  # one sentence scored at reject level on its own (e.g. a scam tacked onto a listing)
+    DISABLED = "disabled"  # NOT decided: moderation is switched off for this feature, so nothing was checked
 
 
 @dataclass(frozen=True)
@@ -208,6 +209,19 @@ class Pipeline:
         # comes from the decision (see feedback.severity_of).
         fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value, None)
         return self._build(req, Decision.REJECT, Stage.GATE, gate, None, gate_ms, None, [], [], None, fb, [])
+
+    def not_moderated_result(self, req: ModerationRequest) -> dict:
+        """Result for a feature whose moderation is switched off.
+
+        ALLOW, because the content is published - but `decided_by` is `disabled` and there is
+        no risk score, so this can never be read as "checked and found clean". Nothing ran:
+        not the model, not the Layer 1 gate. An operator reading the audit trail afterwards
+        needs to be able to tell the difference between content that passed and content that
+        nobody looked at, which is the same distinction `visual_content_checked` draws for
+        pictures.
+        """
+        return self._build(req, Decision.ALLOW, Stage.DISABLED, GateResult(()), None,
+                           0.0, 0.0, [], [], None, None, [])
 
     def moderate(self, req: ModerationRequest, gate: GateResult | None = None, gate_ms: float = 0.0) -> dict:
         t0 = time.perf_counter()

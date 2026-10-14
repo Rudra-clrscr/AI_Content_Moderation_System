@@ -8,6 +8,9 @@ REQUIRED_KEYS = {
     "label_scores", "gate_matches", "targeted_segments", "sentence_scores", "word_scores", "feedback", "gate_version",
     "model_version", "thresholds",
     "latency_ms", "decided_at",
+    # Which moderation level this surface was judged at, and whether it was judged at all.
+    # Present on every response so a caller never has to assume content was checked.
+    "moderation",
 }
 
 
