@@ -147,7 +147,14 @@ def split_of(gid: str, val: float, test: float) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--synthetic", default="D:/AI/bonc-data/synthetic_v4.csv")
+    # Several files, not one. res/implied_threats.csv and res/public_callouts.csv were each
+    # generated and then not wired in, because this took a single path - so the rows existed on
+    # disk and never reached a model. Anything passed here is concatenated before the
+    # de-duplication and contradiction checks below, which is where it has to happen: the
+    # callouts and the implied-threat negatives deliberately share vocabulary, and the
+    # both-labels guard can only see that if they arrive together.
+    ap.add_argument("--synthetic", nargs="+",
+                    default=["D:/AI/bonc-data/synthetic_v4.csv"])
     ap.add_argument("--out", default="D:/AI/bonc-data")
     ap.add_argument("--max-prose", type=int, default=50_000, help="cap on real safe prose rows (label 1 without profanity)")
     ap.add_argument("--max-offensive", type=int, default=35_000)
@@ -172,7 +179,12 @@ def main():
     real = pd.concat([real, real[real["source"] == "bonc_network"]], ignore_index=True)
     real["group"] = "r:" + real["key"]
 
-    syn = pd.read_csv(args.synthetic)
+    frames = []
+    for path in args.synthetic:
+        one = pd.read_csv(path, keep_default_na=False)
+        print(f"  synthetic: {path} -> {len(one):,} rows")
+        frames.append(one)
+    syn = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
     syn["source"] = "synthetic"
     syn["key"] = syn["text"].map(norm_key)
     syn["group"] = "s:" + syn["key"]
