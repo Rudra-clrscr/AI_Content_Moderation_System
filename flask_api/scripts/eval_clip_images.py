@@ -183,6 +183,17 @@ def main() -> int:
     ap.add_argument("--images", type=Path, default=ROOT.parent / "images")
     ap.add_argument("--model-dir", type=Path, default=ROOT / "models" / "img_v1")
     ap.add_argument("--device", default="auto", help="auto | cuda | directml | cpu")
+    # These were NOT settable, and VisualConfig's defaults were silently used instead of
+    # config/settings.yaml - so editing the config and re-running this script changed nothing,
+    # and any "threshold X and Y give identical results" conclusion drawn that way was an
+    # artifact of the file never being read. They happen to match the shipped values, so the
+    # figures were right; they just could not be varied.
+    ap.add_argument("--reject-min", type=float, default=None,
+                    help="override the prompt bar for labels with no reject_min of their own")
+    ap.add_argument("--probe-reject-min", type=float, default=None,
+                    help="override the probe's boundary. NOT comparable across probes with "
+                         "different class counts: the reading is 1 - P(safe), so more classes "
+                         "lower P(safe) for every picture and shift the whole scale.")
     ap.add_argument("--limit", type=int, default=0, help="at most this many images per set")
     ap.add_argument("--dump", type=int, default=0, help="write this many worst cases per set")
     ap.add_argument("--dump-dir", type=Path, default=None)
@@ -196,8 +207,10 @@ def main() -> int:
         print(f"no known image sets under {args.images}", file=sys.stderr)
         return 2
 
+    cfg = {k: v for k, v in (("reject_min", args.reject_min),
+                             ("probe_reject_min", args.probe_reject_min)) if v is not None}
     check = VisualCheck(VisualConfig(enabled=True, model_dir=str(args.model_dir),
-                                     device=args.device), root=ROOT)
+                                     device=args.device, **cfg), root=ROOT)
     if not check.ready:
         print(f"visual check unavailable: {check.status.get('reason')}", file=sys.stderr)
         return 2
