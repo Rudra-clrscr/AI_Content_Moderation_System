@@ -85,6 +85,17 @@ def norm_key(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
+def skeleton(text: str) -> str:
+    """A crude template fingerprint: lowercase, digits collapsed, punctuation dropped.
+
+    Used only for synthetic rows that carry no `template` column. It catches rows that differ
+    by an order number or a date and MISSES rows that differ by a slot word - "that supplier"
+    against "this vendor" - so it is a partial fix, not a complete one. Generators should emit
+    `template` instead; see the note on grouping below.
+    """
+    return re.sub(r"[^a-z#\s]", "", re.sub(r"\d+", "#", text.lower()))[:160]
+
+
 def load_res() -> pd.DataFrame:
     frames = []
     c = pd.read_excel(RES / "bonc_network_moderation_dataset.csv.xlsx")
@@ -187,7 +198,25 @@ def main():
     syn = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
     syn["source"] = "synthetic"
     syn["key"] = syn["text"].map(norm_key)
-    syn["group"] = "s:" + syn["key"]
+    # GROUPING, and why this is not `"s:" + key`.
+    #
+    # It was, and that put every synthetic row in a group of its own, which turns the
+    # group-aware split below into a plain random one for the 1.1M synthetic rows. Sibling
+    # rows off the same template - differing only in a slot word or an order number - then
+    # land on both sides, the model memorises the template, and the validation number rewards
+    # it. v6 reported 99.66% accuracy and 0.9999 AUC that way, while the hand-written held-out
+    # sets said 76%. Measured on that build: 38.1% of synthetic validation rows shared a
+    # skeleton with a training row.
+    #
+    # A generator that records which template it used gets exact grouping. One that does not
+    # falls back to `skeleton`, which collapses numbers but not slot words - better than
+    # nothing and worse than a `template` column, so new generators should emit one.
+    if "template" in syn.columns and syn["template"].astype(str).str.len().gt(0).any():
+        tpl = syn["template"].astype(str)
+        tpl = tpl.where(tpl.str.len() > 0, syn["text"].map(skeleton))
+        syn["group"] = "s:" + tpl
+    else:
+        syn["group"] = "s:" + syn["text"].map(skeleton)
     syn = syn[~syn["key"].isin(set(real["key"]))]
 
     safe_real = real[real["label"] == 0]
