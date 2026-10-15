@@ -300,12 +300,18 @@ def main() -> int:
         while made < count and guard < count * 60:
             guard += 1
             pool = hinglish if rng.random() < 0.12 else frames
-            text = wrap(rng, build(rng, rng.choice(pool)))
+            frame = rng.choice(pool)
+            text = wrap(rng, build(rng, frame))
             key = text.strip().lower()
             if key in seen or key in banned:
                 continue
             seen.add(key)
-            rows.append({"text": text, "label": label, "category": category, "kind": "whole"})
+            # The frame this came from, so prepare_data.py can keep siblings on the same
+            # side of the train/val split. Without it, rows differing by one slot word land on
+            # both sides, the model memorises the template and the validation number flatters
+            # it - v6 read 99.66% that way against 76% on the hand-written held-out sets.
+            rows.append({"text": text, "label": label, "category": category, "kind": "whole",
+                         "template": frame})
             made += 1
         return made
 
@@ -319,7 +325,8 @@ def main() -> int:
     rng.shuffle(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=["text", "label", "category", "kind"])
+        writer = csv.DictWriter(fh, fieldnames=["text", "label", "category", "kind",
+                                                 "template"])
         writer.writeheader()
         writer.writerows(rows)
 

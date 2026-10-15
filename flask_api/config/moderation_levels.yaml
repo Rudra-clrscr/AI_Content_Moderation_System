@@ -1,0 +1,74 @@
+# How strictly each BONC feature is moderated, and whether it is moderated at all.
+#
+# Two controls, per the product spec:
+#
+#   enabled     the toggle. false means this feature is NOT moderated - nothing is scored,
+#               nothing is blocked, and the result says so in as many words.
+#   reject_min  the moderation rating, 0 to 1. The model returns a calibrated risk; content
+#               at or below this number is published and above it is refused. Lower is
+#               stricter. 0.50 is the model's own calibration point, where "as likely harmful
+#               as not" is the boundary.
+#
+# A feature may name a `level` instead of a number. The levels are nothing more than named
+# values - anything in `levels` below can be used, and a raw `reject_min` always wins over a
+# named one, so the admin UI can offer three buttons and an expert can still type 0.62.
+#
+# CHANGING THIS FILE needs no restart if it is changed through the admin API
+# (PUT /v1/admin/moderation-levels); edits on disk are picked up at the next start.
+
+version: 1
+
+# ---- the named levels ---------------------------------------------------------------
+# allow_max == reject_min means a single boundary and no "revise" band, which is what v4 and
+# v5 ship. Setting allow_max lower than reject_min restores the middle band: content between
+# the two is returned to the author to revise rather than refused outright.
+levels:
+  strict:
+    allow_max: 0.25
+    reject_min: 0.25
+    description: >-
+      Nothing contentious. Customer complaints, emotional outcry, public callouts and
+      unprofessional language are all refused. For surfaces the whole network reads.
+  medium:
+    allow_max: 0.50
+    reject_min: 0.50
+    description: >-
+      The model's own calibration point. Ordinary commercial friction is published - a firm
+      complaint about a late consignment - while abuse, scams and callouts are refused.
+  lenient:
+    allow_max: 0.85
+    reject_min: 0.85
+    description: >-
+      Only what is clearly offensive or fraudulent is refused. Strong, unhappy and blunt
+      language is published. For private or low-visibility surfaces.
+
+# No `level` here on purpose: an unconfigured feature uses `thresholds:` from settings.yaml,
+# which is what shipped before this file existed. Set a level here to change every surface at
+# once, or set them per feature below.
+default:
+  enabled: true
+
+# ---- per feature ---------------------------------------------------------------------
+# EMPTY ON PURPOSE. A feature listed here overrides `thresholds:` in settings.yaml; a feature
+# that is absent uses it. Shipping this empty means installing the feature changes nothing
+# until an admin chooses something, which is the only safe default for a control that can
+# switch moderation off.
+#
+# Keys are the API's `content_type`. Uncomment and edit, or set them live through
+# PUT /v1/admin/moderation-levels/<content_type>.
+#
+# The pattern worth following is visibility: the more people a surface reaches, the less the
+# platform can afford to host a grievance on it. An article is published to the whole network
+# and indexed; a proposal is read by one counterparty already in the conversation.
+#
+# features:
+#   article:           {enabled: true, level: strict}    # whole network, indexed, long-lived
+#   post:              {enabled: true, level: strict}    # the feed - callouts and outcry land here
+#   advertisement:     {enabled: true, level: strict}    # paid placement carries our name
+#   business_profile:  {enabled: true, level: medium}
+#   product_listing:   {enabled: true, level: medium}
+#   video:             {enabled: true, level: medium}    # title and description; footage unwatched
+#   request:           {enabled: true, level: lenient}   # read by sellers who opt in
+#   proposal:          {enabled: true, level: lenient}   # one counterparty
+#   business_proposal: {enabled: true, level: lenient}
+features: {}

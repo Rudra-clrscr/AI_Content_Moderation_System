@@ -18,8 +18,17 @@ scikit-learn>=1.5              # LogisticRegression, GroupKFold, class weighting
 # Heavy, GPU-oriented, and only needed to retrain or re-export the DeBERTa text model in
 # models/v5. Skip this tier entirely for image work.
 torch>=2.4                     # install the CUDA build from pytorch.org for GPU training
-transformers>=4.44
-datasets>=3.0
+# PINNED BELOW 5. transformers 5.x breaks DeBERTa-v3 under bf16 autocast: the first optimiser
+# step turns every logit into NaN. Step 0 is clean - loss 0.709, gradient norm 5.1, finite -
+# and step 1 is NaN, which is a library bug rather than divergence. 4.57.6 trains normally on
+# the same data and settings (0.656 -> 0.627 over 20 steps). `>=4.44` was not a pin and let
+# 5.19 in. train.py uses a hand-written loop, so only three APIs matter and they are stable
+# across the 4.x line.
+transformers>=4.44,<5
+tokenizers<0.23                # paired with transformers 4.x
 onnx>=1.17                     # export and the INT8/MatMulNBits quantisers
 scipy>=1.14                    # sparse features in the Layer 1.5 triage filter
 pandas>=2.2
+openpyxl>=3.1                  # prepare_data.py reads two .xlsx sources in res/
+sentencepiece>=0.2             # DeBERTa-v3's tokenizer
+tiktoken>=0.7                  # transformers reads that tokenizer through a tiktoken path

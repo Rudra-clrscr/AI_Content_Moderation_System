@@ -69,11 +69,34 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
     matched or it didn't, and a scam phrase in a photograph is still a scam phrase.
     """
     svc = _svc()
-    pipeline = svc.pipeline if thresholds is None else svc.pipeline.with_thresholds(thresholds)
+    # The admin's setting for this surface: whether it is moderated at all, and at what bar.
+    policy = svc.levels.for_type(req.content_type.value)
+    if not policy.enabled:
+        # Nothing runs - not the model, not the gate. Published and recorded as unchecked.
+        result = {**svc.pipeline.not_moderated_result(req), "moderation": policy.as_dict()}
+        svc.sink.emit(result)
+        return jsonify({**result, **(extra or {})}), 200
+
+    # An explicit override wins over the feature's level. The only caller that passes one is
+    # text read out of a picture, where the higher bar is a correctness measure against OCR
+    # noise rather than a policy preference - applying a `strict` feature bar to word-salad
+    # would bring back exactly the false positives that override exists to prevent.
+    effective = thresholds or policy.thresholds
+    pipeline = svc.pipeline if effective is None else svc.pipeline.with_thresholds(effective)
+
+    def stamp(result: dict) -> dict:
+        """Record the level this was judged at ON the result, not merely in the response.
+
+        The sink is what anyone reads months later to ask why something was published. If an
+        admin had set this surface to `lenient`, or switched it off, that is the first thing
+        they need to see - and merging it into the HTTP body alone would leave the audit row
+        silent about it.
+        """
+        return {**result, "moderation": policy.as_dict()}
     # Layer 1 always runs inline — it's cheap, and a block needs no model or queue.
     gate, gate_ms = pipeline.run_gate(req)
     if gate.blocked:
-        result = pipeline.gate_only_result(req, gate, gate_ms)
+        result = stamp(pipeline.gate_only_result(req, gate, gate_ms))
         svc.sink.emit(result)
         return jsonify({**result, **(extra or {})}), 200
 
@@ -89,6 +112,7 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
             "content_id": req.content_id,
             "content_type": req.content_type.value,
             "status_url": f"/v1/moderate/{req.request_id}",
+            "moderation": policy.as_dict(),
             **(extra or {}),
         }), 202
 
@@ -99,6 +123,7 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
     except Exception:
         log.exception("inference failed for request %s", req.request_id)
         return _error(500, "inference_failed", "model inference failed", request_id=req.request_id)
+    result = stamp(result)
     svc.sink.emit(result)
     return jsonify({**result, **(extra or {})}), 200
 
@@ -347,6 +372,9 @@ def ready():
         # this here rather than infer it from a published result - the visual check turns
         # itself off when its model is missing, and that is exactly when you want to know.
         "visual": svc.settings.visual.status,
+        # Which surfaces are currently unmoderated. An operator should be able to read that
+        # from outside rather than infer it from what gets published.
+        "moderation_disabled_for": svc.levels.disabled_features(),
     }
     if svc.settings.mode == "sync":
         body.update(model_ready=svc.models.ready, model_version=svc.models.version,
@@ -354,6 +382,57 @@ def ready():
         if not svc.models.ready:
             return jsonify({"status": "not_ready", **body}), 503
     return jsonify({"status": "ready", **body}), 200
+
+
+def _require_admin():
+    """None if the caller is an admin, else a ready-made error response."""
+    token = _svc().settings.admin_token
+    if not token:
+        return _error(404, "not_found", "admin endpoints disabled (ADMIN_TOKEN unset)")
+    if not hmac.compare_digest(request.headers.get("X-Admin-Token", ""), token):
+        return _error(401, "unauthorized", "invalid admin token")
+    return None
+
+
+@bp.get("/v1/admin/moderation-levels")
+def get_moderation_levels():
+    """The whole table: the named levels, the default, and every configured feature."""
+    denied = _require_admin()
+    if denied:
+        return denied
+    return jsonify(_svc().levels.as_dict()), 200
+
+
+@bp.put("/v1/admin/moderation-levels/<content_type>")
+def set_moderation_level(content_type: str):
+    """Change one feature, live.
+
+        {"enabled": false}                 the toggle
+        {"level": "strict"}                a named level
+        {"reject_min": 0.62}               the rating directly, 0 to 1
+
+    `enabled` and the rating are independent: setting a level on a disabled feature stores it
+    for when the toggle comes back on. Takes effect on the next request; nothing restarts.
+    """
+    denied = _require_admin()
+    if denied:
+        return denied
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not body:
+        return _error(400, "invalid_request", "send a JSON object with enabled, level or reject_min")
+    known = {"enabled", "level", "reject_min", "allow_max"}
+    unknown = set(body) - known
+    if unknown:
+        return _error(400, "invalid_request", f"unknown fields {sorted(unknown)}; "
+                                              f"expected any of {sorted(known)}")
+    try:
+        policy = _svc().levels.set_feature(
+            content_type, enabled=body.get("enabled"), level=body.get("level"),
+            reject_min=body.get("reject_min"), allow_max=body.get("allow_max"))
+    except (ValueError, TypeError) as exc:
+        return _error(400, "invalid_request", str(exc))
+    log.warning("moderation level changed by admin: %s -> %s", content_type, policy.as_dict())
+    return jsonify({"content_type": content_type, **policy.as_dict()}), 200
 
 
 @bp.post("/v1/admin/model/reload")
