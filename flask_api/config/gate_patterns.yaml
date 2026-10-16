@@ -384,6 +384,16 @@ rules:
       # claim, so none of the patterns above see it. It needs the adjective to be negative -
       # "their pricing is very competitive" is the same shape and must stay publishable.
       - '\b(?:that|this|their)\s+(?:company(?:''s)?|firm(?:''s)?|supplier(?:''s)?|vendor(?:''s)?)?\s*(?:\w+\s+){0,2}(?:system|service|delivery|quality|support|product|staff)\s+(?:is|are|was|were)\s+(?:very\s+|really\s+|extremely\s+|so\s+)?(?:bad|poor|terrible|awful|pathetic|useless|horrible|rubbish|worst)\b'
+      # How the courier behaved, which is its own complaint and shares no vocabulary with the
+      # ones above: the goods are fine, the handling was not. Every pattern needs a PAST tense
+      # act on a specific consignment, because the present tense is how a logistics company
+      # describes its own policy - "our drivers never leave a parcel in the rain" is the same
+      # words and must stay publishable.
+      - '\b(?:left|dumped|abandoned|threw|tossed|chucked)\b[^.!?]{0,50}\b(?:package|parcel|order|consignment|shipment|box|delivery|item|product)\b[^.!?]{0,50}\b(?:out\s+)?in\s+the\s+(?:pouring\s+|heavy\s+|open\s+)?rain\b'
+      - '\b(?:package|parcel|order|consignment|shipment|box|item|product)\b[^.!?]{0,40}\bwas\s+(?:left|dumped|abandoned)\b[^.!?]{0,40}\b(?:in\s+the\s+(?:pouring\s+|heavy\s+)?rain|unattended|on\s+the\s+(?:street|road|pavement|footpath))\b'
+      - '\b(?:threw|tossed|chucked|flung)\b[^.!?]{0,40}\b(?:package|parcel|order|box|shipment|item|product|consignment)\b[^.!?]{0,30}\b(?:over|across)\s+the\s+(?:gate|wall|fence|hedge|railing)\b'
+      - '\b(?:left|dumped|abandoned)\b[^.!?]{0,50}\b(?:package|parcel|order|consignment|shipment|item|product)\b[^.!?]{0,60}\b(?:unattended|on\s+the\s+(?:street|road|pavement|footpath)|outside\s+the\s+(?:gate|door|house|building|shop))\b'
+      - '\b(?:driver|courier|delivery\s+(?:guy|boy|man|person|agent|executive|partner)|delivery\s+staff)\b[^.!?]{0,40}\b(?:was|were)\s+(?:very\s+|extremely\s+|really\s+|so\s+)?(?:rude|abusive|careless|reckless|negligent|unprofessional)\b'
 
   - id: defamation.corporate_smear
     category: abuse
