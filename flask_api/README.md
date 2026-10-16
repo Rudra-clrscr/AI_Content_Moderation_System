@@ -343,6 +343,8 @@ every demo sentence against the decision the demo guide promises.
 | GET | `/health` | Liveness check. |
 | GET | `/ready` | Readiness check. Returns `503` if no model is loaded in sync mode. |
 | POST | `/v1/admin/model/reload` | Hot-swaps the model. Needs the `X-Admin-Token` header and the `ADMIN_TOKEN` env var. |
+| GET | `/v1/admin/moderation-levels` | The whole level table: named levels, the default, every configured feature. |
+| PUT | `/v1/admin/moderation-levels/<content_type>` | Toggles one surface or sets its level, live. Takes effect on the next request. |
 
 ## Layout
 
@@ -366,6 +368,15 @@ tests/
 Everything lives in `config/settings.yaml`. These env vars override it:
 `MODERATION_MODE`, `MODEL_BACKEND`, `MODEL_DIR`, `THRESHOLD_ALLOW_MAX`,
 `THRESHOLD_REJECT_MIN`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` and `ADMIN_TOKEN`.
+
+Overrides can also be put in `flask_api/.env`, which is gitignored; copy `.env.example` and
+edit. `app/config.py`'s module docstring is the full list.
+
+**The admin endpoints are off until `ADMIN_TOKEN` is set.** Without it they answer `404
+admin endpoints disabled`, so an unconfigured deployment does not advertise that they exist.
+That is also what the Admin page reports when it has nothing to talk to. Generate a token with
+`python -c "import secrets; print(secrets.token_hex(16))"`, put it in `.env`, and restart - the
+file is read once at import, so a running server will not pick it up.
 
 **Sync vs. async.** Set `mode: async` to have Flask run only the gate inline and queue
 model inference to Celery. The worker is started with:
