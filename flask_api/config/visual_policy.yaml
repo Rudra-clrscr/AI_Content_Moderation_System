@@ -208,6 +208,45 @@ labels:
       - a photo of a bride and groom sitting before the guru granth sahib
       - a photo of a groom wearing a turban at his wedding
 
+  charity:
+    unsafe: true
+    category: charity_solicitation
+    reject_min: 0.50   # NGO p25 0.55 / p50 0.88. The bar barely matters here - 0.45 to 0.70
+                       # moves recall 83% to 71% while the safe sets stay within two pictures
+                       # of each other - because this label's errors are a conceptual overlap
+                       # rather than a threshold being in the wrong place. See below.
+    # BONC is a trade platform. An appeal for donations is not a trade posting, whoever is
+    # making it, so NGO fundraising and charity promotion are refused like any other
+    # non-business use of the feed.
+    #
+    # THE SET IS TWO DIFFERENT THINGS and both are refused: donation campaign creatives
+    # ("DONATE", "Your help can change lives", a fundraising target) and photographs of aid
+    # work in the field. The posters are easy. The field photography is where the cost is.
+    #
+    # WHERE IT COLLIDES, and it is not fixable by moving the bar. A photograph of volunteers
+    # handing out food in a poor neighbourhood and a photograph of a school event with parents
+    # are the same picture to this encoder: adults, children, a crowd, an everyday setting.
+    # `minors_incidental` - children present but NOT the subject, which the policy allows on
+    # purpose - goes from 48 refused of 167 to 53. Three more body-part pictures go too.
+    # Those five are the honest price of the label, and lowering the bar does not recover them
+    # because their scores sit in the same place as the aid photographs.
+    #
+    # Measured: 62 of 77 (81%), from 14 of 77 before. Real BONC listings are unchanged at
+    # 1 of 62, and `allow`, `gym_positive` and `minors` do not move at all.
+    #
+    # Six prompts were written and dropped. Four of them - "a charity poster asking people to
+    # donate money", "a fundraising appeal with a donate button", "an ngo campaign poster
+    # about helping children", "a poster for a non profit foundation" - changed NOTHING on any
+    # set, because the four below already cover what they describe. Two more cost incidental
+    # children and bought no recall at all: naming the child in the appeal ("a charity
+    # advertisement showing a child in poverty") describes an ordinary photograph of a child
+    # just as well as a fundraising one.
+    prompts:
+      - a photo of volunteers distributing food to poor people
+      - a photo of an aid worker handing out relief supplies
+      - a photo of a charity volunteer in a branded t shirt
+      - an appeal to sponsor a child's education
+
   physique:
     unsafe: true
     category: physique_display

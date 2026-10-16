@@ -121,6 +121,11 @@ def find_sets(images: Path) -> list[tuple[str, Path, bool]]:
         # counterweights and labelled allow. The wedding rule makes them positives; they were
         # split out rather than left to score the policy as wrong every time it is right.
         ("weddings_commons", images / "weddings_commons", True),
+        # NGO and charity promotion: aid-distribution photography and donation campaign
+        # posters, supplied. Most of it features children prominently, so the first question
+        # is not "does the policy catch this" but "which label is catching it" - `minor` would
+        # refuse much of this set for a reason that has nothing to do with fundraising.
+        ("NGO", images / "NGO", True),
     ]
     return [(n, d, e) for n, d, e in candidates if d.is_dir()]
 
