@@ -200,7 +200,8 @@ class Pipeline:
 
     def run_gate(self, req: ModerationRequest) -> tuple[GateResult, float]:
         t0 = time.perf_counter()
-        result = self.gate.check(req.content)
+        # The surface goes to the gate so a rule can apply to the feed and not to a proposal.
+        result = self.gate.check(req.content, req.content_type.value)
         return result, (time.perf_counter() - t0) * 1000
 
     def gate_only_result(self, req: ModerationRequest, gate: GateResult, gate_ms: float) -> dict:

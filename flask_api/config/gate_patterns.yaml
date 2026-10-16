@@ -348,6 +348,43 @@ rules:
       - '\b(?:i|we)\s+(?:will|shall)\s+(?:destroy\s+the\s+entire\s+plant|smash\s+your\s+vehicles)\b'
       - '\b(?:bury\s+your\s+business|fumes\s+when\s+the\s+valves\s+open)\b'
 
+  # A buyer's product or service grievance, on the PUBLIC surfaces only.
+  #
+  # The same sentence is two different things depending on where it is posted. "The item
+  # arrived completely damaged" sent to a supplier inside a proposal or a request is ordinary
+  # trade, and carrying that conversation is what the platform is for. Published as an article
+  # to the whole network it is a complaint about a company, which belongs on that company's
+  # own channel.
+  #
+  # This is a gate rule with `surfaces` rather than training data, and that is the whole
+  # point. The model sees text and has no idea which surface it came from, so teaching it to
+  # refuse these sentences would refuse them in the proposal too - and 50,000 rows of exactly
+  # this genre sit in training as ALLOWED on purpose, because an earlier round over-refused
+  # them and made the portal useless for disputes.
+  #
+  # Deliberately narrow: a defect, a wrong item, a missing delivery, a refused claim. Firm
+  # commercial language is not here and stays publishable everywhere.
+  - id: complaint.public_grievance
+    category: complaint
+    action: block
+    surfaces: [article, post, advertisement]
+    description: A buyer's product or service complaint, published to the network.
+    patterns:
+      - '\b(?:item|parcel|package|product|order|consignment)\s+(?:arrived|came|was\s+delivered)\s+(?:completely\s+)?(?:damaged|broken|faulty|defective|smashed|cracked)\b'
+      - '\bnothing\s+like\s+(?:the\s+)?(?:picture|photo|image|description|sample)\b'
+      - '\bstopped\s+working\s+(?:on\s+the\s+)?(?:very\s+)?first\s+(?:use|day|wash|try)\b'
+      - '\b(?:ripped|tore|torn|faded|shrank)\s+(?:during|in|on)\s+the\s+first\s+wash\b'
+      - '\bi\s+(?:ordered|bought|purchased)\b[^.!?]{0,80}\bbut\s+i\s+(?:received|got|was\s+sent)\b'
+      - '\bsays?\s+(?:my\s+)?(?:package|parcel|order|shipment)\s+was\s+delivered\b[^.!?]{0,60}\b(?:not\s+here|never\s+(?:arrived|received)|cannot\s+find)\b'
+      - '\b(?:claim|refund|replacement|warranty)\s+(?:was\s+)?(?:denied|rejected|refused)\b'
+      - '\bhidden\s+(?:deep\s+)?(?:with)?in\s+the\s+fine\s+print\b'
+      - '\b(?:worst|terrible|pathetic|useless)\s+(?:service|product|quality|experience)\b[^.!?]{0,40}\b(?:ever|avoid|never\s+again)\b'
+      # Bare disparagement of a named third party, which is what prompted this rule: "that
+      # company's delivery system is very bad" carries no defect, no wrong item and no refused
+      # claim, so none of the patterns above see it. It needs the adjective to be negative -
+      # "their pricing is very competitive" is the same shape and must stay publishable.
+      - '\b(?:that|this|their)\s+(?:company(?:''s)?|firm(?:''s)?|supplier(?:''s)?|vendor(?:''s)?)?\s*(?:\w+\s+){0,2}(?:system|service|delivery|quality|support|product|staff)\s+(?:is|are|was|were)\s+(?:very\s+|really\s+|extremely\s+|so\s+)?(?:bad|poor|terrible|awful|pathetic|useless|horrible|rubbish|worst)\b'
+
   - id: defamation.corporate_smear
     category: abuse
     action: block
