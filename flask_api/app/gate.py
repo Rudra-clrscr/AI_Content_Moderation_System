@@ -192,6 +192,27 @@ class Rule:
     action: str
     kind: str
     finder: Callable[[str], list[Span]]
+    # Which surfaces this rule applies to, or None for all of them. The point is the rules
+    # where the SAME words are fine in one place and not in another: a member telling a
+    # supplier their delivery was damaged is ordinary trade in a proposal or a request, and is
+    # a grievance posted to the whole network in an article. The model cannot draw that line -
+    # it sees text and no surface - so a rule that needs it has to say so here.
+    surfaces: frozenset[str] | None = None
+
+    def applies_to(self, content_type: str | None) -> bool:
+        """No `surfaces` means every surface; otherwise exactly the ones named.
+
+        A surface this rule does not name is NOT covered, including one nobody has heard of.
+        That is deliberate and it is the safer default here, though it reads like the riskier
+        one: a new `content_type` is at least as likely to be private - a direct message, a
+        quote request - as public, and auto-applying a rule written for the public feed would
+        refuse the dispute traffic this whole design exists to protect. Adding a surface means
+        adding it to the rules that should cover it.
+
+        `content_type is None` means the caller has no surface (the OCR path, older tests) and
+        every rule runs, so a scoped rule can never be skipped by accident.
+        """
+        return self.surfaces is None or content_type is None or content_type in self.surfaces
 
 
 @dataclass(frozen=True)
@@ -238,10 +259,15 @@ class Gate:
         log.info("gate loaded: %d active rules from %s", len(rules), path)
         return cls(rules, version=raw.get("version", "unversioned"))
 
-    def check(self, text: str) -> GateResult:
+    def check(self, text: str, content_type: str | None = None) -> GateResult:
+        """Rules that match, in action order. `content_type` lets a rule be scoped to a
+        surface - see Rule.surfaces. Omitting it runs every rule, which is what callers
+        that have no surface (the OCR path, tests) should get."""
         norm, index = normalize_with_map(text)
         matches: list[GateMatch] = []
         for rule in self.rules:
+            if not rule.applies_to(content_type):
+                continue
             found = [(s, e) for s, e in rule.finder(norm) if e > s]
             if found:
                 spans = tuple(_trim(text, index[s], index[e - 1] + 1) for s, e in found)
@@ -282,6 +308,9 @@ def _compile_rule(spec: dict, base: Path) -> Rule | None:
     rule_id = spec["id"]
     action = spec.get("action", "block")
     kind = spec.get("kind", "pattern")
+    # `surfaces: [article, post]` limits a rule to those content types. Absent means all.
+    raw_surfaces = _as_list(spec.get("surfaces"))
+    surfaces = frozenset(str(s).strip() for s in raw_surfaces if str(s).strip()) or None
     if action not in _ACTIONS:
         raise ValueError(f"gate rule {rule_id}: action must be one of {_ACTIONS}, got {action!r}")
     if kind not in _KINDS:
@@ -299,7 +328,7 @@ def _compile_rule(spec: dict, base: Path) -> Rule | None:
             log.info("gate rule %s has no terms, inactive", rule_id)
             return None
         log.info("gate rule %s: %d terms", rule_id, len(term_set))
-        return Rule(rule_id, category, action, kind, term_set.find)
+        return Rule(rule_id, category, action, kind, term_set.find, surfaces)
 
     if kind == "targeted":
         subjects = frozenset(normalize(s) for s in _as_list(spec.get("subjects")))
@@ -310,7 +339,7 @@ def _compile_rule(spec: dict, base: Path) -> Rule | None:
             log.info("gate rule %s has no terms, inactive", rule_id)
             return None
         log.info("gate rule %s: %d subjects, %d terms", rule_id, len(subjects), len(term_set))
-        return Rule(rule_id, category, action, kind, targeted_finder(subjects, term_set))
+        return Rule(rule_id, category, action, kind, targeted_finder(subjects, term_set), surfaces)
 
     alternatives = list(spec.get("patterns") or [])
     if terms:
@@ -323,4 +352,5 @@ def _compile_rule(spec: dict, base: Path) -> Rule | None:
         regex = re.compile("|".join(f"(?:{a})" for a in alternatives))
     except re.error as exc:
         raise ValueError(f"gate rule {rule_id}: invalid regex: {exc}") from exc
-    return Rule(rule_id, category, action, kind, lambda norm: [m.span() for m in regex.finditer(norm)])
+    return Rule(rule_id, category, action, kind,
+                lambda norm: [m.span() for m in regex.finditer(norm)], surfaces)
