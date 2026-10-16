@@ -12,8 +12,9 @@
     "prompts.npz"
   ],
   "policy_file": "visual_policy.yaml",
-  "policy_digest": "0cb6413f6bb6c105",
+  "policy_digest": "c456eb40946f2b78",
   "labels": {
+    "charity": "unsafe: charity_solicitation",
     "gore": "unsafe: graphic_violence",
     "manhandling": "unsafe: violence_or_unrest",
     "minor": "unsafe: minors",
@@ -27,6 +28,7 @@
     "wedding": "unsafe: wedding_content"
   },
   "prompt_counts": {
+    "charity": 4,
     "gore": 6,
     "manhandling": 14,
     "minor": 6,

@@ -59,6 +59,7 @@ categories:
   romantic_content: romantic content
   physique_display: personal physique photos
   wedding_content: wedding photos
+  charity_solicitation: charity and donation appeals
   minors: pictures of children
 
 # Instruction shown next to each highlighted match, by rule id.
@@ -69,6 +70,9 @@ rules:
   profanity.wordlist: Remove the profanity. Keep posts professional.
   # Visual refusals come through as `visual.<label>`. This one needs saying, because there IS
   # an allowed version of what the author just tried and they will otherwise re-upload it.
+  visual.charity: >-
+    BONC is for trade, so appeals for donations and NGO fundraising can't be published here.
+    If your business supports a cause, post about the business - what you make, sell or supply.
   visual.wedding: >-
     Wedding photos are personal rather than business, so they can't be published here. If
     you're in the events trade, show what you sell - the venue, the catering, the decor, the

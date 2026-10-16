@@ -339,7 +339,7 @@ with no new code. The `content` is the filename, because there is no text to quo
 wrong is in `media.visual`.
 
 **It is a separate model from the text moderator.** `models/img_v1`
-(`clip-vit-b32-bonc-img-v1`) scores pictures; `models/v5` (`deberta-v3-small-bonc-v5`) scores
+(`clip-vit-b32-bonc-img-v1`) scores pictures; `models/v6` (`deberta-v3-small-bonc-v6`) scores
 words. They version apart, roll back independently, and neither stands in for the other. Only
 the 352 MB vision encoder is loaded at serving time: the text encoder runs once offline in
 `scripts/build_clip_prompts.py`, which bakes the prompt embeddings into `prompts.npz`.
