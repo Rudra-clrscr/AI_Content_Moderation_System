@@ -58,7 +58,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 class Settings:
     mode: str = "sync"
     model_backend: str = "onnx"
-    model_dir: Path = PROJECT_ROOT / "models" / "v5"
+    model_dir: Path = PROJECT_ROOT / "models" / "v6"
     intra_op_threads: int = 4
     inter_op_threads: int = 1
     label_weights: dict[str, float] | None = None

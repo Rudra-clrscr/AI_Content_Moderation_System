@@ -6,7 +6,7 @@ mode: sync                 # sync  -> inference inline, final decision in the re
 
 model:
   backend: onnx            # onnx | stub   (stub = dev only, never deploy)
-  dir: models/v5           # live model. To roll back, put a v4 bundle next to it and set
+  dir: models/v6           # live model. To roll back, put an older bundle next to it and set
                            # dir: models/v4 (or MODEL_DIR=...).
                            # v1, v3 and v4 are no longer tracked in the repo;
                            # each bundle's model_meta.json carries its own label_weights.

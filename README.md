@@ -6,7 +6,7 @@ and the author is shown what to change.
 
 | | |
 |---|---|
-| **Text** | DeBERTa-v3-small, ONNX INT8 (`models/v5`) + a regex gate + a linear triage filter |
+| **Text** | DeBERTa-v3-small, ONNX (`models/v6`) + a regex gate + a linear triage filter |
 | **Pictures** | CLIP ViT-B/32 zero-shot against a written policy (`models/img_v1`) + a 5-class probe |
 | **Serving** | Flask + ONNX Runtime, SQL Server for the audit trail, Celery/Redis for async |
 | **Tests** | 450, `python -m pytest` from `flask_api/` |
