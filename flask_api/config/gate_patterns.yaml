@@ -404,6 +404,44 @@ rules:
       - '\b(?:app|website|portal|system|site)\b[^.!?]{0,40}\b(?:refuses?|refused|will\s+not|won''t|does\s+not|doesn''t|would\s+not)\b[^.!?]{0,30}\b(?:let|allow)\b[^.!?]{0,30}\b(?:submit|raise|file|lodge|register)\b[^.!?]{0,20}\b(?:refund|claim|complaint|return|ticket|request)\b'
       - '\b(?:cannot|can''t|unable\s+to|not\s+able\s+to)\b[^.!?]{0,25}\b(?:submit|raise|file|lodge|register)\b[^.!?]{0,20}\b(?:a\s+)?(?:refund|return|claim|complaint)\s+(?:request|claim)?\b'
       - '\b(?:refund|return|claim)\s+(?:request|option|button)\b[^.!?]{0,30}\b(?:blocked|disabled|greyed\s+out|not\s+available|keeps?\s+failing)\b'
+  - id: offtopic.political_opinion
+    category: politics
+    action: block
+    surfaces: [article, post, advertisement]
+    description: >-
+      OPINION about a named politician or party, published to the network. Not politics as a
+      subject, and not world events - both of those are things a trade network legitimately
+      discusses, and two live examples drew the line:
+
+        blocked   "the trump's way of thinking should get changed"
+        allowed   "US and Iran war is going on since 10 months, and now both leaders are
+                   stuck, now it is stupidious to continue this war further"
+
+      The second is commentary on world events and it publishes. So a name on its own is never
+      enough - "Trump announced new tariffs on steel imports" is trade news that members need.
+      Every pattern needs the name AND a verdict attached to it: should change, should resign,
+      is corrupt, vote for.
+
+      That also keeps the thing a trade network actually talks about: "the new budget is
+      terrible for small manufacturers", "export volumes fell after the tariff", "the new GST
+      slab changes how we invoice". Those carry political vocabulary and no actor being judged,
+      and they are the member's own business.
+
+      Scoped public, like complaint.public_grievance: a political aside inside a proposal is
+      between two people already talking, and refusing it is more intrusive than the problem.
+    patterns:
+      # A named figure or party, PLUS a verdict. The two halves have to co-occur within a
+      # sentence; neither alone does anything.
+      - '\b(?:trump|biden|obama|putin|zelensky|netanyahu|modi|rahul\s+gandhi|kejriwal|mamata|yogi|amit\s+shah|imran\s+khan|bjp|congress\s+party|aap|tmc|shiv\s+sena|republicans?|democrats?)\b[^.!?]{0,70}\b(?:should\s+(?:get\s+|be\s+)?(?:chang|resign|go|step\s+down|replac|remov)\w*|must\s+(?:resign|go|change)|is\s+(?:corrupt|useless|a\s+disaster|ruining|destroying|anti-?business)|are\s+(?:corrupt|useless|ruining|destroying))\b'
+      - '\b(?:should\s+(?:get\s+|be\s+)?(?:chang|resign|replac|remov)\w*|is\s+(?:corrupt|useless|a\s+disaster))\b[^.!?]{0,70}\b(?:trump|biden|putin|modi|rahul\s+gandhi|kejriwal|bjp|congress\s+party|aap|tmc)\b'
+      # The same verdict aimed at a political role rather than a name. The verb is what keeps
+      # "government tender for school furniture" and "we supply the ministry" out of it.
+      - '\b(?:prime\s+minister|president|chief\s+minister|finance\s+minister|the\s+government|this\s+government|ruling\s+party|politicians?)\b[^.!?]{0,60}\b(?:should\s+(?:be\s+)?(?:resign|go|change|step\s+down|replaced)|must\s+(?:resign|go|change)|is\s+(?:corrupt|useless|a\s+disaster|destroying|ruining|anti-?business)|are\s+(?:corrupt|useless|destroying|ruining))\b'
+      # "X's way of thinking should get changed" - the submitted shape, with the possessive
+      # carrying the subject rather than a verb.
+      - '\b(?:way\s+of\s+thinking|mindset|thinking|attitude|policies)\s+(?:of\s+[\w\s]{0,20})?should\s+(?:get\s+)?(?:chang|be\s+chang)\w*\b'
+      # Electoral advocacy, which is campaigning and not commentary.
+      - '\b(?:vote\s+for|don''t\s+vote|do\s+not\s+vote|boycott\s+the\s+election)\b'
 
   - id: defamation.corporate_smear
     category: abuse
