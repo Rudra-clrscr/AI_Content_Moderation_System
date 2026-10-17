@@ -90,6 +90,14 @@ def main():
     ap.add_argument("--evals-per-epoch", type=int, default=2)
     ap.add_argument("--seed", type=int, default=4)
     ap.add_argument("--limit", type=int, default=0, help="debug: use only this many training rows")
+    ap.add_argument("--label-smoothing", type=float, default=0.0,
+                    help="target 1-eps instead of 1. v4-v6 trained at 0.0 and their scores "
+                         "saturate: only 3.0%% (v5) and 5.2%% (v6) of held-out scores land "
+                         "between 0.05 and 0.95, which leaves the admin's 0-1 moderation "
+                         "rating almost nothing to move. Smoothing caps how far the logits "
+                         "can be driven apart, so the middle of the range stays populated. "
+                         "Changes what a score MEANS, so it needs recalibration and a fresh "
+                         "comparison - never change it on a model already in service.")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -135,7 +143,8 @@ def main():
             y = torch.tensor(tr_y[b], device=device)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
                 logits = model(input_ids=x, attention_mask=m).logits
-            loss = torch.nn.functional.cross_entropy(logits.float(), y)
+            loss = torch.nn.functional.cross_entropy(logits.float(), y,
+                                                     label_smoothing=args.label_smoothing)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
