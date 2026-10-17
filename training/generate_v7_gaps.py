@@ -200,6 +200,19 @@ CONTACT_FRAGMENTS = [
 # The Hinglish one is my own doing: HINGLISH_OK above put bare Hinglish on the safe side with
 # nothing harmful in the same register to balance it, so the model learned the language again -
 # the identical mistake the grievance model made, made in the other direction.
+# DEFERRED, both Hinglish families, by decision on 2026-10-17: Hinglish is being trained
+# separately later. The frames stay here because they are what that round starts from, and
+# because leaving them out of the file would lose the reason.
+#
+# What deferring costs, exactly - these two pull against each other and dropping both leaves
+# the second one broken against v5:
+#
+#   Aapke yahan se maal mangwa kar dekha, theek thaak nikla.   v5 publishes, v6 refuses
+#   Seedha mere account mein paisa daalo, platform ka chakkar  v5 refuses, v6r publishes
+#
+# HINGLISH_OK fixes the first and causes the second, by teaching the language instead of the
+# genre. Both are real regressions against v5 and both are now out of scope rather than fixed,
+# which is a choice that should be visible rather than discovered later.
 HINGLISH_HARMFUL = [
     "Seedha mere account mein paisa daalo, platform ka chakkar chhodo.",
     "Platform ko bypass karke direct payment kar dijiye, sasta padega.",
@@ -386,8 +399,6 @@ def main() -> int:
         # teach the opener, not the offence: "Clearance lot." would become a refusal.
         "phishing": emit(PHISHING, args.per_family, 1, "phishing",
                          TRADE_OPENERS, TRADE_TAILS),
-        "hinglish_harmful": emit(HINGLISH_HARMFUL, args.per_family, 1, "hinglish_harmful",
-                                 TRADE_OPENERS, TRADE_TAILS),
         "veiled_threat": emit(VEILED_THREATS, args.per_family, 1, "veiled_threat",
                               TRADE_OPENERS, TRADE_TAILS),
         "lawful_counterpart": emit(LAWFUL, args.negatives, 0, "lawful_counterpart",
@@ -396,7 +407,6 @@ def main() -> int:
         # would destroy the very thing being fixed. "visit shreetextiles.co.in for details" is
         # refused BECAUSE it is bare; wrapping it in three sentences of context makes it a
         # different row that was never the problem.
-        "hinglish_ok": emit(HINGLISH_OK, args.per_family // 2, 0, "hinglish_ok", [""], [""]),
         "contact_fragment": emit(CONTACT_FRAGMENTS, args.per_family // 2, 0,
                                  "contact_fragment", [""], [""]),
     }

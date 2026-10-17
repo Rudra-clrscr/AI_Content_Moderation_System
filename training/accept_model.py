@@ -163,6 +163,12 @@ def main() -> int:
     print("=" * 78)
 
     if len(lost):
+        deferred = lost[lost.apply(lambda r: f"{r['set']}/{r['group']}" in DEFERRED, axis=1)]
+        if len(deferred):
+            print(f"\n  {len(deferred)} of these are in DEFERRED categories - still counted, "
+                  f"because a deferred regression is still a regression:")
+            for r in deferred.itertuples():
+                print(f"     {r.set}/{r.group}: {bn} {r.b:.3f} -> {cn} {r.c:.3f}  {r.text[:54]}")
         print(f"\nREGRESSIONS ({len(lost)}), the gate that matters most:\n")
         for r in lost.head(args.show).itertuples():
             kind = "now PUBLISHES harmful" if r.label == 1 else "now REFUSES legitimate"
