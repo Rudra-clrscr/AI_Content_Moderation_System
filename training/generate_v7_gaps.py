@@ -58,7 +58,17 @@ PERIOD = ["every month", "monthly", "each quarter", "from day one", "within 30 d
 # three days" is not something a person writes.
 DAYS = ["Friday", "Monday", "the 10th", "month end", "the 15th", "next Tuesday",
         "this weekend", "the 25th"]
-PLACES = ["Surat", "Ludhiana", "Tiruppur", "Rajkot", "Noida", "Pune", "Indore", "Hosur"]
+PLACES = ["Surat", "Ludhiana", "Tiruppur", "Rajkot", "Noida", "Pune", "Indore", "Hosur",
+          "Coimbatore", "Jaipur", "Agra", "Kanpur", "Nashik", "Bhiwandi", "Panipat"]
+# Volume for the two bare families below comes from slots, not from composition. They are
+# refused BECAUSE they are short, so wrapping them in context would fix a row that was never
+# the problem. Varying the name and the noun keeps them bare and still gives the model
+# thousands of distinct examples instead of twenty-six.
+BRANDS = ["shreetextiles", "mahalaxmisteel", "arihantpolymers", "sunrisetraders", "jkfasteners",
+          "balajiexports", "nationalpipes", "royalfabrics", "ganeshengg", "omsaicables",
+          "kiranplastics", "vishwakarmatools", "sagarchemicals", "newindiaprints",
+          "deepakspices", "rathitimber", "jyotielectricals", "surajpackaging"]
+GOODS_SHORT = ["maal", "stock", "material", "order", "samaan", "lot", "consignment"]
 
 # ---- family 1: adulterated, expired and relabelled goods (label 1) -------------------
 ADULTERATED = [
@@ -110,6 +120,73 @@ COLLECTION = [
     "Our recovery team is in {place} next week. Keep the cash ready.",
     "Pay {money} by {day} or we take it out of the goods lying with the transporter.",
     "No more notices. Next time we come to the factory.",
+]
+
+# ---- family 4: credential and OTP phishing (label 1) --------------------------------
+# regression_check.py found this one, not me: v5 scores "send me otp fast otherwise your
+# account will closed" at 0.950 and v6 at 0.159. Broken-grammar phishing is its own register
+# and v6 lost it, so it is rebuilt here across several phrasings rather than the one.
+PHISHING = [
+    "send me otp fast otherwise your account will closed",
+    "Share the OTP you just received or the order will be cancelled.",
+    "Tell me the 6 digit code sent on your number to confirm the payment.",
+    "Your account will be blocked today, send the verification code immediately.",
+    "KYC pending, share your PAN and the OTP to keep the account active.",
+    "I am calling from the payment team, read out the code on your phone.",
+    "Forward the SMS code to complete the refund of {money}.",
+    "Your GST registration will be cancelled, verify by sending the OTP now.",
+    "Login on this link and confirm your bank details to release the payment.",
+    "Send your UPI PIN to receive the advance for the order.",
+    "Update your bank details here or the invoice amount will be returned.",
+    "Account suspend ho jayega, OTP abhi bhejiye.",
+    "Verification failed, share the code again quickly before it expires.",
+    "Click the link and re-enter your card number to confirm the order.",
+]
+
+# ---- family 5: what v6 started refusing - Hinglish satisfaction and bare contacts ----
+# Also from regression_check.py. These are label 0: v6 refuses them and should not.
+#   "Aapke yahan se maal mangwa kar dekha, theek thaak nikla."  0.000 -> 0.997
+#   "visit shreetextiles.co.in for details"                     0.170 -> 0.595
+HINGLISH_OK = [
+    "Aapke yahan se {gs} mangwa kar dekha, theek thaak nikla.",
+    "{gs_cap} time par mil gaya, quality bhi acchi thi.",
+    "Inse {gs} order kiya tha, koi dikkat nahi hui.",
+    "{place_cap} se {gs} mangwaya, delivery theek rahi.",
+    "Rate thoda zyada hai par {gs} sahi hai.",
+    "Dobara {gs} order karenge, experience acha raha.",
+    "{gs_cap} dekh kar order kiya, waise hi nikla.",
+    "Aapke yahan se maal mangwa kar dekha, theek thaak nikla.",
+    "Maal time par mil gaya, quality bhi acchi thi.",
+    "Inse order kiya tha, koi dikkat nahi hui.",
+    "Rate thoda zyada hai par material sahi hai.",
+    "Humne {place} se mangwaya, delivery theek rahi.",
+    "Packing acchi thi, {parts} bilkul sahi haalat mein mile.",
+    "Dobara order karenge, experience acha raha.",
+    "Payment terms clear the, koi confusion nahi.",
+    "Sample dekh kar order kiya, waise hi nikla.",
+    "Bhai log, inka service theek hai, try kar sakte ho.",
+    "Thoda late hua par inform kar diya tha unhone.",
+    "{place_cap} wale supplier se acha response mila.",
+]
+
+CONTACT_FRAGMENTS = [
+    "visit {brand}.co.in for details",
+    "see www.{brand}.in for the catalogue",
+    "{brand}.com has the full range",
+    "rate list on {brand}.co.in",
+    "email sales at {brand} dot com",
+    "visit shreetextiles.co.in for details",
+    "see www.{place}traders.in for the catalogue",
+    "details on our website",
+    "catalogue link in bio",
+    "write to sales for the rate list",
+    "more on our site",
+    "full range at the {place} showroom",
+    "contact number on the profile",
+    "rates updated on the website every Monday",
+    "brochure available, ask on chat",
+    "address and timings on our page",
+    "find us on the BONC directory",
 ]
 
 # ---- the negatives, in the same vocabulary (label 0) --------------------------------
@@ -210,10 +287,12 @@ LAWFUL_TAILS = ["", "", "",
 
 
 def fill(rng: random.Random, frame: str, **extra) -> str:
-    goods, parts = rng.choice(GOODS), rng.choice(PARTS)
-    return frame.format(goods=goods, goods_cap=goods[0].upper() + goods[1:],
+    goods, parts, place = rng.choice(GOODS), rng.choice(PARTS), rng.choice(PLACES)
+    gs = rng.choice(GOODS_SHORT)
+    return frame.format(brand=rng.choice(BRANDS), gs=gs, gs_cap=gs[0].upper() + gs[1:],goods=goods, goods_cap=goods[0].upper() + goods[1:],
                         parts=parts, money=rng.choice(MONEY), period=rng.choice(PERIOD),
-                        day=rng.choice(DAYS), place=rng.choice(PLACES), **extra)
+                        day=rng.choice(DAYS), place=place,
+                        place_cap=place[0].upper() + place[1:], **extra)
 
 
 def compose(rng: random.Random, core: str, openers, tails) -> tuple[str, str]:
@@ -260,8 +339,17 @@ def main() -> int:
                                   TRADE_OPENERS, TRADE_TAILS),
         # The lawful rows take their own openers and tails. Sharing the harmful pool would
         # teach the opener, not the offence: "Clearance lot." would become a refusal.
+        "phishing": emit(PHISHING, args.per_family, 1, "phishing",
+                         TRADE_OPENERS, TRADE_TAILS),
         "lawful_counterpart": emit(LAWFUL, args.negatives, 0, "lawful_counterpart",
                                    LAWFUL_OPENERS, LAWFUL_TAILS),
+        # Short by design: these two families are short texts and composing them with openers
+        # would destroy the very thing being fixed. "visit shreetextiles.co.in for details" is
+        # refused BECAUSE it is bare; wrapping it in three sentences of context makes it a
+        # different row that was never the problem.
+        "hinglish_ok": emit(HINGLISH_OK, args.per_family // 2, 0, "hinglish_ok", [""], [""]),
+        "contact_fragment": emit(CONTACT_FRAGMENTS, args.per_family // 2, 0,
+                                 "contact_fragment", [""], [""]),
     }
 
     # Minimal pairs. Every pronoun of every frame, so the set is exactly balanced: whatever
@@ -292,9 +380,12 @@ def main() -> int:
         print(f"  {v:>7,}  {k}")
     print(f"  {len(set(r['template'] for r in rows)):,} distinct templates")
 
+    # hinglish_ok and contact_fragment are deliberately uncomposed, so their ceiling is the
+    # frame list and a short count there is the design, not a defect.
+    expected = {"lawful_counterpart": args.negatives, "hinglish_ok": 0, "contact_fragment": 0,
+                "pronoun_pair": 0}
     short = [(k, v) for k, v in counts.items()
-             if k != "pronoun_pair" and v < (args.negatives if k == "lawful_counterpart"
-                                             else args.per_family)]
+             if v < expected.get(k, args.per_family)]
     for k, v in short:
         print(f"\n  WARNING: {k} produced {v:,} rows, short of the target. Add frames rather "
               f"than accepting near-duplicates.", file=sys.stderr)

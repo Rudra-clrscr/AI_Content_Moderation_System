@@ -8,8 +8,15 @@ between v6 and v7 would mean anything. Same splits, same boundaries, new rows on
 
 WHAT IS ADDED
 
-1. res/v7_gaps.csv - the three families v6 lost or never had, with their lawful counterparts.
-   See generate_v7_gaps.py for why each one is there.
+1. res/v7_gaps.csv - the six families regression_check.py found v6 had lost, with their
+   lawful counterparts. See generate_v7_gaps.py for why each one is there.
+
+1b. res/policy_rows.csv - the categories config/visual_policy.yaml refuses in PICTURES, in
+   text. The text model was never taught most of them, and measured on
+   eval_policy_categories.csv it shows: nudity 100% -> 60% from v5 to v6, romance 40% -> 20%,
+   charity 40% -> 20%. Every family is paired with the same number of lawful rows, because
+   each one sits on top of a real BONC business - lingerie manufacturers, wedding caterers,
+   gym equipment suppliers, school uniform makers - and those must stay publishable.
 
 2. PRONOUN DE-CORRELATION, which is the part that needs the existing rows rather than new
    ones. Measured in v6's training set:
@@ -76,7 +83,9 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--v6", type=Path, default=Path("D:/AI/bonc-data-v6"))
     ap.add_argument("--out", type=Path, default=Path("D:/AI/bonc-data-v7b"))
-    ap.add_argument("--gaps", type=Path, default=ROOT / "res" / "v7_gaps.csv")
+    ap.add_argument("--gaps", nargs="+", type=Path,
+                    default=[ROOT / "res" / "v7_gaps.csv",
+                             ROOT / "res" / "policy_rows.csv"])
     ap.add_argument("--swap-per-side", type=int, default=60_000,
                     help="pronoun-swapped copies to add on each side of the label")
     ap.add_argument("--seed", type=int, default=7)
@@ -123,8 +132,13 @@ def main() -> int:
           f"({(swaps.label == 0).sum():,} into 'their', {(swaps.label == 1).sum():,} out of it)")
 
     # --- 1. the gap rows ---------------------------------------------------------------
-    gaps = pd.read_csv(args.gaps, keep_default_na=False)
-    gaps["source"] = "v7_gaps"
+    frames = []
+    for path in args.gaps:
+        one = pd.read_csv(path, keep_default_na=False)
+        one["source"] = path.stem
+        print(f"  {path.name}: {len(one):,} rows")
+        frames.append(one)
+    gaps = pd.concat(frames, ignore_index=True)
     gaps["split"] = gaps["template"].map(split_of)
     print(f"gap rows: {len(gaps):,} "
           f"({(gaps.split == 'train').sum():,} train / {(gaps.split == 'val').sum():,} val / "
