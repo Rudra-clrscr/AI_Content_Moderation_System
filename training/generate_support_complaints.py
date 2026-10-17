@@ -312,6 +312,95 @@ NEGATIVE_FRAMES = [
     "We supply calibrated instruments to three refineries and can share references.",
     "Payment released against the second milestone as agreed.",
     "Please find the revised rate card effective from the 1st.",
+    # HINGLISH NEGATIVES IN VOLUME. The first bundle refused "Payment clear ho gaya hai,
+    # invoice ki copy attach kar di hai" at 1.000 - a payment confirmation - and "Naye design
+    # ke kurte aa gaye hain" at 1.000, which is a product listing. Cause: 6,000 Hinglish rows
+    # at label 1 against three Hinglish negatives, so the model learned the LANGUAGE, not the
+    # genre. These are listings, confirmations, logistics and ordinary chat, and there have to
+    # be enough of them to outweigh the positives.
+    "Naye design ke {item} aa gaye hain, wholesale rate par milenge.",
+    "Payment clear ho gaya hai, invoice ki copy attach kar di hai.",
+    "Sabhi payment company ke current account mein hi karein.",
+    "Humare paas 20 saal ka experience hai, quality mein koi compromise nahi.",
+    "Stock ready hai, {day} tak dispatch ho jayega.",
+    "Rate list bhej di hai, dekh kar bataiye.",
+    "GST number invoice par likha hua hai.",
+    "{item_cap} ka sample bhej rahe hain, check kar lijiye.",
+    "Transport ka charge alag se lagega, confirm kar dijiye.",
+    "Order confirm ho gaya, LR number kal share karenge.",
+    "Minimum order 100 piece ka hai, uske baad rate kam ho jata hai.",
+    "Naya catalogue upload kar diya hai portal par.",
+    "Quality check ke baad hi maal bhejte hain hum.",
+    "Bulk order par discount milega, baat kar lijiye.",
+    "{place_cap} mein humara warehouse hai, visit kar sakte hain.",
+    "Packing extra strong karte hain hum, transit damage nahi hota.",
+    # EVERYDAY AND PERSONAL PROSE. "The cricket match was a disaster for our team" and "I was
+    # furious when my cycle got a flat tyre" were both refused at 1.000. Emotional language
+    # about something that is not a seller is not a customer complaint, and a personal article
+    # is a thing members write here.
+    "The cricket match was a disaster for our team.",
+    "I was furious when my cycle got a flat tyre on the way to college.",
+    "The bus was late again, so I walked home.",
+    "It rained all afternoon and the terrace garden loved it.",
+    "My daughter finally learned to ride without the training wheels.",
+    "I failed maths in class nine and it taught me how to study.",
+    "The wedding season has made the roads impossible this month.",
+    "We drank fresh buttermilk at my grandmother's village.",
+    "Monday mornings are harder than they need to be.",
+    "I am tired after the trade fair but it was worth it.",
+    "My father started this business with one machine in 1984.",
+    "I was nervous before my first big presentation and it went fine.",
+    "The traffic on the way to {place} was unbelievable today.",
+    "Nothing beats chai after a long day on the shop floor.",
+    # BROKEN GRAMMAR, which is not a genre. "I am going to market tomorrow for buy some
+    # fruits" was refused at 1.000; poor English must not read as a complaint.
+    "I am going to market tomorrow for buy some fruits.",
+    "She dont like vegetables but she eat them for her mother.",
+    "We is having good stock of {item} right now.",
+    "Please to send the quotation on my email id.",
+    "He go to {place} every month for the business work.",
+    "The price is more cheaper than other sellers.",
+    # PRAISE, which was the clearest bug of the second round: "Their engineer conducted the
+    # commissioning very thoroughly" refused at 0.982 and "Happy to recommend them after two
+    # years of steady supply" at 0.767. Praise and complaint share their whole subject matter -
+    # a supplier, a delivery, an engineer - and differ only in direction, so there has to be as
+    # much of one as the other or the model learns the subject.
+    "Their engineer conducted the commissioning very thoroughly.",
+    "Happy to recommend {firm} after two years of steady supply.",
+    "I was worried about the monsoon affecting dispatch but it went smoothly.",
+    "{desk_cap} answered on the first ring and sorted it out.",
+    "The replacement reached us before we had finished the paperwork.",
+    "Their packing has improved a lot since last season.",
+    "Credit note was issued the same week without being chased.",
+    "{firm_cap} absorbed the freight difference without an argument.",
+    "Quality has been consistent across eleven consignments.",
+    "They flagged the delay themselves before we noticed it.",
+    "Good experience overall, we have placed a repeat order.",
+    "The technician explained the fault clearly and fixed it in one visit.",
+    "Their documentation is the cleanest we deal with.",
+    "We have never had a short shipment from them.",
+    "Invoicing is accurate and the GST details are always right.",
+    "Dispatch happened a day early, which helped us a lot.",
+    # TITLES AND SECTION HEADINGS. "About us" was refused at 0.993 and "Behind the scenes" at
+    # 0.776. The API scores titles on their own (contracts/moderation_result.md), so a two-word
+    # heading has to be safe by default rather than judged as if it were a post.
+    "About us", "Behind the scenes", "Our story", "What we do", "Contact",
+    "Company profile", "Our journey", "From the founder", "Quality policy",
+    "Infrastructure", "Our clients", "Certifications", "Case studies", "In the press",
+    "Frequently asked questions", "Terms of supply", "How we work", "Our team",
+    "Factory tour", "Export markets", "Product range", "Why choose us",
+    # MORE LISTINGS, short and plain. "Polypropylene woven sacks for cement and fertiliser"
+    # was refused at 0.777 - a bare product listing, the single most common thing on BONC.
+    "Polypropylene woven sacks for cement and fertiliser, 50 kg capacity, printed.",
+    "{item_cap} available in six finishes, GST invoice with every order.",
+    "Mild steel angles and channels, IS 2062 grade, cut to length.",
+    "Cotton hosiery yarn, 20s to 40s count, dyed and greige.",
+    "PVC pipes and fittings, ISI marked, {place} stock.",
+    "Corrugated boxes, 3 ply and 5 ply, custom printing available.",
+    "Industrial fasteners, high tensile, metric and BSW.",
+    "LED drivers and panel lights, two year replacement warranty.",
+    "Packaging tape and stretch film, factory direct from {place}.",
+    "Stainless steel sheets, 304 and 316 grade, cut to size.",
     # Hinglish negatives
     "{thing_cap} time par aa gaya, dhanyavaad.",
     "{firm_cap} ke saath humara experience acha raha.",
@@ -363,14 +452,15 @@ NEUTRAL_TAILS = ["", "", "", "",
 def fill(rng: random.Random, frame: str) -> str:
     item, parcel = rng.choice(ITEMS), rng.choice(PARCEL)
     thing, firm, desk = rng.choice(THINGS), rng.choice(FIRMS), rng.choice(DESKS)
-    money = rng.choice(MONEY)
+    money, place = rng.choice(MONEY), rng.choice(PLACES)
     return frame.format(
-        item=item, parcel=parcel, thing=thing, thing_cap=thing[0].upper() + thing[1:],
+        item=item, item_cap=item[0].upper() + item[1:],
+        parcel=parcel, thing=thing, thing_cap=thing[0].upper() + thing[1:],
         firm=firm, firm_cap=firm[0].upper() + firm[1:],
         desk=desk, desk_cap=desk[0].upper() + desk[1:],
         money=money, money_cap=money[0].upper() + money[1:],
         span=rng.choice(SPANS), count=rng.choice(COUNTS), day=rng.choice(DAYS),
-        place=rng.choice(PLACES))
+        place=place, place_cap=place[0].upper() + place[1:])
 
 
 def compose(rng: random.Random, core: str, openers, tails) -> tuple[str, str]:
