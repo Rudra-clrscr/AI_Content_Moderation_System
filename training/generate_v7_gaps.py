@@ -189,6 +189,51 @@ CONTACT_FRAGMENTS = [
     "find us on the BONC directory",
 ]
 
+# ---- family 6: the three the first v6r retrain still lost ---------------------------
+# accept_model.py on the retrained bundle: 4 regressions, one of which the pipeline's sentence
+# scan catches anyway. These are the three that genuinely publish.
+#
+#   Seedha mere account mein paisa daalo, platform ka chakkar chhodo.   0.992 -> 0.002
+#   Be a pity if your godown had an accident.                          0.982 -> 0.146
+#   Do not involve police, it will be worse for you.                   0.564 -> 0.009
+#
+# The Hinglish one is my own doing: HINGLISH_OK above put bare Hinglish on the safe side with
+# nothing harmful in the same register to balance it, so the model learned the language again -
+# the identical mistake the grievance model made, made in the other direction.
+HINGLISH_HARMFUL = [
+    "Seedha mere account mein paisa daalo, platform ka chakkar chhodo.",
+    "Platform ko bypass karke direct payment kar dijiye, sasta padega.",
+    "Bill mat banwao, cash mein de do, {money} bach jayega.",
+    "Mere personal UPI par bhej do, company account mein mat daalo.",
+    "GST ka chakkar chhodo, kacha bill bana denge.",
+    "Advance mere account mein, baaki delivery par - platform ko mat batana.",
+    "Yahan baat mat karo, WhatsApp par number de raha hoon.",
+    "Portal se hat kar deal karenge to dono ka commission bachega.",
+    "Paisa pehle bhejo warna order cancel ho jayega.",
+    "Apna OTP bata do, verification ke liye chahiye.",
+]
+
+# The veiled register: a threat with no verb of violence in it. "Be a pity if your godown had
+# an accident" is a sentence about misfortune, and that is exactly how it works.
+VEILED_THREATS = [
+    "Be a pity if your godown had an accident.",
+    "Would be a shame if something happened to that consignment.",
+    "Accidents do happen to warehouses in {place} this time of year.",
+    "Your loading bay looks like it could catch fire easily.",
+    "Nice shop. Would be sad if customers stopped coming.",
+    "Hope nothing happens to your truck on the {place} highway.",
+    "Insurance covers fire, does it? Good to know.",
+    "Do not involve police, it will be worse for you.",
+    "Keep the lawyers out of this if you know what is good for you.",
+    "Going to the authorities would be a mistake you regret.",
+    "Nobody needs to know about this conversation. For your own sake.",
+    "Settle it quietly or it stops being quiet.",
+    "It would be unfortunate if your buyers heard certain things.",
+    "Your family lives above the shop, no? Long hours for them.",
+    "Think about what matters to you before you refuse again.",
+    "I would not want your name coming up in the wrong conversation.",
+]
+
 # ---- the negatives, in the same vocabulary (label 0) --------------------------------
 LAWFUL = [
     # deposits and fees that are ordinary trade
@@ -341,6 +386,10 @@ def main() -> int:
         # teach the opener, not the offence: "Clearance lot." would become a refusal.
         "phishing": emit(PHISHING, args.per_family, 1, "phishing",
                          TRADE_OPENERS, TRADE_TAILS),
+        "hinglish_harmful": emit(HINGLISH_HARMFUL, args.per_family, 1, "hinglish_harmful",
+                                 TRADE_OPENERS, TRADE_TAILS),
+        "veiled_threat": emit(VEILED_THREATS, args.per_family, 1, "veiled_threat",
+                              TRADE_OPENERS, TRADE_TAILS),
         "lawful_counterpart": emit(LAWFUL, args.negatives, 0, "lawful_counterpart",
                                    LAWFUL_OPENERS, LAWFUL_TAILS),
         # Short by design: these two families are short texts and composing them with openers

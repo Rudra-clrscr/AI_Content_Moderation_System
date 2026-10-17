@@ -82,3 +82,10 @@ flask_api/models/img_v2_softmax/
 # 78% caught against the transformer's 83% on the hand-written set, and it means a fresh clone
 # has working cover rather than a disabled check. Point settings.yaml at it, or rebuild above.
 flask_api/models/grievance-v1/
+
+# Candidate text bundles under test (models/v6new, v6r2, ...). Same reasoning as the grievance
+# bundle: 371 MB each against a 1 GB LFS tier, and a candidate that has not passed
+# training/accept_model.py has no business in anyone else's clone. The one that passes gets
+# tracked deliberately, under its own name.
+flask_api/models/v6new/
+flask_api/models/v6r2/

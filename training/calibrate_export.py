@@ -222,6 +222,10 @@ def main():
     ap.add_argument("--bundle", default=str(HERE.parent / "flask_api" / "models" / "v4"))
     ap.add_argument("--version", default="deberta-v3-small-bonc-v4")
     ap.add_argument("--max-len", type=int, default=256)
+    ap.add_argument("--min-temperature", type=float, default=0.0,
+                    help="floor on the fitted temperature. 1.0 means calibrate but never "
+                         "sharpen - see the note where T is fitted. 0 (default) is the "
+                         "original behaviour.")
     ap.add_argument("--agree-n", type=int, default=3000, help="test texts used to compare quantized vs FP32")
     ap.add_argument("--candidates", nargs="+", default=["fp32_emb16"],
                     choices=["fp32_emb16", "dynamic_int8", "static_int8", "static_int8_matmul", "all"],
@@ -243,6 +247,19 @@ def main():
     vl = torch_logits(model, tok, val["text"].tolist(), device, args.max_len)
     vy = val["label"].to_numpy()
     T = fit_temperature(vl, vy)
+    # A fitted T below 1 SHARPENS: the graph divides by it, so logits are scaled up and the
+    # scores move further towards 0 and 1. That is the right answer for ECE and the wrong one
+    # for the moderation dial, and with label smoothing the two fight directly - smoothing
+    # makes the model deliberately under-confident to keep the middle of the range populated,
+    # and a T of 0.58 multiplies the logits by 1.74 and empties it again. Measured on this
+    # bundle: ECE 0.0199 -> 0.0009, and the usable middle 3.4% -> 1.6%, worse than v5.
+    #
+    # --min-temperature 1.0 means "calibrate, but never sharpen". Default 0 keeps the old
+    # behaviour exactly, so no existing bundle changes.
+    if T < args.min_temperature:
+        print(f"temperature {T:.4f} floored to {args.min_temperature:.4f}: below 1 it sharpens, "
+              f"which empties the usable middle that label smoothing exists to create")
+        T = args.min_temperature
     print(f"temperature T = {T:.4f}; val ECE {ece(softmax(vl)[:, 1], vy):.4f} -> {ece(softmax(vl / T)[:, 1], vy):.4f}")
 
     # 2. test metrics (PyTorch, calibrated)
