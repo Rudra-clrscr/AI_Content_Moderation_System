@@ -1,6 +1,6 @@
 """Does the whole system keep everything v5 was good at, AND add grievance control?
 
-    python training/accept_system.py --baseline models/v5 --candidate models/v7
+    python training/accept_system.py --baseline models/v5 --candidate models/v6
 
 accept_model.py compares two text models. That is only half the question, because the thing
 being shipped is not a model, it is a pipeline: a gate, a text model, the scans, and now a
@@ -118,7 +118,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--baseline", default="models/v5")
-    ap.add_argument("--candidate", default="models/v7")
+    ap.add_argument("--candidate", default="models/v6")
     ap.add_argument("--min-grievance-recall", type=float, default=0.80)
     ap.add_argument("--show", type=int, default=15)
     args = ap.parse_args()

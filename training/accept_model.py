@@ -1,7 +1,7 @@
 """The acceptance gate: is the candidate better than the baseline on EVERY angle?
 
     python training/accept_model.py --baseline ../flask_api/models/v5 \\
-                                    --candidate ../flask_api/models/v7
+                                    --candidate ../flask_api/models/v6
 
 One command, one verdict, because "better" was being decided per conversation and that is how
 v6 shipped. v6 is better than v5 on average - 87.6% of held-out texts against 76.5% - and it
@@ -50,7 +50,7 @@ SKIP = {"eval_grievance_handwritten.csv", "eval_grievance_handwritten_2.csv"}
 # Excluding them is the move that lets a model ship with holes nobody can see any more.
 #
 # Hinglish, deferred 2026-10-17 to its own training round. The two affected texts pull in
-# opposite directions, so no partial fix was honest - see generate_v7_gaps.py.
+# opposite directions, so no partial fix was honest - see generate_v6_gaps.py.
 DEFERRED = {"handwritten/hinglish", "dismissive/hinglish_heldout",
             "public_callouts/callout_hinglish", "public_callouts/outcry_hinglish",
             "public_callouts/ordinary_complaint_hinglish", "public_callouts/neutral_hinglish"}

@@ -1,6 +1,6 @@
 """The three things v6 got wrong, as training rows.
 
-    python training/generate_v7_gaps.py --out res/v7_gaps.csv
+    python training/generate_v6_gaps.py --out res/v6_gaps.csv
 
 v6 is not a worse model than v5 - implied_threats went 17.5% -> 59.2% caught and
 public_callouts 5.1% -> 59.0%. But training/compare_text_models.py found three specific
@@ -30,7 +30,7 @@ failures, and each one is a different kind of problem, so each needs a different
    callouts generator leans on "their" because that is how a callout names its target, and the
    model took the shortcut. This file carries MINIMAL PAIRS - the same sentence, same label,
    different pronoun - on both sides, so the pronoun predicts nothing on its own.
-   build_v7_data.py does the same to a sample of the existing rows, which is where the volume
+   build_v6_data.py does the same to a sample of the existing rows, which is where the volume
    comes from; these are the clean, deliberate cases.
 
 3. THE NEGATIVES. Every family here has a counterpart in the same vocabulary: a lawful
@@ -355,7 +355,7 @@ def fill(rng: random.Random, frame: str, **extra) -> str:
 
 def compose(rng: random.Random, core: str, openers, tails) -> tuple[str, str]:
     """Text plus the SKELETON of the three frames, which goes in `template`. prepare_data.py
-    and build_v7_data.py both group on it, so a row and its siblings cannot land on opposite
+    and build_v6_data.py both group on it, so a row and its siblings cannot land on opposite
     sides of a split - the mistake that let v6 report 99.66% accuracy while the hand-written
     sets said 76%."""
     opener, tail = rng.choice(openers), rng.choice(tails)
@@ -366,7 +366,7 @@ def compose(rng: random.Random, core: str, openers, tails) -> tuple[str, str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", type=Path, default=ROOT / "res" / "v7_gaps.csv")
+    ap.add_argument("--out", type=Path, default=ROOT / "res" / "v6_gaps.csv")
     ap.add_argument("--per-family", type=int, default=9_000)
     ap.add_argument("--negatives", type=int, default=20_000)
     ap.add_argument("--seed", type=int, default=7)

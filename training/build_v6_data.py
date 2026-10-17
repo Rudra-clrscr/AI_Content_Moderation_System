@@ -1,15 +1,15 @@
-"""Build the v7 train/val/test splits from v6's, plus the fixes v6 measured badly on.
+"""Build the v6 train/val/test splits from v6's, plus the fixes v6 measured badly on.
 
-    python training/build_v7_data.py --v6 D:/AI/bonc-data-v6 --out D:/AI/bonc-data-v7b
+    python training/build_v6_data.py --v6 D:/AI/bonc-data-v6 --out D:/AI/bonc-data-v6r
 
 Not a re-run of prepare_data.py. v6's splits are taken as they are and added to, for one
 reason: a rebuild from source would move rows between train and test, and then no comparison
-between v6 and v7 would mean anything. Same splits, same boundaries, new rows only.
+between the old v6 and the retrained one would mean anything. Same splits, same boundaries, new rows only.
 
 WHAT IS ADDED
 
-1. res/v7_gaps.csv - the six families regression_check.py found v6 had lost, with their
-   lawful counterparts. See generate_v7_gaps.py for why each one is there.
+1. res/v6_gaps.csv - the six families regression_check.py found v6 had lost, with their
+   lawful counterparts. See generate_v6_gaps.py for why each one is there.
 
 1b. res/policy_rows.csv - the categories config/visual_policy.yaml refuses in PICTURES, in
    text. The text model was never taught most of them, and measured on
@@ -37,7 +37,7 @@ WHAT IS ADDED
 
    What this does NOT do is fix sentences where the pronoun genuinely matters - "post their
    address here" is not the same offence as "post your address here". Those live in
-   generate_v7_gaps.py's PRONOUN_UNSAFE, labelled 1 under every pronoun, so the model still
+   generate_v6_gaps.py's PRONOUN_UNSAFE, labelled 1 under every pronoun, so the model still
    has the offence and only loses the shortcut.
 
 3. Nothing is removed. v6's gains - implied_threats 17.5% -> 59.2%, public_callouts 5.1% ->
@@ -82,9 +82,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--v6", type=Path, default=Path("D:/AI/bonc-data-v6"))
-    ap.add_argument("--out", type=Path, default=Path("D:/AI/bonc-data-v7b"))
+    ap.add_argument("--out", type=Path, default=Path("D:/AI/bonc-data-v6r"))
     ap.add_argument("--gaps", nargs="+", type=Path,
-                    default=[ROOT / "res" / "v7_gaps.csv",
+                    default=[ROOT / "res" / "v6_gaps.csv",
                              ROOT / "res" / "policy_rows.csv"])
     ap.add_argument("--swap-per-side", type=int, default=60_000,
                     help="pronoun-swapped copies to add on each side of the label")
@@ -170,7 +170,7 @@ def main() -> int:
             merged = merged[~merged.text.isin(bad)]
         merged = merged.drop_duplicates(subset="text")
         merged.to_csv(out_dir / f"{name}.csv", index=False)
-        print(f"v7 {name}: {len(merged):,} rows, {merged.label.mean():.3f} positive")
+        print(f"v6 {name}: {len(merged):,} rows, {merged.label.mean():.3f} positive")
 
     after = pd.read_csv(out_dir / "train.csv", keep_default_na=False)
     m = after.text.str.contains(r"\btheir\b", case=False, regex=True)

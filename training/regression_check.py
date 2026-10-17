@@ -1,7 +1,7 @@
 """Does the candidate still handle every category the baseline handled?
 
     python training/regression_check.py --baseline ../flask_api/models/v5 \\
-                                        --candidate ../flask_api/models/v7 \\
+                                        --candidate ../flask_api/models/v6 \\
                                         --also ../flask_api/models/v6
 
 A per-set average can hide this entirely: a model that gains ten points on implied threats and
