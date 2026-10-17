@@ -253,6 +253,14 @@
       }
 
       if (!response.ok) {
+        // The server answers 404 when ADMIN_TOKEN is unset, deliberately, so an unconfigured
+        // deployment does not advertise that these endpoints exist. Read on its own that looks
+        // like a broken page, so say what to do about it. A genuinely missing route returns
+        // HTML and fails the JSON.parse above, so this branch really is the disabled case.
+        if (response.status === 404 && data.error?.code === "not_found") {
+          throw new Error("Admin endpoints are off because the server has no ADMIN_TOKEN. "
+            + "Set one in flask_api/.env (copy .env.example) and restart the service.");
+        }
         throw new Error(data.error?.message || `HTTP ${response.status}`);
       }
       return data;
