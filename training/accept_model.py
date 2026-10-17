@@ -83,6 +83,13 @@ def main() -> int:
     ap.add_argument("--boundary", type=float, default=0.5)
     ap.add_argument("--allow-regressions", type=int, default=0)
     ap.add_argument("--show", type=int, default=25)
+    ap.add_argument("--informational", nargs="*", default=[],
+                    help="eval sets to measure and report but NOT gate on. Use this only for "
+                         "a set the model was deliberately not trained for - "
+                         "eval_policy_categories.csv is the case it exists for, since the "
+                         "image model's categories were scoped out of the text model. A set "
+                         "moved here is still printed, so scoping something out can never "
+                         "quietly become hiding it.")
     args = ap.parse_args()
 
     base, cand = load(Path(args.baseline)), load(Path(args.candidate))
@@ -103,13 +110,16 @@ def main() -> int:
         for r in d.itertuples():
             rows.append({"set": name[5:-4], "group": r.group, "label": int(r.label),
                          "text": r.text, "b": base.score(r.text).risk_score,
-                         "c": cand.score(r.text).risk_score})
+                         "c": cand.score(r.text).risk_score,
+                         "gated": name not in args.informational})
     df = pd.DataFrame(rows)
     df["ok_b"] = (df.b >= args.boundary) == (df.label == 1)
     df["ok_c"] = (df.c >= args.boundary) == (df.label == 1)
 
-    lost = df[df.ok_b & ~df.ok_c]
-    fixed = df[~df.ok_b & df.ok_c]
+    info = df[~df.gated]
+    gated = df[df.gated]
+    lost = gated[gated.ok_b & ~gated.ok_c]
+    fixed = gated[~gated.ok_b & gated.ok_c]
     y = df.label.to_numpy()
     ece_b, ece_c = ece(y, df.b.to_numpy()), ece(y, df.c.to_numpy())
     mid_b = float(((df.b > 0.05) & (df.b < 0.95)).mean())
@@ -164,6 +174,18 @@ def main() -> int:
         print("\nROBUSTNESS FLIPS:\n")
         for what, a, b in flips:
             print(f"  {what}: {a:.3f} vs {b:.3f}")
+
+    if len(info):
+        # Printed, always. A set that was scoped out is still measured, so "we did not train
+        # for that" can never quietly turn into "we did not look".
+        il = info[info.ok_b & ~info.ok_c]
+        print(f"\n== INFORMATIONAL (not gated): {len(info)} texts in "
+              f"{', '.join(sorted(info['set'].unique()))}")
+        print(f"   baseline {info.ok_b.mean():.1%} correct, candidate {info.ok_c.mean():.1%}; "
+              f"{len(il)} texts the baseline got right are now wrong")
+        for r in il.head(8).itertuples():
+            kind = "now PUBLISHES harmful" if r.label == 1 else "now REFUSES legitimate"
+            print(f"     {r.group}: {kind}  {r.b:.3f} -> {r.c:.3f}  {r.text[:56]}")
 
     ok = all(g[1] for g in gates)
     print(f"\n{'ACCEPTED' if ok else 'NOT ACCEPTED'}: "
