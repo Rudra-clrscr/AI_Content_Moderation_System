@@ -1,0 +1,161 @@
+{
+  "metadata": {
+    "file_path": "C:\\Users\\every\\New folder (4)\\sample_test_video.mp4",
+    "file_name": "sample_test_video.mp4",
+    "file_size_bytes": 150467,
+    "duration_seconds": 9.733016,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "width": 640,
+    "height": 360,
+    "fps": 24.0,
+    "has_audio": true
+  },
+  "detected_language": "en",
+  "language_probability": 0.9954,
+  "processing_time_seconds": 1.77,
+  "created_at": "2026-10-16T15:11:13.602676+00:00",
+  "total_words": 19,
+  "full_text": "Welcome to the Video Transcription Data Pipeline. This video demonstrates automated speech extraction and transcription using local AI models.",
+  "exported_files": {
+    "txt": "C:\\Users\\every\\New folder (4)\\transcripts\\sample_test_video.txt",
+    "srt": "C:\\Users\\every\\New folder (4)\\transcripts\\sample_test_video.srt",
+    "vtt": "C:\\Users\\every\\New folder (4)\\transcripts\\sample_test_video.vtt"
+  },
+  "segments": [
+    {
+      "id": 1,
+      "start": 0.0,
+      "end": 2.8,
+      "text": "Welcome to the Video Transcription Data Pipeline.",
+      "avg_logprob": -0.287,
+      "no_speech_prob": 0.016,
+      "words": [
+        {
+          "word": " Welcome",
+          "start": 0.0,
+          "end": 0.52,
+          "probability": 0.9531156420707703
+        },
+        {
+          "word": " to",
+          "start": 0.52,
+          "end": 0.76,
+          "probability": 0.9967509508132935
+        },
+        {
+          "word": " the",
+          "start": 0.76,
+          "end": 0.84,
+          "probability": 0.9813719987869263
+        },
+        {
+          "word": " Video",
+          "start": 0.84,
+          "end": 1.18,
+          "probability": 0.44489771127700806
+        },
+        {
+          "word": " Transcription",
+          "start": 1.18,
+          "end": 1.94,
+          "probability": 0.9580995440483093
+        },
+        {
+          "word": " Data",
+          "start": 1.94,
+          "end": 2.24,
+          "probability": 0.8517868518829346
+        },
+        {
+          "word": " Pipeline.",
+          "start": 2.24,
+          "end": 2.8,
+          "probability": 0.9496893882751465
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "start": 3.76,
+      "end": 8.9,
+      "text": "This video demonstrates automated speech extraction and transcription using local AI models.",
+      "avg_logprob": -0.287,
+      "no_speech_prob": 0.016,
+      "words": [
+        {
+          "word": " This",
+          "start": 3.76,
+          "end": 3.98,
+          "probability": 0.9867339134216309
+        },
+        {
+          "word": " video",
+          "start": 3.98,
+          "end": 4.32,
+          "probability": 0.8179431557655334
+        },
+        {
+          "word": " demonstrates",
+          "start": 4.32,
+          "end": 4.9,
+          "probability": 0.994818389415741
+        },
+        {
+          "word": " automated",
+          "start": 4.9,
+          "end": 5.56,
+          "probability": 0.9437839984893799
+        },
+        {
+          "word": " speech",
+          "start": 5.56,
+          "end": 5.98,
+          "probability": 0.9946973323822021
+        },
+        {
+          "word": " extraction",
+          "start": 5.98,
+          "end": 6.48,
+          "probability": 0.985124409198761
+        },
+        {
+          "word": " and",
+          "start": 6.48,
+          "end": 6.86,
+          "probability": 0.9942024350166321
+        },
+        {
+          "word": " transcription",
+          "start": 6.86,
+          "end": 7.3,
+          "probability": 0.994561493396759
+        },
+        {
+          "word": " using",
+          "start": 7.3,
+          "end": 7.9,
+          "probability": 0.9941239953041077
+        },
+        {
+          "word": " local",
+          "start": 7.9,
+          "end": 8.22,
+          "probability": 0.6987565159797668
+        },
+        {
+          "word": " AI",
+          "start": 8.22,
+          "end": 8.52,
+          "probability": 0.9424414038658142
+        },
+        {
+          "word": " models.",
+          "start": 8.52,
+          "end": 8.9,
+          "probability": 0.9769527912139893
+        }
+      ]
+    }
+  ]
+}

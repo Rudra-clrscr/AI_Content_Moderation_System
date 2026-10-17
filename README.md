@@ -179,6 +179,6 @@ twice and made things worse — see the comment block in that file before trying
   It is carried by its 14 prompts, which do catch 99% of real press photography of confrontation.
 - **`minors_incidental` sits at ~29% false refusals.** That is the deliberate price of refusing
   pictures *of* children at 97%; a graduation photo can be caught.
-- **Video is not watched.** Only its text is read, and the result says so.
+- **Video is not watched.** Only its text is read, and the result says so. Video speech transcription and subtitles extraction are supported via the offline pipeline in [docs/video_transcription_pipeline.md](docs/video_transcription_pipeline.md).
 - **`images/_quarantine_explicit/`** holds 18 files pulled out of the children's folder during
   the audit. They need a human decision — see [docs/image_sets.md](docs/image_sets.md).
