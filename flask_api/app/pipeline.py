@@ -24,7 +24,7 @@ from app.triage import TriageFilter
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "1.8"  # 1.8: per-feature moderation levels; decided_by "disabled"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3: sentence_scores, decided_by "sentence"
+SCHEMA_VERSION = "1.9"  # 1.9: public-surface grievance model; decided_by "grievance"  # 1.8: per-feature moderation levels; decided_by "disabled"  # 1.1: targeted_segments; 1.2: "revise" + feedback; 1.3: sentence_scores, decided_by "sentence"
                         # 1.4: word windows in sentence_scores ("kind"), word_scores, issues[].words
                         # 1.5: sentence_scores[].by ("prefilter" = scored by the linear pre-filter, not the model)
                         # 1.6: media.text_readable - whether OCR read an attachment's writing, as
@@ -62,6 +62,8 @@ class Stage(str, Enum):
     TARGETED = "targeted"  # decided by a sentence aimed at someone, scored separately
     SENTENCE = "sentence"  # one sentence scored at reject level on its own (e.g. a scam tacked onto a listing)
     DISABLED = "disabled"  # NOT decided: moderation is switched off for this feature, so nothing was checked
+    GRIEVANCE = "grievance"  # a customer-support complaint or an outcry, refused on a PUBLIC surface only
+                             # (app/grievance.py). The same text in a proposal is never asked about.
 
 
 @dataclass(frozen=True)
@@ -170,7 +172,7 @@ class Pipeline:
     def __init__(self, gate: Gate, models: ModelRegistry, thresholds: Thresholds, latency_budget_ms: float = 30.0,
                  targeted: TargetedAbuse | None = None, feedback: Feedback | None = None,
                  sentence_scan: SentenceScan | None = None, word_scan: WordScan | None = None,
-                 triage: TriageFilter | None = None):
+                 triage: TriageFilter | None = None, grievance=None):
         self.gate = gate
         self.models = models
         self.thresholds = thresholds
@@ -180,6 +182,8 @@ class Pipeline:
         self.sentence_scan = sentence_scan or SentenceScan(enabled=False)
         self.word_scan = word_scan or WordScan(enabled=False)
         self.triage = triage or TriageFilter()
+        from app.grievance import GrievanceCheck
+        self.grievance = grievance or GrievanceCheck()
 
     def with_thresholds(self, thresholds: Thresholds) -> "Pipeline":
         """This pipeline, judged at different boundaries.
@@ -211,6 +215,31 @@ class Pipeline:
         fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value, None)
         return self._build(req, Decision.REJECT, Stage.GATE, gate, None, gate_ms, None, [], [], None, fb, [])
 
+    def grievance_result(self, req: ModerationRequest, gate: GateResult, gate_ms: float,
+                         score: float, stages=None) -> dict:
+        """Final result for a complaint refused on a public surface.
+
+        REJECT with `decided_by: grievance`, not `model`, because the reader of an audit trail
+        has to be able to tell which question was asked. The main model never scored this text
+        as unsafe and would not - the same words in a proposal are published - so recording
+        this as a model decision would make the two look inconsistent when they are not.
+        """
+        # A ScoreResult, not a bare float, so `risk_score`, `predicted_label`, `label_scores`
+        # and `model_version` are populated exactly as they are for a model decision. The
+        # model_version is this model's, which is the point: a reader can see which model
+        # refused the text without having to infer it from `decided_by`.
+        scored = ScoreResult(risk_score=score, label="grievance",
+                             label_scores={"not_grievance": round(1.0 - score, 6),
+                                           "grievance": round(score, 6)},
+                             model_version=self.grievance.version, inference_ms=0.0)
+        fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value, score)
+        # `total` has to include the model that decided. Left to default it would report the
+        # gate's 0.1 ms for a request that spent 12 ms in this model, and the one number an
+        # operator reads first would be the one that is wrong.
+        total_ms = gate_ms + (stages.ms.get("grievance", 0.0) if stages else 0.0)
+        return self._build(req, Decision.REJECT, Stage.GRIEVANCE, gate, scored, gate_ms,
+                           total_ms, [], [], None, fb, [], stages)
+
     def not_moderated_result(self, req: ModerationRequest) -> dict:
         """Result for a feature whose moderation is switched off.
 
@@ -232,6 +261,18 @@ class Pipeline:
             return self.gate_only_result(req, gate, gate_ms)
 
         stages = _Stages()
+        # The public-surface complaint model, before the main one. Its question is different
+        # and it only runs on the surfaces settings.yaml names, so a proposal never reaches it
+        # and `score is None` records that nothing looked rather than that nothing was found.
+        #
+        # Timed into `stages` because it is a second transformer: on a public surface an
+        # allowed post now pays for both models (~12 ms each on this host), and a latency
+        # number that hides half of that would be worse than no number.
+        with stages.time("grievance"):
+            refuse, grievance_score = self.grievance.check(req.content, req.content_type.value)
+        if refuse:
+            return self.grievance_result(req, gate, gate_ms, grievance_score, stages)
+
         score = _Scorer(self.models)
         # Leetspeak restored word by word ("F1rst c0py" -> "First copy"), same length, so every span
         # is scored on both texts and the riskier reading counts. Identical text when there's none.

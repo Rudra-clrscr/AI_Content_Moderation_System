@@ -1,0 +1,50 @@
+{
+  "version": "grievance-linear-v3",
+  "feature_version": 1,
+  "feature_bits": 18,
+  "threshold": 0.66,
+  "surfaces": [
+    "article",
+    "post",
+    "advertisement"
+  ],
+  "trained_on": {
+    "rows": 272935,
+    "skeletons": 71059
+  },
+  "metrics": {
+    "validation": {
+      "n": 25062,
+      "recall": 0.9501435014350144,
+      "false_positive_rate": 0.0006217455506334033,
+      "accuracy": 0.975420956029048,
+      "auc": 0.9951900945915498,
+      "ap": 0.9953905069176506
+    },
+    "test": {
+      "n": 23437,
+      "recall": 0.8345927094577763,
+      "false_positive_rate": 8.77654906090925e-05,
+      "accuracy": 0.9149635192217433,
+      "auc": 0.9999057703401499,
+      "ap": 0.9999093777070716
+    },
+    "eval_grievance_handwritten": {
+      "n": 52,
+      "recall": 0.6153846153846154,
+      "false_positive_rate": 0.038461538461538464,
+      "accuracy": 0.7884615384615384,
+      "auc": 0.9023668639053255,
+      "ap": 0.9035445166949692
+    },
+    "eval_grievance_handwritten_2": {
+      "n": 38,
+      "recall": 0.7222222222222222,
+      "false_positive_rate": 0.0,
+      "accuracy": 0.868421052631579,
+      "auc": 0.9027777777777778,
+      "ap": 0.9183103507816153
+    }
+  },
+  "note": "Public surfaces only. The main model is surface-blind and must stay that way; this one answers 'is this a complaint published where it does not belong'."
+}

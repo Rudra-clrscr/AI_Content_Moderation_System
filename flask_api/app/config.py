@@ -10,6 +10,9 @@ Env overrides (all optional):
     THRESHOLD_REJECT_MIN  float, risk >= this -> reject
     CELERY_BROKER_URL / CELERY_RESULT_BACKEND
     ADMIN_TOKEN           enables POST /v1/admin/model/reload when set
+    GRIEVANCE_CHECK       0 to turn off the public-surface complaint model (app/grievance.py);
+                          the gate's complaint.public_grievance rule is then the only cover
+    GRIEVANCE_REJECT_MIN  float, overrides the threshold the grievance bundle was trained with
     RESULT_SINK           sql | log
     DEMO_PAGE             1 to serve the demo UI at /demo (off by default)
     TARGETED_ABUSE        0 to turn off per-sentence scoring of text aimed at someone
@@ -48,6 +51,7 @@ from app.clip import VisualCheck, VisualConfig
 from app.ocr import OcrConfig, OcrEngine
 from app.pdf import PdfLimits
 from app.targeted import DEFAULT_SUBJECTS, SentenceScan, TargetedAbuse, WordScan
+from app.grievance import GrievanceCheck
 from app.triage import TriageFilter
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -85,6 +89,7 @@ class Settings:
     sentence_scan: SentenceScan = field(default_factory=SentenceScan)
     word_scan: WordScan = field(default_factory=WordScan)
     triage: TriageFilter = field(default_factory=TriageFilter)   # disabled unless a bundle is configured
+    grievance: GrievanceCheck = field(default_factory=GrievanceCheck)  # public surfaces only; see app/grievance.py
     pdf: PdfLimits = field(default_factory=PdfLimits)
     media: MediaLimits = field(default_factory=MediaLimits)
     ocr: OcrEngine = field(default_factory=lambda: OcrEngine(OcrConfig(enabled=False)))
@@ -122,6 +127,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
     sc = raw.get("sentence_scan", {})
     ws = raw.get("word_scan", {})
     tr = raw.get("triage", {})
+    gr = raw.get("grievance", {})
     pdf = raw.get("pdf", {})
     ocr = pdf.get("ocr", {})
     med = raw.get("media", {})
@@ -131,6 +137,13 @@ def load_settings(path: str | Path | None = None) -> Settings:
     triage = (TriageFilter.load(_resolve(tr.get("dir", "models/triage-v1")),
                                 None if triage_threshold is None else float(triage_threshold))
               if _as_bool(env("TRIAGE", tr.get("enabled", True))) else TriageFilter())
+    grievance_threshold = env("GRIEVANCE_REJECT_MIN", gr.get("threshold"))
+    grievance = GrievanceCheck.load(
+        _resolve(gr.get("dir", "models/grievance-v1")),
+        enabled=_as_bool(env("GRIEVANCE_CHECK", gr.get("enabled", True))),
+        threshold=None if grievance_threshold is None else float(grievance_threshold),
+        surfaces=tuple(gr.get("surfaces") or ()) or None,
+    )
 
     return Settings(
         mode=env("MODERATION_MODE", raw.get("mode", "sync")),
@@ -186,6 +199,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
             max_calls=int(ws.get("max_calls", 40)),
         ),
         triage=triage,
+        grievance=grievance,
         pdf=PdfLimits(
             enabled=_as_bool(env("PDF_UPLOAD", pdf.get("enabled", True))),
             max_bytes=int(pdf.get("max_bytes", 25_000_000)),

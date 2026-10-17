@@ -66,3 +66,33 @@ flask_api/models/v6_candidate/
 # git like every other third-party weight; scripts/build_clip_prompts.py --family siglip2 rebuilds.
 flask_api/models/img_v2/
 flask_api/models/img_v2_softmax/
+
+# The public-surface grievance model (app/grievance.py). A DeBERTa bundle, so another 371 MB
+# of LFS next to models/v6's 371 MB - 742 MB against a 1 GB free tier, and every clone would
+# pull both. Same reasoning as v5 above.
+#
+# It is fully reproducible, which is why it is safe to leave out:
+#   python training/generate_support_complaints.py
+#   python training/train_grievance.py --write-splits D:/AI/bonc-grievance-data
+#   python training/train.py --data D:/AI/bonc-grievance-data --out D:/AI/bonc-grievance/ckpt --epochs 2 --max-len 192
+#   python training/calibrate_export.py --ckpt D:/AI/bonc-grievance/ckpt --data D:/AI/bonc-grievance-data \
+#          --bundle flask_api/models/grievance-v1 --version grievance-deberta-v1 --max-len 192
+#
+# models/grievance-linear-v1 IS tracked, all 928 KB of it: hashed n-grams over the same data,
+# 78% caught against the transformer's 83% on the hand-written set, and it means a fresh clone
+# has working cover rather than a disabled check. Point settings.yaml at it, or rebuild above.
+flask_api/models/grievance-v1/
+
+# Candidate text bundles under test (models/v6new, v6r2, ...). Same reasoning as the grievance
+# bundle: 371 MB each against a 1 GB LFS tier, and a candidate that has not passed
+# training/accept_model.py has no business in anyone else's clone. The one that passes gets
+# tracked deliberately, under its own name.
+flask_api/models/v6new/
+flask_api/models/v6r2/
+
+# The bundle models/v6 held before the retrain, kept so the before/after comparison stays
+# runnable on this machine. Its LFS object is the same OID that v6 already had, so tracking it
+# would cost no storage - but nobody else needs a copy of the superseded model under a second
+# name, and a path called "original" in a clone invites exactly the wrong guess about which
+# one is live.
+flask_api/models/v6_original/

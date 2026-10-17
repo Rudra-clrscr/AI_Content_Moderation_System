@@ -21,6 +21,13 @@ GRIEVANCES = [
     "Your system says my package was delivered, but I have checked everywhere and it is not here.",
     "My claim was denied based on a clause hidden deep within the fine print.",
     "that company's delivery system is very bad",
+    # How the courier behaved. The goods are fine here; the handling is the complaint, so none
+    # of the patterns above see these. The first one is verbatim what was published.
+    "The driver left my fragile package out in the pouring rain instead of placing it under the covered porch",
+    "The courier dumped the parcel in the rain and walked off.",
+    "My package was left unattended on the street for three hours.",
+    "The delivery boy threw the box over the gate.",
+    "Their delivery guy was extremely rude when I asked for a signature.",
 ]
 
 # Same vocabulary, legitimate use. Each one is a sentence a member could reasonably publish.
@@ -32,6 +39,12 @@ NOT_GRIEVANCES = [
     "Stainless steel kitchen sinks, 304 grade. GST invoice with every order.",
     "Our support team is available all week.",
     "Please confirm whether the consignment was delivered on Tuesday.",
+    # A logistics company describing its own handling uses the same words in the present tense.
+    # This is why every courier pattern requires a past-tense act on a specific consignment.
+    "Our drivers never leave a parcel in the rain; every doorstep drop is photographed.",
+    "We do not leave a package unattended - someone must sign for it.",
+    "Rain covers are standard on every consignment we move during the monsoon.",
+    "Our delivery staff are trained in handling fragile goods.",
 ]
 
 PUBLIC = ("article", "post", "advertisement")
