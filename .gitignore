@@ -102,3 +102,4 @@ flask_api/models/v6_original/
 # train_grievance.py --write-splits -> train.py -> calibrate_export.py --min-temperature 1.0.
 # models/grievance-linear-v4 stays tracked at 928 KB so a fresh clone has working cover.
 flask_api/models/grievance-v2/
+flask_api/models/grievance-v3/

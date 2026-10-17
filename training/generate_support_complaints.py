@@ -476,6 +476,80 @@ NEGATIVE_FRAMES = [
     "It rained all day and the courier could not reach us.",
     "The roads were flooded so nothing moved yesterday.",
     "Factory is shut for the festival so dispatch resumes {day}.",
+    # ROUND 4. accept_system.py with public_label left 39 genuine false positives, and they
+    # fall into eight shapes. The model has learned "negative about a counterparty" when the
+    # target is "complaint", and these are the families that separate them.
+    #
+    # PROFESSIONAL CRITICISM - an assessment, with a reason, often with a caveat. This is how
+    # members help each other choose a supplier and it must publish.
+    "I disagree with his approach to pricing, though he explained his reasoning clearly.",
+    "His quotation was unrealistic for our budget, so we went with another mill.",
+    "Her lead time estimate was optimistic and the order slipped by ten days.",
+    "Their technical answer was not detailed enough for our compliance team.",
+    "We do not agree with their assessment of demand for this season.",
+    "His costing sheet looks wrong to us; we have asked for a revised version.",
+    "He is new to this category and still learning, so we inspect every consignment.",
+    "I would not use them for urgent work, but their standard orders are reliable.",
+    "Good for bulk, not for small lots - it depends what you need.",
+    "Their strength is price rather than speed; choose accordingly.",
+    "The supplier disagreed with our test results and sent the sample to a third-party lab.",
+    "Our auditor found three gaps in their process and they fixed all of them.",
+    "He misread our drawing and machined the part 2 mm short. We resent the file.",
+    "Strong on finishing, weaker on documentation - worth knowing before you order.",
+    "A good fit for standard sizes, less so for custom work.",
+    # LEGAL AND CONTRACT NOTICE - a consequence stated under an agreement. Not a grievance;
+    # this is the machinery a contract runs on.
+    "We will escalate this to our legal team if the invoice remains unpaid.",
+    "We may have to terminate the contract if quality does not improve.",
+    "There will be commercial consequences for the partnership if this continues.",
+    "Continued non-payment will result in suspension of further supply.",
+    "Please treat this as formal notice of our intention to rescind.",
+    "We will withhold the final payment until the defects are rectified.",
+    "We will be forced to reconsider the renewal in March.",
+    "Failure to respond within ten days will be treated as refusal.",
+    "This is the last time we will accept a late consignment.",
+    "We cannot be held responsible for what happens after handover.",
+    "The agreement permits cancellation on seven days written notice.",
+    "Liquidated damages apply from the first day of delay, as agreed.",
+    "We reserve the right to pursue damages for the delayed consignment.",
+    "This matter will be referred to arbitration as per the contract.",
+    "Repeated short deliveries will affect the vendor rating.",
+    # PROPER CHANNEL - describing that a dispute is being handled properly, which is the
+    # OPPOSITE of a public callout and was being refused as if it were one.
+    "Arbitration clause has been invoked. Nothing further to discuss publicly.",
+    "We have written to their account manager and copied their regional office.",
+    "We have escalated the matter through their support portal as the contract requires.",
+    "Our legal team is corresponding with them about the shortfall.",
+    "Raised a formal complaint on their grievance portal, reference number received.",
+    "The matter is with the insurer and we are waiting for the surveyor.",
+    "We are following the escalation matrix agreed in the contract.",
+    # SAFETY ADVICE - warning other members about a pattern, not about a company.
+    "Report abusive messages instead of replying to them.",
+    "A supplier asking for a processing fee up front is a warning sign.",
+    "Never release goods against a screenshot of a payment.",
+    "Check the GST number on the portal before you ship on credit.",
+    "If a buyer refuses a call before paying an advance, be careful.",
+    "Verify the bank details by phone, not by email, before the first transfer.",
+    "A rate far below the market usually means something is wrong with the goods.",
+    # BALANCED REVIEW - a problem that was resolved, which reads as a complaint to a model
+    # that only sees the problem half.
+    "Their dispatch team is slow to respond but the goods are always as described.",
+    "The machine stopped working after a week. Their technician came the next day and fixed it.",
+    "Packing was fine but the colour was a shade darker than the sample; we accepted the lot.",
+    "There was a delay, they told us in advance and credited the freight.",
+    "One carton was short and the replacement reached us within 48 hours.",
+    "Not the cheapest, but we have never had a quality issue in three years.",
+    "They had a bad quarter on delivery and have since fixed the process.",
+    # ANNOUNCEMENTS AND NOTICES - plain operational news.
+    "We have moved to a bigger warehouse in {place}. Our phone numbers stay the same.",
+    "The factory is closed for the festival from the 12th; dispatch resumes on the 18th.",
+    "Our new catalogue for the season is live on the portal.",
+    "We have added a second production line and lead times are shorter now.",
+    "New GST registration for our {place} branch is effective from this month.",
+    "Hamare paas 20 saal ka experience hai, quality mein koi compromise nahi.",
+    "Godown mein jagah kam hai isliye abhi zyada stock nahi le sakte.",
+    "i dont know how to use this app properly please help",
+    "My son broke his arm playing football, so I was away from the shop last week.",
     # Hinglish negatives
     "{thing_cap} time par aa gaya, dhanyavaad.",
     "{firm_cap} ke saath humara experience acha raha.",
@@ -557,6 +631,8 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=ROOT / "res" / "support_complaints.csv")
     ap.add_argument("--positives", type=int, default=50_000)
     ap.add_argument("--negatives", type=int, default=25_000)
+    ap.add_argument("--long-articles", type=int, default=12_000,
+                    help="editorial articles WITH a setback sentence inside, label 0")
     ap.add_argument("--seed", type=int, default=17)
     ap.add_argument("--reconcile", action="store_true",
                     help="also print the label-0 templates in res/public_callouts.csv that "
@@ -595,6 +671,37 @@ def main() -> int:
     n = emit(NEGATIVE_FRAMES, args.negatives, 0, "legitimate_commercial",
              NEUTRAL_OPENERS, NEUTRAL_TAILS)
 
+    # LONG ARTICLES, which nothing above produces. Six legitimate long articles were being
+    # refused - "How our family pickle business survived the lockdown", "A visit to a cotton
+    # farm in Vidarbha", "Why we stopped selling to one big retailer" - and every one of them
+    # contains a sentence about something going wrong. That is what makes it a story rather
+    # than a brochure.
+    #
+    # So these are built deliberately WITH a setback inside: four to eight editorial sentences
+    # and one complaint sentence among them, labelled 0. A model that has only ever seen the
+    # complaint sentence alone learns that the paragraph around it does not matter, and a
+    # member writing honestly about a bad quarter gets told to rewrite.
+    openers = ["Lessons from a difficult season", "What we learned the hard way",
+               "Notes from the shop floor", "How we fixed our dispatch problem",
+               "Our first year exporting", "Why we changed suppliers",
+               "A visit to our weaving unit", "Three things that cost us money",
+               "What nobody tells you about bulk orders", "The year we nearly closed"]
+    made = 0
+    for _ in range(args.long_articles * 4):
+        if made >= args.long_articles:
+            break
+        body = [fill(rng, f) for f in rng.sample(NEGATIVE_FRAMES, rng.randint(4, 7))]
+        setback = fill(rng, rng.choice(SUPPORT_FRAMES + EMOTIONAL_FRAMES))
+        body.insert(rng.randint(1, len(body) - 1), setback)
+        text = rng.choice(openers) + "\n\n" + " ".join(body)
+        if text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        rows.append({"text": text, "label": 0, "category": "long_article",
+                     "kind": "whole", "template": "long_article"})
+        made += 1
+    counts = made
+
     rng.shuffle(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8", newline="") as fh:
@@ -607,6 +714,7 @@ def main() -> int:
     print(f"  {e:,} emotional outcry          (label 1)")
     print(f"  {h:,} Hinglish complaints       (label 1)")
     print(f"  {n:,} legitimate commercial     (label 0)")
+    print(f"  {counts:,} long articles with a setback inside (label 0)")
     print(f"  {len(set(r['template'] for r in rows)):,} distinct skeletons")
 
     if args.reconcile:
