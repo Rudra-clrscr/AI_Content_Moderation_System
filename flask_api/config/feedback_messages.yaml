@@ -49,6 +49,7 @@ categories:
   profanity: profanity
   fraud: fraud and scams
   spam: spam
+  politics: political commentary
   # From config/visual_policy.yaml, by way of app/api.py::_visual_reject. These were missing
   # and the raw label was being shown.
   weapons: weapons
@@ -67,6 +68,9 @@ rules:
   payment.off_platform: >-
     Payments must go through BONC. Remove requests to pay by crypto, gift cards
     or money-transfer services.
+  offtopic.political_opinion: >-
+    BONC is a trade network. Remove opinion about politicians, parties or conflicts.
+    Writing about how a policy, tariff or budget affects your business is welcome.
   profanity.wordlist: Remove the profanity. Keep posts professional.
   # Visual refusals come through as `visual.<label>`. This one needs saying, because there IS
   # an allowed version of what the author just tried and they will otherwise re-upload it.
