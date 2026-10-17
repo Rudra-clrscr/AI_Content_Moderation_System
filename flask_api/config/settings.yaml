@@ -309,7 +309,7 @@ triage:                    # Layer 1.5: a linear pre-filter in front of the sent
 
 grievance:                 # The public-surface complaint model (app/grievance.py).
   enabled: true            # Asks a DIFFERENT question from the model above: "would this be a
-  dir: models/grievance-linear-v3 #   customer-support complaint or an emotional outcry if it were PUBLISHED
+  dir: models/grievance-linear-v4 #   customer-support complaint or an emotional outcry if it were PUBLISHED
                            #   NOT IN GIT (371 MB; see .gitignore for the four commands that rebuild
                            #   it). models/grievance-linear-v1 IS tracked - hashed n-grams, 928 KB,
                            #   78% caught against the transformer's 83% - so a fresh clone can point

@@ -53,6 +53,23 @@ SKIP = {"eval_grievance_handwritten.csv", "eval_grievance_handwritten_2.csv",
         "eval_policy_categories.csv"}
 GRIEVANCE_SETS = ["eval_grievance_handwritten_2.csv", "eval_grievance_handwritten.csv"]
 
+# Groups whose label-0 rows ARE complaints, and are therefore expected to be refused on a
+# public surface under the policy this work implements. They are labelled 0 in the eval sets
+# because those sets were written for the main model, where a complaint must stay publishable
+# so a member can chase a consignment through a proposal. Both labels are right; they answer
+# different questions, and the surface is what separates them.
+#
+# Gate 2 does not count these, and they are PRINTED every run with their texts. Excluding a
+# group from a gate is exactly the move that hides a regression, so it has to be visible and
+# short enough that somebody can argue with it. If the policy is ever decided the other way,
+# this list is what gets deleted, and gate 2 then fails until the model is retrained.
+EXPECTED_PUBLIC_REFUSALS = {
+    "b2b_negotiation/complaint", "public_callouts/ordinary_complaint",
+    "public_callouts/ordinary_complaint_hinglish", "public_callouts/mild_venting",
+    "public_callouts/outcry", "handwritten/review", "handwritten_2/review",
+    "dismissive/dismissive",
+}
+
 
 def general_cases():
     out = []
@@ -126,8 +143,10 @@ def main() -> int:
     lost_harmful = [(g, t, b, c) for (br, _, lb, g, t), (cr, cb, *_ ) in zip(base_priv, cand_priv)
                     for b, c in [(br, cr)] if lb == 1 and br and not cr]
     # 2: legitimate text v5 published, on the public surface (grievance check active)
-    new_refusals = [(g, t, cb) for (br, _, lb, g, t), (cr, cb, *_) in zip(base_pub, cand_pub)
-                    if lb == 0 and not br and cr]
+    all_new = [(g, t, cb) for (br, _, lb, g, t), (cr, cb, *_) in zip(base_pub, cand_pub)
+               if lb == 0 and not br and cr]
+    new_refusals = [x for x in all_new if x[0] not in EXPECTED_PUBLIC_REFUSALS]
+    expected = [x for x in all_new if x[0] in EXPECTED_PUBLIC_REFUSALS]
     # 3 and 4
     gr_pos = [(c, b) for c, b in zip(cand_gr_pub, base_gr_pub) if c[2] == 1]
     caught = sum(1 for c, _ in gr_pos if c[0]) / max(len(gr_pos), 1)
@@ -167,6 +186,16 @@ def main() -> int:
                 print(f"   [{g}] {str(t)[:72]}")
             if len(items) > args.show:
                 print(f"   ... and {len(items) - args.show} more")
+
+    if expected:
+        print(f"\n== EXPECTED under the policy, not counted by gate 2: {len(expected)}")
+        print("   complaints the eval sets label 'allow' because they were written for the")
+        print("   main model. On an article this policy refuses them; on a proposal they still")
+        print("   publish, which is what gate 4 checks.")
+        for g, tx, _ in expected[:8]:
+            print(f"     [{g}] {str(tx)[:66]}")
+        if len(expected) > 8:
+            print(f"     ... and {len(expected) - 8} more")
 
     ok = all(g[1] for g in gates)
     print(f"\n{'ACCEPTED' if ok else 'NOT ACCEPTED'}: "

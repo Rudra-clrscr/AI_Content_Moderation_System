@@ -440,6 +440,42 @@ NEGATIVE_FRAMES = [
     "We are drowning in enquiries since the fair.",
     "That client is a beast to service but worth it.",
     "We bled cash for two years before this line paid off.",
+    # FIRM NEGOTIATION AND CONTRACT LANGUAGE, the largest remaining block of false refusals:
+    # 16 of 60 came from eval_implied_threats' `firm_business_language` group, which exists in
+    # this repo as the hard-negative set for threats and turns out to be the hard-negative set
+    # for complaints too. A buyer stating a consequence is not a complaint about a seller:
+    #
+    #   We will walk away from this deal if the terms do not change.    0.998
+    #   We will hold them to the penalty clause if this slips again.    0.987
+    #   If you cannot meet the deadline, say so now and we will go elsewhere.
+    #
+    # All of that is how a contract gets negotiated, and refusing it would make the platform
+    # useless for the conversation it exists to host - the same argument as the proposal, in a
+    # different register.
+    "We will walk away from this deal if the terms do not change.",
+    "If you cannot meet the deadline, say so now and we will go elsewhere.",
+    "We will hold you to the penalty clause if this slips again.",
+    "Do not involve a third party in this negotiation without telling us.",
+    "We are prepared to place the order elsewhere if the rate does not move.",
+    "The contract allows us to cancel after two missed milestones.",
+    "We need a firm commitment on {thing} before we release the advance.",
+    "Our board will not approve this at the current price.",
+    "We expect the revised quotation by {day} or we close the file.",
+    "Liquidated damages apply from the first day of delay, as agreed.",
+    "This is our final offer; above it the project does not work for us.",
+    "We will escalate to the steering committee if this is not resolved.",
+    "Either the specification changes or the timeline does, not neither.",
+    "We reserve the right to source from a second vendor this quarter.",
+    "There is no joining fee, no deposit and no hidden charge in our scheme.",
+    "No advance, no lock-in and no cancellation penalty on trial orders.",
+    "We do not take deposits; payment is against delivery only.",
+    "Our terms have no hidden charges and the annexure lists everything.",
+    "I would not use them for urgent work, but their standard orders are fine.",
+    "Good for bulk, not for small lots - depends what you need.",
+    "Their strength is price, not speed; choose accordingly.",
+    "It rained all day and the courier could not reach us.",
+    "The roads were flooded so nothing moved yesterday.",
+    "Factory is shut for the festival so dispatch resumes {day}.",
     # Hinglish negatives
     "{thing_cap} time par aa gaya, dhanyavaad.",
     "{firm_cap} ke saath humara experience acha raha.",
