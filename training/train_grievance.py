@@ -311,7 +311,11 @@ def main() -> int:
     np.savez_compressed(args.out / "grievance.npz", weights=weights,
                         intercept=np.float32(clf.intercept_[0]))
     meta = {
-        "version": "grievance-linear-v1",
+        # From the output directory, not a constant. It was "grievance-linear-v1"
+        # hardcoded, so v3 and v4 both reported themselves as v1 in the service log and
+        # in model_version on every result - which is the kind of thing that makes an
+        # hour of debugging look like a model regression.
+        "version": args.out.name,
         "feature_version": FEATURE_VERSION,
         "feature_bits": FEATURE_BITS,
         "threshold": threshold,

@@ -321,7 +321,24 @@ grievance:                 # The public-surface complaint model (app/grievance.p
     - article              #   list is never checked, including a new one - a classifier refusing a
     - post                 #   whole genre on a surface nobody reviewed is the regression this whole
     - advertisement        #   design exists to prevent. Add a surface deliberately, not by default.
-                           # threshold: 0.60   # uncomment to override the trained threshold
+  threshold: 0.99          # NOT the trained threshold (0.60), and chosen by sweeping the curve
+                           # rather than by trusting the training run. Measured on 274 held-out
+                           # legitimate texts and 44 hand-written grievances:
+                           #
+                           #     0.60   caught 72.7%   refused 22.3% of legitimate text
+                           #     0.90   caught 54.5%   refused  9.5%
+                           #     0.99   caught 27.3%   refused  1.8%
+                           #
+                           # Refusing one legitimate post in ten is worse than missing a
+                           # complaint, because the author sees it and the miss is invisible.
+                           # 0.99 buys precision with recall deliberately. The gate rule
+                           # complaint.public_grievance still catches the common shapes
+                           # deterministically underneath, so this is the model's share only.
+                           #
+                           # The transformer bundle (models/grievance-v1) is NOT used: it is
+                           # saturated - 33-35% of legitimate text refused at EVERY threshold
+                           # from 0.5 to 0.9999 - so the dial cannot rescue it. Retraining it
+                           # on the corrected negatives is the open work.
                            # GRIEVANCE_CHECK=0 turns it off; config/gate_patterns.yaml's
                            # complaint.public_grievance rule then becomes the only cover again.
 

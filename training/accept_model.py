@@ -44,6 +44,17 @@ sys.path.insert(0, str(ROOT / "flask_api"))
 
 SKIP = {"eval_grievance_handwritten.csv", "eval_grievance_handwritten_2.csv"}
 
+# Categories deferred by decision, not by oversight. They STILL COUNT as failures in gate 1 -
+# a deferred regression is still a regression - and are only listed separately so the number
+# reads as "N real, M deferred" instead of being re-argued every run. Nothing is subtracted.
+# Excluding them is the move that lets a model ship with holes nobody can see any more.
+#
+# Hinglish, deferred 2026-10-17 to its own training round. The two affected texts pull in
+# opposite directions, so no partial fix was honest - see generate_v7_gaps.py.
+DEFERRED = {"handwritten/hinglish", "dismissive/hinglish_heldout",
+            "public_callouts/callout_hinglish", "public_callouts/outcry_hinglish",
+            "public_callouts/ordinary_complaint_hinglish", "public_callouts/neutral_hinglish"}
+
 ROBUSTNESS = [
     ("I have called their customer support six times and nobody helps.",
      "I have called customer support six times and nobody helps.", "pronoun 'their'"),
@@ -163,7 +174,8 @@ def main() -> int:
     print("=" * 78)
 
     if len(lost):
-        deferred = lost[lost.apply(lambda r: f"{r['set']}/{r['group']}" in DEFERRED, axis=1)]
+        keys = [f"{s}/{g}" for s, g in zip(lost["set"], lost["group"])]
+        deferred = lost[[k in DEFERRED for k in keys]]
         if len(deferred):
             print(f"\n  {len(deferred)} of these are in DEFERRED categories - still counted, "
                   f"because a deferred regression is still a regression:")
