@@ -394,6 +394,16 @@ rules:
       - '\b(?:threw|tossed|chucked|flung)\b[^.!?]{0,40}\b(?:package|parcel|order|box|shipment|item|product|consignment)\b[^.!?]{0,30}\b(?:over|across)\s+the\s+(?:gate|wall|fence|hedge|railing)\b'
       - '\b(?:left|dumped|abandoned)\b[^.!?]{0,50}\b(?:package|parcel|order|consignment|shipment|item|product)\b[^.!?]{0,60}\b(?:unattended|on\s+the\s+(?:street|road|pavement|footpath)|outside\s+the\s+(?:gate|door|house|building|shop))\b'
       - '\b(?:driver|courier|delivery\s+(?:guy|boy|man|person|agent|executive|partner)|delivery\s+staff)\b[^.!?]{0,40}\b(?:was|were)\s+(?:very\s+|extremely\s+|really\s+|so\s+)?(?:rude|abusive|careless|reckless|negligent|unprofessional)\b'
+      # Delivered to the wrong place, and a refund channel that will not open. Both reported
+      # from the live feed: "The driver delivered my order to the wrong address, and the app
+      # refuses to let me submit a refund request." The model scores that 0.598 as a whole and
+      # 0.971 on its first sentence alone - the second clause dilutes it below any threshold
+      # that is safe to run - so the rule carries it.
+      - '\b(?:delivered|dropped|left)\b[^.!?]{0,40}\b(?:my|our|the)\s+(?:order|parcel|package|consignment|shipment|item)\b[^.!?]{0,40}\bto\s+the\s+wrong\s+(?:address|place|house|shop|pin\s?code|location)\b'
+      - '\b(?:my|our|the)\s+(?:order|parcel|package|consignment|delivery)\b[^.!?]{0,40}\bwent\s+to\s+the\s+wrong\s+(?:address|place|person|city)\b'
+      - '\b(?:app|website|portal|system|site)\b[^.!?]{0,40}\b(?:refuses?|refused|will\s+not|won''t|does\s+not|doesn''t|would\s+not)\b[^.!?]{0,30}\b(?:let|allow)\b[^.!?]{0,30}\b(?:submit|raise|file|lodge|register)\b[^.!?]{0,20}\b(?:refund|claim|complaint|return|ticket|request)\b'
+      - '\b(?:cannot|can''t|unable\s+to|not\s+able\s+to)\b[^.!?]{0,25}\b(?:submit|raise|file|lodge|register)\b[^.!?]{0,20}\b(?:a\s+)?(?:refund|return|claim|complaint)\s+(?:request|claim)?\b'
+      - '\b(?:refund|return|claim)\s+(?:request|option|button)\b[^.!?]{0,30}\b(?:blocked|disabled|greyed\s+out|not\s+available|keeps?\s+failing)\b'
 
   - id: defamation.corporate_smear
     category: abuse
