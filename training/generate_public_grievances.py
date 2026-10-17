@@ -66,6 +66,13 @@ GRIEVANCE_FRAMES = [
     "That company's delivery system is very bad and nobody there seems to care.",
     "Their service is really poor and the staff are useless.",
     "This supplier's quality is terrible compared to what was promised.",
+    # Courier conduct: the goods are fine, the handling is the complaint.
+    "The driver left my fragile {parcel} out in the pouring rain instead of under the porch.",
+    "The courier dumped my {parcel} in the rain and walked off without knocking.",
+    "My {parcel} was left unattended on the street for hours.",
+    "The delivery boy threw the {parcel} over the gate.",
+    "Their delivery agent was extremely rude when I asked him to wait for a signature.",
+    "He left my {parcel} outside the gate in the heavy rain.",
 ]
 
 # ---- the negatives: same words, legitimate use --------------------------------------
@@ -90,6 +97,10 @@ NEGATIVE_FRAMES = [
     "The first wash may soften the fabric; that is normal for this weave.",
     "Case study: how we cut damaged-in-transit rates from 4% to under 1%.",
     "A guide to reading warranty terms before you sign a supply contract.",
+    "Our drivers never leave a {parcel} in the rain; every doorstep drop is photographed.",
+    "We do not leave a {parcel} unattended - someone must sign for it.",
+    "Rain covers are standard on every consignment we move during the monsoon.",
+    "Our delivery staff are trained in handling fragile goods.",
 ]
 
 
