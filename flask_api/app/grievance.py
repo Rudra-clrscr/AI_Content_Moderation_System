@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -140,11 +141,62 @@ class GrievanceCheck:
     def check(self, text: str, content_type: str | None) -> tuple[bool, float | None]:
         """(refuse this on this surface, score). Score is None when the check did not run,
         so a caller can tell "looked and found nothing" from "never looked" - the same
-        distinction `visual_content_checked` draws for pictures."""
+        distinction `visual_content_checked` draws for pictures.
+
+        The score is the HIGHEST of the whole text and its individual sentences, because a
+        complaint diluted by an ordinary clause was scoring below any usable threshold. From
+        the live feed:
+
+            "The driver delivered my order to the wrong address, and the app refuses to
+             let me submit a refund request."          whole 0.598, first clause 0.971
+
+        The main model has had this since 1.3 - app/targeted.py scans sentences for exactly
+        the same reason, a scam tacked onto a listing - and this check never did. Whole text
+        first, so the common case costs one call and short posts cost nothing extra.
+        """
         if not self.applies_to(content_type):
             return False, None
         score = self.probability(text)
+        if score < self.threshold:
+            for part in _sentences(text):
+                score = max(score, self.probability(part))
+                if score >= self.threshold:
+                    break
         return score >= self.threshold, score
+
+
+_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+# Clauses too, not only sentences. The text that prompted this is ONE sentence:
+#
+#   "The driver delivered my order to the wrong address, and the app refuses to let me
+#    submit a refund request."          whole 0.598, first clause 0.971
+#
+# so splitting on full stops alone changed nothing. A comma followed by a conjunction, or a
+# semicolon, is where a second thought gets attached - and that is exactly where a complaint
+# gets diluted by something ordinary.
+_CLAUSE = re.compile(r",\s+(?:and|but|so|yet|although|though|while)\s+|;\s+")
+
+MIN_SENTENCE_CHARS = 25          # below this a fragment is too short to judge on its own
+MAX_SENTENCES = 12               # a cap, so a long article cannot turn one check into fifty
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentences, and the clauses of long ones, worth scoring on their own. Returns nothing
+    for a short single-clause post, so the common case does no extra work at all."""
+    out: list[str] = []
+    for sentence in _SENTENCE.split(text):
+        sentence = sentence.strip()
+        if len(sentence) < MIN_SENTENCE_CHARS:
+            continue
+        out.append(sentence)
+        # Split a sentence further only when it is long enough that a clause can stand on its
+        # own. Below that the pieces are fragments, and a fragment scored out of context is
+        # how a check starts refusing "and nobody will fix it".
+        if len(sentence) >= 2 * MIN_SENTENCE_CHARS:
+            out.extend(c.strip() for c in _CLAUSE.split(sentence)
+                       if len(c.strip()) >= MIN_SENTENCE_CHARS)
+    deduped = list(dict.fromkeys(out))
+    return deduped[:MAX_SENTENCES] if len(deduped) > 1 else []
 
 
 def _hash(text: str):
