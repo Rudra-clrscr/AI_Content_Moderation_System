@@ -582,6 +582,22 @@ prevent.
 | `decided_by` | `model` | `grievance` |
 | "nobody has replied about my refund in two weeks" | allow | refuse on an article, never asked on a proposal |
 
+### What counts as a complaint on a public surface
+
+Decided 2026-10-17, because the eval sets cannot answer it: they label this text *allow*, and
+they are right to, for the main model.
+
+> "Their LR copy has the wrong destination pin code again."
+
+On an **article** this is refused. It is a complaint about a named counterparty published to
+the whole network, and the seller's own channel is where it belongs. On a **proposal** the
+identical sentence publishes, because there it is a member chasing a consignment with the
+party who can fix it.
+
+That is the whole design in one example, and it is why the two models disagree about this
+sentence on purpose. `training/accept_system.py` carries the list of eval groups this applies
+to, excluded from its false-positive gate and printed in full on every run.
+
 `GRIEVANCE_CHECK=0` turns it off; the gate's `complaint.public_grievance` rule is then the only
 cover, as it was before this existed.
 

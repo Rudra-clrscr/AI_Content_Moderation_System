@@ -59,6 +59,11 @@ GRIEVANCE_SETS = ["eval_grievance_handwritten_2.csv", "eval_grievance_handwritte
 # so a member can chase a consignment through a proposal. Both labels are right; they answer
 # different questions, and the surface is what separates them.
 #
+# DECIDED, not inferred. Asked directly on 2026-10-17 whether "Their LR copy has the wrong
+# destination pin code again" should be refused on an article, the answer was that it is
+# refused. So this list is policy, and a reader who disagrees with it is disagreeing with the
+# product decision rather than with a measurement convenience.
+#
 # Gate 2 does not count these, and they are PRINTED every run with their texts. Excluding a
 # group from a gate is exactly the move that hides a regression, so it has to be visible and
 # short enough that somebody can argue with it. If the policy is ever decided the other way,
