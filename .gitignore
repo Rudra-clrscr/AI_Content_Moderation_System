@@ -66,3 +66,19 @@ flask_api/models/v6_candidate/
 # git like every other third-party weight; scripts/build_clip_prompts.py --family siglip2 rebuilds.
 flask_api/models/img_v2/
 flask_api/models/img_v2_softmax/
+
+# The public-surface grievance model (app/grievance.py). A DeBERTa bundle, so another 371 MB
+# of LFS next to models/v6's 371 MB - 742 MB against a 1 GB free tier, and every clone would
+# pull both. Same reasoning as v5 above.
+#
+# It is fully reproducible, which is why it is safe to leave out:
+#   python training/generate_support_complaints.py
+#   python training/train_grievance.py --write-splits D:/AI/bonc-grievance-data
+#   python training/train.py --data D:/AI/bonc-grievance-data --out D:/AI/bonc-grievance/ckpt --epochs 2 --max-len 192
+#   python training/calibrate_export.py --ckpt D:/AI/bonc-grievance/ckpt --data D:/AI/bonc-grievance-data \
+#          --bundle flask_api/models/grievance-v1 --version grievance-deberta-v1 --max-len 192
+#
+# models/grievance-linear-v1 IS tracked, all 928 KB of it: hashed n-grams over the same data,
+# 78% caught against the transformer's 83% on the hand-written set, and it means a fresh clone
+# has working cover rather than a disabled check. Point settings.yaml at it, or rebuild above.
+flask_api/models/grievance-v1/

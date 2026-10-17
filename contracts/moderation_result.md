@@ -198,7 +198,7 @@ Layer 1 gate blocks the content:
 
 ```json
 {
-  "schema_version": "1.7",
+  "schema_version": "1.9",
   "request_id": "5b0c7e0e-…",
   "status": "completed",
   "content_id": "LST-10293",
@@ -226,7 +226,7 @@ Layer 1 gate blocks the content:
 | Field | Notes |
 |---|---|
 | `decision` | `allow` / `revise` / `reject`. *Changed in 1.2:* `review` was replaced by `revise`. There's no human-review queue; `revise` content isn't published, and its author is shown what to fix (see `feedback`) and can resubmit. *With v4* the thresholds are one boundary (`allow_max = reject_min = 0.5`): risk ≤ 0.5 is `allow`, risk > 0.5 is `reject`, and the author rewrites the highlighted parts and resubmits. `revise` then only comes from a gate `revise` rule. |
-| `decided_by` | `gate` means a Layer 1 rule decided: a `block` rule (model skipped), or a `revise` rule on content the model would have allowed. After a block, `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. `targeted` means the whole text passed, but a sentence aimed at someone scored in the revise or reject band (see `targeted_segments`). `sentence` (added in 1.3) means one sentence, scored on its own, reached reject level (see `sentence_scores`). |
+| `decided_by` | `gate` means a Layer 1 rule decided: a `block` rule (model skipped), or a `revise` rule on content the model would have allowed. After a block, `risk_score`, `predicted_label`, `label_scores`, `model_version` and `latency_ms.inference` are then `null`. `model` means the model's score decided it. `targeted` means the whole text passed, but a sentence aimed at someone scored in the revise or reject band (see `targeted_segments`). `sentence` (added in 1.3) means one sentence, scored on its own, reached reject level (see `sentence_scores`). `disabled` (*added in 1.8*) means NOTHING was checked: moderation is switched off for this `content_type`, so the `allow` is not a judgement and `risk_score` is `null` — see the `moderation` block. `grievance` (*added in 1.9*) means a second model, consulted on PUBLIC surfaces only, refused the text as a customer-support complaint or an emotional outcry; `risk_score` is that model's score, and the main model is not consulted. Do not read it as a `model` decision: the main model scores the same text as safe on purpose, because in a proposal it is a member chasing a consignment. |
 | `gate_matches` | A list of `{rule_id, category, action, spans}`. `spans` are `[start, end]` character offsets into `content` (added in 1.2). `block` rejects, `revise` sends the content back to its author, and `flag` is recorded only. |
 | `sentence_scores` | *Added in 1.3.* For posts with 2 or more sentences: every sentence scored on its own, up to `sentence_scan.max_sentences`, as `{start, end, risk_score}` (offsets into `content`). *1.5:* an entry with `"by": "prefilter"` was scored by the linear triage filter instead of the model (`app/triage.py`) — its `risk_score` comes from that filter, is far below `allow_max`, and never contributes to the decision. Entries without `by` are model scores, as before. Any sentence in the reject band (v4: risk > 0.5) rejects the post (`decided_by: "sentence"`). *1.4:* sentences longer than `word_scan.window_words` words are also scored in overlapping word windows, listed here with `"kind": "window"` (so a long run-on sentence can't dilute a harmful phrase); these can appear even for a single-sentence post. Empty for short single-sentence posts, gate blocks, posts already rejected, or when the scan is off. |
 | `word_scores` | *Added in 1.4.* The word-by-word scan, for each span the model flagged (risk above `allow_max`): every word as `{start, end, contribution}`, where `contribution` = risk of the span minus risk of the span with that word removed. The *trigger words* (in `feedback.issues[].words`) are the words with `contribution >= word_scan.min_contribution` (default 0.10). When no single word reaches that (the harm is spread over several words, or the score is saturated at 0.999), they are the smallest set, found greedily and at most `max_triggers`, whose removal brings the span back to ≤ `allow_max`. Long spans are analysed in their riskiest word window. Empty when nothing was flagged. |
@@ -556,6 +556,34 @@ one, with scores differing by at most 8.5e-03. The GPU build of onnxruntime repl
 one rather than sitting beside it; `flask_api/requirements.txt` has the two commands.
 `GET /ready` reports the provider actually in use, so whether pictures are being looked at is
 visible without reading a published result.
+
+## The public-surface grievance model (*added in 1.9*)
+
+A customer-support complaint published as an article is not the same act as the same sentence
+sent to a counterparty in a proposal. The first is a complaint about a company, hosted on a
+trade platform that is not that company's channel; the second is the platform working.
+
+The main model cannot draw that line, because it is given text and no surface, and it must not
+be taught to: an earlier round that refused this language made the portal useless for disputes,
+and `res/public_callouts.csv` still carries ~19,600 rows labelled *allow* to hold that fix in
+place. So a second model answers the other question —
+
+> would this be a customer-support complaint or an emotional outcry if it were PUBLISHED?
+
+— and `settings.yaml` names the surfaces it is consulted on (`article`, `post`,
+`advertisement`). On any other `content_type` it never runs, including a new one: a classifier
+that refuses a whole genre on a surface nobody reviewed is the regression this design exists to
+prevent.
+
+| | main model | grievance model |
+|---|---|---|
+| question | is this harmful anywhere | is this a complaint published where it does not belong |
+| surfaces | all | `article`, `post`, `advertisement` |
+| `decided_by` | `model` | `grievance` |
+| "nobody has replied about my refund in two weeks" | allow | refuse on an article, never asked on a proposal |
+
+`GRIEVANCE_CHECK=0` turns it off; the gate's `complaint.public_grievance` rule is then the only
+cover, as it was before this existed.
 
 ## Who writes to SQL Server
 

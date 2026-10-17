@@ -133,4 +133,8 @@ def test_schema_version_announces_the_new_field():
     # 1.7 added feedback.severity and media.visual. 1.8 adds the per-feature `moderation`
     # block and the `disabled` value for decided_by - a result that was never checked, which
     # a consumer must be able to tell apart from one that was checked and allowed.
-    assert SCHEMA_VERSION == "1.8"
+    # 1.9 adds `grievance` to decided_by: a customer-support complaint or an emotional outcry
+    # refused on a PUBLIC surface by a second model that is never consulted on a proposal. A
+    # consumer must not read it as a `model` decision, because the main model scores that same
+    # text as safe and would publish it in the dispute channel.
+    assert SCHEMA_VERSION == "1.9"

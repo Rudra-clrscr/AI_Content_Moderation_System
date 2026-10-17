@@ -1,0 +1,53 @@
+text,label,note
+"I have been chasing these people for six weeks and all I get is a new ticket number every time.",1,support desk loop
+"Three emails, two calls, one WhatsApp. Not a single reply about my money.",1,fragmented phrasing
+"Still no refund. Still no explanation. Still nothing.",1,repetition
+"They took the payment in four seconds and have taken four months to send a replacement.",1,contrast construction
+"Ordered on the 2nd, promised the 9th, and today is the 28th.",1,dates only
+"The guy on the phone actually laughed when I told him the unit had burnt out.",1,anecdote
+"Do not buy from them. That is the whole review.",1,terse warning
+"We have sent the signed POD twice and they keep saying it was never received.",1,documentary dispute
+"After eleven years of ordering from them this is how we are treated.",1,loyalty appeal
+"My elderly father paid for that cylinder and nobody will even pick up the phone.",1,third party harm
+"I am not angry any more, just tired of being lied to.",1,quiet emotional
+"Every single person I spoke to gave me a different answer.",1,inconsistency
+"They blamed the courier. The courier blamed them. I am out of pocket either way.",1,circular blame
+"Zero response. Zero accountability. Zero shame.",1,anaphora
+"What hurts is that we recommended them to two other members here.",1,emotional + reputational
+"I have a folder of screenshots and I am happy to share every one.",1,evidence threat
+"Their quality has gone downhill badly since last year and everyone in the trade knows it.",1,sector disparagement
+"Pehle paisa liya, phir phone uthana band kar diya.",1,hinglish
+"Bohot pareshan ho chuka hoon, koi solution hi nahi mil raha.",1,hinglish emotional
+"It is genuinely humiliating to have to beg for something you have already paid for.",1,humiliation
+"Never felt this helpless dealing with a company in my life.",1,emotional superlative
+"Honestly disgusted. That is the only word for it.",1,short outcry
+"The unit they sent as a replacement failed in exactly the same way after nine days.",1,repeat defect
+"They have had our deposit since March and the project was cancelled in April.",1,money held
+"Four rescheduled delivery slots and I took leave from work for each one.",1,consequential
+"I would like other members to know what we went through before they sign anything.",1,warning to network
+"Our support desk answers within one business day, Monday to Saturday.",0,service level, own voice
+"We publish our full refund policy on every product page.",0,policy description
+"Case study: cutting damaged-in-transit claims by 70% in one monsoon season.",0,editorial
+"A short guide to what you should photograph when a carton arrives torn.",0,guide using claim vocabulary
+"If a delivery slips we tell the buyer before they have to ask.",0,service promise
+"We were late on that consignment and we credited the freight without being asked.",0,business apologising properly
+"Our drivers are trained never to leave a parcel unattended at a gate.",0,policy, grievance vocabulary
+"Replacement units ship the same day for any manufacturing defect.",0,warranty description
+"Lead time is two weeks from order confirmation; GST invoice with every order.",0,listing
+"Payment terms remain 30 days net and the credit note has been raised.",0,correspondence
+"Their team closed our ticket the same afternoon, which we did not expect.",0,positive experience
+"We are delighted with how the Tiruppur consignment turned out.",0,positive
+"Recommending this vendor to other members after a genuinely good experience.",0,recommendation
+"Five questions worth asking a supplier before you place a bulk order.",0,listicle
+"Why a short shipment is usually a packing-list error rather than theft.",0,explainer
+"The audit of the rate revision will be held at Noida on the 15th.",0,logistics
+"Open to better ideas from the group on protecting cartons in transit.",0,discussion
+"Their pricing is very competitive and the lead times are short.",0,praise with comparative
+"We handle damaged-goods claims within 48 hours of photographs reaching us.",0,claims handling
+"Our escalation matrix is published in the contract annexure.",0,process
+"Thank you to everyone who advised us on the customs paperwork.",0,thanks
+"Stainless steel sinks, 304 grade, available in six finishes.",0,bare listing
+"An explainer on how warranty exclusions are normally worded in B2B contracts.",0,fine print vocabulary, editorial
+"Partial shipment is acceptable to us if the balance follows by month end.",0,negotiation
+"We have moved our grievance cell to a dedicated number for bulk buyers.",0,grievance vocabulary, own service
+"Quality control now samples every third carton instead of every tenth.",0,process improvement

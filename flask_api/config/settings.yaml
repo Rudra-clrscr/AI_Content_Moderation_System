@@ -307,6 +307,24 @@ triage:                    # Layer 1.5: a linear pre-filter in front of the sent
                            # threshold: 0.05   # uncomment to override the trained threshold (higher = skips more)
                            # TRIAGE=0 turns it off; decisions must not change, only latency.
 
+grievance:                 # The public-surface complaint model (app/grievance.py).
+  enabled: true            # Asks a DIFFERENT question from the model above: "would this be a
+  dir: models/grievance-v1 #   customer-support complaint or an emotional outcry if it were PUBLISHED
+                           #   NOT IN GIT (371 MB; see .gitignore for the four commands that rebuild
+                           #   it). models/grievance-linear-v1 IS tracked - hashed n-grams, 928 KB,
+                           #   78% caught against the transformer's 83% - so a fresh clone can point
+                           #   here and have working cover instead of a disabled check.
+                           #   to the network". The main model is surface-blind and must stay that
+                           #   way, because the same sentence in a proposal is a member chasing a
+                           #   consignment, which is the platform working.
+  surfaces:                #   Hence: consulted here and nowhere else. A content_type not on this
+    - article              #   list is never checked, including a new one - a classifier refusing a
+    - post                 #   whole genre on a surface nobody reviewed is the regression this whole
+    - advertisement        #   design exists to prevent. Add a surface deliberately, not by default.
+                           # threshold: 0.60   # uncomment to override the trained threshold
+                           # GRIEVANCE_CHECK=0 turns it off; config/gate_patterns.yaml's
+                           # complaint.public_grievance rule then becomes the only cover again.
+
 word_scan:                 # word-by-word analysis (see app/targeted.py WordScan)
   enabled: true
   window_words: 40         # a sentence longer than this is also scored in overlapping word windows,

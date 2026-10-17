@@ -1,0 +1,39 @@
+text,label,note
+"Six months of emails and I still do not have the certificate I paid for.",1,document chasing
+"They cashed the cheque on the 4th and have not shipped a single carton since.",1,money vs delivery
+"Asked for a replacement. Got a lecture about the terms and conditions.",1,dismissive response
+"The engineer came, looked at it, said he would send a report, and vanished.",1,narrative abandonment
+"Nobody from that firm has picked up a call from us since Diwali.",1,silence
+"We lost a tender because their sample did not arrive and they will not accept that.",1,consequential loss
+"Second unit, same fault, same excuse.",1,terse repetition
+"I am writing this so nobody else wastes a quarter of their year on them.",1,warning to network
+"It is humiliating to chase a company this hard for your own money.",1,emotional
+"Honestly I have run out of patience and politeness.",1,emotional short
+"Paise de diye, maal nahi aaya, aur ab phone bhi nahi uthate.",1,hinglish
+"They keep telling me it is with the logistics partner, as if that is my problem.",1,deflection
+"My invoice has a line item nobody at their office can explain.",1,billing
+"Four months. No refund. No apology. No answer.",1,staccato
+"The replacement arrived in worse condition than the original.",1,defect
+"We were promised a dedicated manager and have spoken to eleven different people.",1,support churn
+"Their warranty is worthless if nobody processes the claim.",1,warranty
+"I would genuinely advise members here to look elsewhere.",1,advice to avoid
+"Heavy duty industrial air compressor, 10 HP, three phase, with two year warranty.",0,bare listing
+"MOQ 500 pieces, dispatch within 10 working days, GST invoice provided.",0,trade terms
+"We supply calibrated pressure gauges to three refineries in Gujarat.",0,capability statement
+"How to write a purchase order that survives an audit: a short checklist.",0,editorial checklist
+"A practical note on warranty exclusions and what they normally cover.",0,explainer, warranty vocabulary
+"When a consignment arrives short, here is the paperwork that settles it fastest.",0,guide, grievance vocabulary
+"Our claims desk now runs a dedicated line for bulk buyers.",0,service description
+"We revised our packing standard after a bad monsoon and damage fell by half.",0,own failure, editorial frame
+"Apologies to the members whose quotes were delayed last week; we have cleared the backlog.",0,business apologising
+"Their team resolved our query the same day and followed up in writing.",0,positive experience
+"We have worked with this vendor for nine years without a single dispute.",0,positive, dispute vocabulary
+"Looking for a supplier of food grade stainless steel drums near Pune.",0,sourcing request
+"Payment released against the second milestone as agreed.",0,transaction note
+"Please find attached the revised rate card effective from the 1st.",0,correspondence
+"Case study: reducing customer complaints by redesigning the returns flow.",0,editorial, complaint vocabulary
+"Five things buyers should check before accepting a part shipment.",0,listicle
+"Our refund turnaround is now four working days, down from eleven.",0,metric, refund vocabulary
+"The audit closed with two minor observations and no adverse findings.",0,audit note
+"Thanks to the member who recommended this transporter; the lane has been smooth.",0,thanks
+"Quality control samples every third carton on export orders.",0,process
