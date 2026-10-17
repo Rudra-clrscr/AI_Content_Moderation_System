@@ -1,0 +1,73 @@
+{
+  "metadata": {
+    "file_path": "C:\\Users\\Asus\\AppData\\Local\\Temp\\tmpsadjsdcc.mp4",
+    "file_name": "tmpsadjsdcc.mp4",
+    "file_size_bytes": 1032684,
+    "duration_seconds": 4.486022,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "width": 478,
+    "height": 850,
+    "fps": 29.87056090275473,
+    "has_audio": true
+  },
+  "detected_language": "hi",
+  "language_probability": 0.6503,
+  "processing_time_seconds": 5.6,
+  "created_at": "2026-10-17T15:24:02.379194+00:00",
+  "total_words": 1,
+  "full_text": "0,5,0,0,0,0",
+  "exported_files": {
+    "txt": "D:\\BONC\\flask_api\\transcripts\\tmpsadjsdcc.txt",
+    "srt": "D:\\BONC\\flask_api\\transcripts\\tmpsadjsdcc.srt",
+    "vtt": "D:\\BONC\\flask_api\\transcripts\\tmpsadjsdcc.vtt"
+  },
+  "segments": [
+    {
+      "id": 1,
+      "start": 0.9,
+      "end": 3.88,
+      "text": "0,5,0,0,0,0",
+      "avg_logprob": -1.157,
+      "no_speech_prob": 0.097,
+      "words": [
+        {
+          "word": " 0",
+          "start": 0.9,
+          "end": 1.8,
+          "probability": 0.026349041610956192
+        },
+        {
+          "word": ",5",
+          "start": 1.8,
+          "end": 2.14,
+          "probability": 0.32847966253757477
+        },
+        {
+          "word": ",0",
+          "start": 2.14,
+          "end": 2.62,
+          "probability": 0.44826706498861313
+        },
+        {
+          "word": ",0",
+          "start": 2.62,
+          "end": 2.98,
+          "probability": 0.38749928772449493
+        },
+        {
+          "word": ",0",
+          "start": 2.98,
+          "end": 3.44,
+          "probability": 0.6063221246004105
+        },
+        {
+          "word": ",0",
+          "start": 3.44,
+          "end": 3.88,
+          "probability": 0.6320090889930725
+        }
+      ]
+    }
+  ]
+}

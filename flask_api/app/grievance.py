@@ -177,12 +177,24 @@ _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 _CLAUSE = re.compile(r",\s+(?:and|but|so|yet|although|though|while)\s+|;\s+")
 
 MIN_SENTENCE_CHARS = 25          # below this a fragment is too short to judge on its own
+# Above this, a post is not a diluted complaint - it is an article, and it is allowed to
+# contain a sentence about something going wrong. Measured: scoring the parts of long posts
+# refused six legitimate long articles outright, among them "How our family pickle business
+# survived the lockdown", "A visit to a cotton farm in Vidarbha" and "Why our factory switched
+# to LED lighting". Each has one sentence about a setback, which is what makes it a story.
+#
+# The dilution this scan exists for is a SHORT-post problem: a clause tacked onto a complaint
+# so the average drops. A 2,000 character article cannot be diluted, so it is judged whole and
+# the model's view of the piece as a whole is what decides it.
+MAX_SPLIT_CHARS = 400
 MAX_SENTENCES = 12               # a cap, so a long article cannot turn one check into fifty
 
 
 def _sentences(text: str) -> list[str]:
     """Sentences, and the clauses of long ones, worth scoring on their own. Returns nothing
     for a short single-clause post, so the common case does no extra work at all."""
+    if len(text) > MAX_SPLIT_CHARS:
+        return []
     out: list[str] = []
     for sentence in _SENTENCE.split(text):
         sentence = sentence.strip()

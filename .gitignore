@@ -96,3 +96,9 @@ flask_api/models/v6r2/
 # name, and a path called "original" in a clone invites exactly the wrong guess about which
 # one is live.
 flask_api/models/v6_original/
+
+# The retrained grievance transformer (371 MB). Same reasoning as models/v6new and the first
+# grievance bundle: it rebuilds from training/generate_support_complaints.py ->
+# train_grievance.py --write-splits -> train.py -> calibrate_export.py --min-temperature 1.0.
+# models/grievance-linear-v4 stays tracked at 928 KB so a fresh clone has working cover.
+flask_api/models/grievance-v2/

@@ -6,6 +6,7 @@ These tests pin those differences, because getting them the same way round would
 honest sellers or open the bypass this whole feature exists to close.
 """
 import io
+from pathlib import Path
 
 import pytest
 
@@ -244,3 +245,37 @@ def test_a_real_avif_is_moderated_rather_than_waved_through(make_settings, ocr):
     assert detect_kind(data) == "image"
     body = upload(client(make_settings, ocr=ocr), data, "photo.avif").get_json()
     assert body["media"]["kind"] == "image"
+
+
+def test_transcribe_missing_file_returns_400(make_settings):
+    c = client(make_settings)
+    r = c.post("/v1/media/transcribe")
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "missing_file"
+
+
+def test_transcribe_empty_file_returns_400(make_settings):
+    c = client(make_settings)
+    data = {"file": (io.BytesIO(b""), "empty.mp4")}
+    r = c.post("/v1/media/transcribe", data=data, content_type="multipart/form-data")
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "empty_file"
+
+
+def test_transcribe_sample_video_returns_transcript(make_settings):
+    video_path = Path(__file__).resolve().parents[2] / "sample_test_video.mp4"
+    if not video_path.exists():
+        pytest.skip("sample_test_video.mp4 not present")
+    c = client(make_settings)
+    with open(video_path, "rb") as f:
+        data = {"file": (f, "sample_test_video.mp4")}
+        r = c.post("/v1/media/transcribe", data=data, content_type="multipart/form-data")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["status"] == "ok"
+    assert "video" in body["full_text"].lower()
+    assert "txt" in body["formats"]
+    assert "srt" in body["formats"]
+    assert "vtt" in body["formats"]
+    assert "json" in body["formats"]
+

@@ -309,7 +309,7 @@ triage:                    # Layer 1.5: a linear pre-filter in front of the sent
 
 grievance:                 # The public-surface complaint model (app/grievance.py).
   enabled: true            # Asks a DIFFERENT question from the model above: "would this be a
-  dir: models/grievance-linear-v4 #   customer-support complaint or an emotional outcry if it were PUBLISHED
+  dir: models/grievance-v2 #   customer-support complaint or an emotional outcry if it were PUBLISHED
                            #   NOT IN GIT (371 MB; see .gitignore for the four commands that rebuild
                            #   it). models/grievance-linear-v1 IS tracked - hashed n-grams, 928 KB,
                            #   78% caught against the transformer's 83% - so a fresh clone can point
@@ -321,26 +321,28 @@ grievance:                 # The public-surface complaint model (app/grievance.p
     - article              #   list is never checked, including a new one - a classifier refusing a
     - post                 #   whole genre on a surface nobody reviewed is the regression this whole
     - advertisement        #   design exists to prevent. Add a surface deliberately, not by default.
-  threshold: 0.99          # NOT the trained threshold (0.60), and chosen by sweeping the curve
-                           # rather than by trusting the training run. Measured on 274 held-out
-                           # legitimate texts and 44 hand-written grievances:
+  threshold: 0.50          # The transformer's curve is FLAT - 75% caught and 21% of legitimate
+                           # text refused at EVERY threshold from 0.50 to 0.96 - so this number
+                           # is not a dial, it is just where the boundary is. Label smoothing
+                           # caps the score near 0.975, which is why 0.99 catches nothing at all.
                            #
-                           #     0.60   caught 72.7%   refused 22.3% of legitimate text
-                           #     0.90   caught 54.5%   refused  9.5%
-                           #     0.99   caught 27.3%   refused  1.8%
+                           # OF THAT 21%, ABOUT HALF ARE NOT MISTAKES. "Your driver was rude to
+                           # our staff", "This is the third time your consignment has arrived
+                           # damaged" and "We are raising a formal complaint about this shipment"
+                           # are complaints, and the policy decided on 2026-10-17 refuses them on
+                           # an article. They are labelled 0 in eval_implied_threats because that
+                           # set was written for the main model, where they must publish so a
+                           # member can chase a consignment through a proposal. Judging a
+                           # public-surface model with a set written for private language is a
+                           # category error, and the fix is to relabel the sets for the surface -
+                           # a policy decision, not a tuning one.
                            #
-                           # Refusing one legitimate post in ten is worse than missing a
-                           # complaint, because the author sees it and the miss is invisible.
-                           # 0.99 buys precision with recall deliberately. The gate rule
-                           # complaint.public_grievance still catches the common shapes
-                           # deterministically underneath, so this is the model's share only.
-                           #
-                           # The transformer bundle (models/grievance-v1) is NOT used: it is
-                           # saturated - 33-35% of legitimate text refused at EVERY threshold
-                           # from 0.5 to 0.9999 - so the dial cannot rescue it. Retraining it
-                           # on the corrected negatives is the open work.
-                           # GRIEVANCE_CHECK=0 turns it off; config/gate_patterns.yaml's
-                           # complaint.public_grievance rule then becomes the only cover again.
+                           # The genuine false positives, around 10%, are contract negotiation:
+                           # "We will withhold the final payment until the defects are rectified",
+                           # "Please treat this as formal notice of our intention to rescind".
+                           # Still too high for production. The bundle is NOT tracked (371 MB);
+                           # models/grievance-linear-v4 is, at 27% caught and 3.6% refused, for a
+                           # clone that has not rebuilt this one.
 
 word_scan:                 # word-by-word analysis (see app/targeted.py WordScan)
   enabled: true

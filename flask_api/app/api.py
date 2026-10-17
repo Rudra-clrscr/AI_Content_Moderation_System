@@ -454,3 +454,96 @@ def reload_model():
     except Exception as exc:
         return _error(500, "reload_failed", f"{type(exc).__name__}: {exc}", active_version=previous)
     return jsonify({"status": "reloaded", "previous_version": previous, "model_version": svc.models.version}), 200
+
+
+@bp.post("/v1/media/transcribe")
+def transcribe_media_file():
+    """Transcribes an uploaded video file using the offline Faster-Whisper pipeline.
+    Returns detected language, full transcript, word/sentence segments, and exportable formats (txt, srt, vtt, json).
+    """
+    upload = request.files.get("file")
+    if upload is None:
+        return _error(400, "missing_file", "multipart field 'file' is required")
+
+    filename = upload.filename or "video.mp4"
+    data = upload.read()
+    if not data:
+        return _error(400, "empty_file", "uploaded file is empty")
+
+    import os
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    # Ensure pipeline package is importable
+    root_dir = Path(__file__).resolve().parents[2]
+    if str(root_dir) not in sys.path:
+        sys.path.insert(0, str(root_dir))
+
+    try:
+        from pipeline.config import PipelineConfig
+        from pipeline.orchestrator import VideoTranscriptionPipeline
+        from pipeline.stages.ingestion import IngestionError, NoAudioStreamError
+    except ImportError as exc:
+        return _error(500, "transcription_unavailable", f"Pipeline import error: {exc}")
+
+    suffix = Path(filename).suffix or ".mp4"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(data)
+        tmp_path = Path(tmp.name)
+
+    try:
+        config = PipelineConfig(
+            model_size="tiny",
+            device="auto",
+            output_formats={"txt", "srt", "vtt", "json"},
+            word_timestamps=True,
+            keep_extracted_audio=False,
+        )
+        pipeline = VideoTranscriptionPipeline(config=config)
+        result = pipeline.process(tmp_path)
+
+        sink = pipeline.sink_stage
+        txt_content = sink.to_txt(result.full_text, result.segments)
+        srt_content = sink.to_srt(result.segments)
+        vtt_content = sink.to_vtt(result.segments)
+        json_content = sink.to_json(result)
+
+        return jsonify({
+            "status": "ok",
+            "filename": filename,
+            "detected_language": result.detected_language,
+            "language_probability": round(result.language_probability, 4),
+            "processing_time_seconds": round(result.processing_time_seconds, 2),
+            "total_words": result.total_words,
+            "full_text": result.full_text,
+            "segments": [
+                {
+                    "id": s.id,
+                    "start": round(s.start, 3),
+                    "end": round(s.end, 3),
+                    "text": s.text,
+                    "time_range": s.formatted_time_range,
+                }
+                for s in result.segments
+            ],
+            "formats": {
+                "txt": txt_content,
+                "srt": srt_content,
+                "vtt": vtt_content,
+                "json": json_content,
+            }
+        }), 200
+
+    except NoAudioStreamError:
+        return _error(422, "no_audio_stream", "The uploaded video does not contain an audio stream to transcribe.")
+    except Exception as exc:
+        log.exception("Transcription failed: %s", exc)
+        return _error(500, "transcription_failed", str(exc))
+    finally:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+
