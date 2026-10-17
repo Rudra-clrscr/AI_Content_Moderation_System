@@ -401,6 +401,45 @@ NEGATIVE_FRAMES = [
     "LED drivers and panel lights, two year replacement warranty.",
     "Packaging tape and stretch film, factory direct from {place}.",
     "Stainless steel sheets, 304 and 316 grade, cut to size.",
+    # B2B IDIOM, which is the failure accept_system.py found and the narrow sets could not.
+    # Through the whole pipeline on an article, the first bundle refused 121 legitimate texts
+    # that v5 published, and these were most of them:
+    #
+    #   Our team killed it at the Surat trade fair this year.       0.999999
+    #   We destroyed our old dispatch record: 4,200 parcels in one day.
+    #   We are bleeding margin on this SKU and need a cheaper source.
+    #   Give us your target price and we will destroy it.
+    #
+    # Trade English is violent and negative by habit - killed, destroyed, murdered, bleeding,
+    # nightmare, disaster, took a beating - and none of it is a complaint. eval_b2b_negotiation
+    # .csv exists in this repo because an earlier model made exactly this mistake, which is
+    # the part that should have warned me.
+    "Our team killed it at the {place} trade fair this year.",
+    "We destroyed our old dispatch record: 4,200 parcels in one day.",
+    "The new line absolutely murders our old cycle time.",
+    "We are bleeding margin on this SKU and need a cheaper source.",
+    "Give us your target price and we will destroy it.",
+    "We will beat any quote you have in hand, send it across.",
+    "Their quote blew ours out of the water, so we revised it.",
+    "That batch was a disaster and we ate the loss ourselves.",
+    "The old packaging line was a nightmare to maintain.",
+    "We took a beating on freight last monsoon.",
+    "This SKU is killing our margins, we need to re-rate it.",
+    "The monsoon murdered our dispatch numbers in July.",
+    "We want to kill the middleman model and sell direct.",
+    "Our competitor is getting slaughtered on delivery times.",
+    "That tender was brutal but we came out ahead.",
+    "We are fighting for every paisa on this contract.",
+    "The {item} market is bleeding right now, rates are all over.",
+    "We smashed our export target this quarter.",
+    "Cutting the lead time in half nearly broke the team.",
+    "Honestly a painful quarter, but the order book is healthy.",
+    "We crushed the backlog over the weekend.",
+    "The old process was torture; the new one takes four minutes.",
+    "Rates are brutal this season but volumes are up.",
+    "We are drowning in enquiries since the fair.",
+    "That client is a beast to service but worth it.",
+    "We bled cash for two years before this line paid off.",
     # Hinglish negatives
     "{thing_cap} time par aa gaya, dhanyavaad.",
     "{firm_cap} ke saath humara experience acha raha.",
