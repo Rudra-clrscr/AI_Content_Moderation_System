@@ -265,13 +265,15 @@ class Pipeline:
         # and it only runs on the surfaces settings.yaml names, so a proposal never reaches it
         # and `score is None` records that nothing looked rather than that nothing was found.
         #
-        # Timed into `stages` because it is a second transformer: on a public surface an
-        # allowed post now pays for both models (~12 ms each on this host), and a latency
-        # number that hides half of that would be worse than no number.
-        with stages.time("grievance"):
-            refuse, grievance_score = self.grievance.check(req.content, req.content_type.value)
-        if refuse:
-            return self.grievance_result(req, gate, gate_ms, grievance_score, stages)
+        # Tied to the moderation level: on lenient and permissive levels (reject_min > 0.50,
+        # Levels 6-10), public commercial complaints and friction are permitted by policy, so
+        # the check is bypassed. On standard baseline and stricter levels (reject_min <= 0.50,
+        # Levels 1-5), it screens public outcries.
+        if self.thresholds.reject_min <= 0.50:
+            with stages.time("grievance"):
+                refuse, grievance_score = self.grievance.check(req.content, req.content_type.value)
+            if refuse:
+                return self.grievance_result(req, gate, gate_ms, grievance_score, stages)
 
         score = _Scorer(self.models)
         # Leetspeak restored word by word ("F1rst c0py" -> "First copy"), same length, so every span

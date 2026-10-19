@@ -178,7 +178,7 @@
         <h1>Admin</h1>
         <p class="subtitle">Manage AI content moderation.</p>
 
-        <section class="card" style="padding:24px; max-width:700px">
+        <section class="card" style="padding:24px; max-width:760px">
           <div id="admin-message" role="status" aria-live="polite"></div>
 
           <div class="field">
@@ -195,16 +195,62 @@
             </select>
           </div>
 
-          <div class="field">
-            <label for="moderation-level">Moderation level</label>
-            <select class="select" id="moderation-level">
-              <option value="lenient">Lenient</option>
-              <option value="medium" selected>Medium</option>
-              <option value="strict">Strict</option>
-            </select>
+          <div class="heat-control-panel">
+            <div class="heat-header">
+              <div class="heat-title-group">
+                <span style="font-size:18px;">🌡️</span>
+                <h3>Moderation Heat Bar (Strictness Scale)</h3>
+              </div>
+              <div class="heat-badges">
+                <span class="heat-badge-lvl" id="heat-badge-lvl">Level 5 / 10</span>
+                <span class="heat-badge-val" id="heat-badge-val">0.50</span>
+                <span class="heat-badge-status" id="heat-badge-status">⚖️ Balanced (Default)</span>
+              </div>
+            </div>
+
+            <p style="font-size:13px; color:var(--muted); margin:0 0 12px;">
+              Adjust AI strictness between <strong>0.0</strong> (Cold / Maximum Strict) and <strong>1.0</strong> (Hot / Maximum Permissive).
+              Drag the temperature slider or click any of the 10 level steppers below.
+            </p>
+
+            <div class="heat-track-container">
+              <div class="heat-track-bar" id="heat-track-bar"></div>
+              <input type="range" class="heat-slider" id="heat-slider" min="1" max="10" step="1" value="5" aria-label="Moderation Heat Bar">
+            </div>
+
+            <div class="heat-scale-bounds">
+              <span>❄️ 0.0 (Cold / Max Strict)</span>
+              <span>⚖️ 0.5 (Balanced)</span>
+              <span>🔥 1.0 (Hot / Permissive)</span>
+            </div>
+
+            <div class="heat-steppers" id="heat-steppers"></div>
+
+            <div class="heat-policy-card" id="heat-policy-card">
+              <div class="heat-policy-head">
+                <strong id="heat-policy-name">Level 5 — Balanced (Production Default)</strong>
+                <span class="heat-policy-tone" id="heat-policy-tone">50/50 Calibration Baseline</span>
+              </div>
+              <div class="heat-policy-grid">
+                <div class="heat-allowed-box">
+                  <b>✅ ALLOWS (Publishes)</b>
+                  <span id="heat-policy-allowed">Standard commercial friction, blunt vendor feedback, delivery delay discussions.</span>
+                </div>
+                <div class="heat-blocked-box">
+                  <b>⛔ BLOCKS (Cumulative)</b>
+                  <span id="heat-policy-blocked">Everything blocked in L6–L10 PLUS targeted insults, off-platform payments, disguised fraud.</span>
+                </div>
+              </div>
+              <div class="heat-monotonic-note">
+                <span>🔒</span>
+                <span><strong>Cumulative Rule:</strong> What is blocked at Level 9 is strictly blocked at Level 8, Level 7, down to Level 1.</span>
+              </div>
+            </div>
+
+            <select class="select" id="moderation-level" style="display:none;"></select>
           </div>
 
-          <div style="display:flex; gap:10px; flex-wrap:wrap">
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:20px;">
             <button class="btn btn-outline" id="admin-load">Load settings</button>
             <button class="btn btn-primary" id="admin-save">Save settings</button>
           </div>
@@ -219,17 +265,183 @@
            Try Add Business, Videos, Articles, Requests, Proposals or Business Proposals.</p>
       </div></section>`;
   }
-// ```
-    // function wireAdmin() {
-    // const message = (text, error = false) => {
-    //   $("admin-message").textContent = text;
-    //   $("admin-message").style.color = error ? "#c62828" : "#1f8f4e";
-    // };
-      function wireAdmin() {
+
+  function wireAdmin() {
     const message = (text, error = false) => {
       $("admin-message").textContent = text;
       $("admin-message").style.color = error ? "#c62828" : "#1f8f4e";
     };
+
+    const HEAT_LEVELS = [
+      {
+        level: 1,
+        val: 0.10,
+        name: "level_1",
+        label: "Ultra Strict",
+        icon: "❄️",
+        color: "#2563eb",
+        tone: "Ice Cold — Zero Tolerance",
+        allowed: "Only sterile corporate profiles, clean product specifications, and neutral B2B listings.",
+        blocked: "Everything blocked in L2–L10 + any negative tone, commercial friction, or delayed delivery complaints."
+      },
+      {
+        level: 2,
+        val: 0.20,
+        name: "level_2",
+        label: "Very Strict",
+        icon: "🧊",
+        color: "#06b6d4",
+        tone: "Cold — High Scrutiny",
+        allowed: "Professional business articles, case studies, formal RFQs, polite negotiation inquiries.",
+        blocked: "Everything blocked in L3–L10 + minor commercial dissatisfaction, supplier disputes, and heated pricing remarks."
+      },
+      {
+        level: 3,
+        val: 0.30,
+        name: "level_3",
+        label: "Strict",
+        icon: "🛡️",
+        color: "#0d9488",
+        tone: "Cool — Strict Protection",
+        allowed: "Standard business proposals, contract terms with penalty clauses, neutral market commentary.",
+        blocked: "Everything blocked in L4–L10 + customer support outcries, emotional venting, and vendor callouts."
+      },
+      {
+        level: 4,
+        val: 0.40,
+        name: "level_4",
+        label: "Firm",
+        icon: "📋",
+        color: "#10b981",
+        tone: "Mild — Controlled Commercial",
+        allowed: "Constructive feedback, supplier reviews with context, delivery delay notices with agreed fixes.",
+        blocked: "Everything blocked in L5–L10 + unstructured grievances, hostile venting, and aggressive haggling."
+      },
+      {
+        level: 5,
+        val: 0.50,
+        name: "level_5",
+        label: "Balanced",
+        icon: "⚖️",
+        color: "#84cc16",
+        tone: "Balanced — Platform Default",
+        allowed: "Standard commercial friction, blunt vendor feedback, sharp negotiation, delivery complaints.",
+        blocked: "Everything blocked in L6–L10 + targeted insults, off-platform payment terms, and disguised fraud."
+      },
+      {
+        level: 6,
+        val: 0.60,
+        name: "level_6",
+        label: "Moderate",
+        icon: "🌤️",
+        color: "#eab308",
+        tone: "Warm — Moderate Tolerance",
+        allowed: "Heated commercial disputes, unhappy customer reviews, sharp expressions of frustration.",
+        blocked: "Everything blocked in L7–L10 + direct personal harassment, counterfeit buzzwords (7A, first copy), and advance fees."
+      },
+      {
+        level: 7,
+        val: 0.70,
+        name: "level_7",
+        label: "Relaxed",
+        icon: "⛅",
+        color: "#f59e0b",
+        tone: "Warmer — Relaxed Filter",
+        allowed: "Aggressive negotiation language, blunt interpersonal criticism, informal venting, candid trade opinions.",
+        blocked: "Everything blocked in L8–L10 + explicit insults aimed at named individuals/firms, and high-confidence scams."
+      },
+      {
+        level: 8,
+        val: 0.80,
+        name: "level_8",
+        label: "Lenient",
+        icon: "🌤️",
+        color: "#f97316",
+        tone: "Hot — Lenient Filter",
+        allowed: "Heavy dispute language, uncensored business dissatisfaction, aggressive sales hype, and blunt demands.",
+        blocked: "Everything blocked in L9 + overt fraud, lottery scams, advance-fee schemes, and blatant harassment."
+      },
+      {
+        level: 9,
+        val: 0.90,
+        name: "level_9",
+        label: "Very Lenient",
+        icon: "🔥",
+        color: "#ef4444",
+        tone: "Very Hot — High Tolerance",
+        allowed: "High-friction conversations, heated arguments, heavy colloquial slang, contentious trade claims.",
+        blocked: "Confirmed financial fraud, extortion, explicit illegal trade, overt hate speech, and direct violent threats."
+      },
+      {
+        level: 10,
+        val: 1.00,
+        name: "level_10",
+        label: "Max Permissive",
+        icon: "🌋",
+        color: "#dc2626",
+        tone: "Scorching — Maximum Heat",
+        allowed: "Practically all text passes the AI model check without restriction.",
+        blocked: "Only hard-blocked Layer 1 gate rules (illegal contraband, malicious URLs, severe slurs)."
+      }
+    ];
+
+    let currentHeatLevel = 5;
+
+    function applyHeatLevel(lvl) {
+      currentHeatLevel = Math.max(1, Math.min(10, parseInt(lvl, 10) || 5));
+      const cfg = HEAT_LEVELS[currentHeatLevel - 1];
+
+      $("heat-slider").value = currentHeatLevel;
+      $("heat-badge-lvl").textContent = `Level ${cfg.level} / 10`;
+      $("heat-badge-val").textContent = cfg.val.toFixed(2);
+      $("heat-badge-status").textContent = `${cfg.icon} ${cfg.label}`;
+      $("heat-badge-status").style.backgroundColor = cfg.color;
+
+      $("heat-policy-name").textContent = `Level ${cfg.level} — ${cfg.label} (${cfg.val.toFixed(2)})`;
+      $("heat-policy-tone").textContent = cfg.tone;
+      $("heat-policy-allowed").textContent = cfg.allowed;
+      $("heat-policy-blocked").textContent = cfg.blocked;
+
+      $("heat-steppers").querySelectorAll(".heat-step-btn").forEach((btn) => {
+        const bLvl = parseInt(btn.dataset.level, 10);
+        const isActive = bLvl === currentHeatLevel;
+        btn.classList.toggle("active", isActive);
+        if (isActive) {
+          btn.style.borderColor = cfg.color;
+          btn.style.boxShadow = `0 0 0 2px ${cfg.color}33`;
+        } else {
+          btn.style.borderColor = "";
+          btn.style.boxShadow = "";
+        }
+      });
+
+      if ($("moderation-level")) {
+        const legacyVal = currentHeatLevel <= 3 ? "strict" : (currentHeatLevel <= 6 ? "medium" : "lenient");
+        $("moderation-level").value = legacyVal;
+      }
+    }
+
+    // Render 10 stepper buttons
+    $("heat-steppers").innerHTML = HEAT_LEVELS.map((cfg) => `
+      <button type="button" class="heat-step-btn" data-level="${cfg.level}">
+        <span class="step-lvl">L${cfg.level}</span>
+        <span class="step-val">${cfg.val.toFixed(2)}</span>
+      </button>
+    `).join("");
+
+    $("heat-slider").addEventListener("input", (e) => {
+      applyHeatLevel(e.target.value);
+    });
+
+    $("heat-steppers").addEventListener("click", (e) => {
+      const btn = e.target.closest(".heat-step-btn");
+      if (btn && btn.dataset.level) {
+        applyHeatLevel(btn.dataset.level);
+      }
+    });
+
+    // Initialize default level
+    applyHeatLevel(5);
 
     async function api(url, method = "GET", body = null) {
       const token = $("admin-token").value.trim();
@@ -253,10 +465,6 @@
       }
 
       if (!response.ok) {
-        // The server answers 404 when ADMIN_TOKEN is unset, deliberately, so an unconfigured
-        // deployment does not advertise that these endpoints exist. Read on its own that looks
-        // like a broken page, so say what to do about it. A genuinely missing route returns
-        // HTML and fails the JSON.parse above, so this branch really is the disabled case.
         if (response.status === 404 && data.error?.code === "not_found") {
           throw new Error("Admin endpoints are off because the server has no ADMIN_TOKEN. "
             + "Set one in flask_api/.env (copy .env.example) and restart the service.");
@@ -266,8 +474,7 @@
       return data;
     }
 
-    
-        // Every page the Admin controls apply to
+    // Every page the Admin controls apply to
     const ADMIN_SURFACES = ["article", "business_profile", "video", "request", "proposal", "business_proposal"];
 
     $("admin-load").addEventListener("click", async () => {
@@ -275,13 +482,35 @@
         const data = await api("/v1/admin/moderation-levels");
         const policies = ADMIN_SURFACES.map((k) => data.features?.[k] || data.default || {});
 
-        const levelNames = Object.keys(data.levels || {});
-        $("moderation-level").innerHTML = levelNames
-          .map((l) => `<option value="${esc(l)}">${esc(l.charAt(0).toUpperCase() + l.slice(1))}</option>`)
-          .join("");
-        const shown = policies.find((p) => p.enabled && p.level)?.level;
-        $("moderation-level").value = levelNames.includes(shown) ? shown
-          : (levelNames.includes("medium") ? "medium" : (levelNames[0] || ""));
+        // Match from reject_min or named level
+        let matchedLevel = 5;
+        const activePolicy = policies.find((p) => p.enabled && (p.reject_min !== undefined || p.level));
+        if (activePolicy) {
+          if (activePolicy.reject_min !== undefined) {
+            const rMin = parseFloat(activePolicy.reject_min);
+            let closest = HEAT_LEVELS[0];
+            let minDiff = Math.abs(closest.val - rMin);
+            for (const item of HEAT_LEVELS) {
+              const diff = Math.abs(item.val - rMin);
+              if (diff < minDiff) {
+                minDiff = diff;
+                closest = item;
+              }
+            }
+            matchedLevel = closest.level;
+          } else if (activePolicy.level) {
+            if (activePolicy.level.startsWith("level_")) {
+              matchedLevel = parseInt(activePolicy.level.replace("level_", ""), 10) || 5;
+            } else if (activePolicy.level === "strict") {
+              matchedLevel = 3;
+            } else if (activePolicy.level === "medium") {
+              matchedLevel = 5;
+            } else if (activePolicy.level === "lenient") {
+              matchedLevel = 8;
+            }
+          }
+        }
+        applyHeatLevel(matchedLevel);
 
         const allOn = policies.every((p) => p.enabled !== false);
         const allOff = policies.every((p) => p.enabled === false);
@@ -297,11 +526,15 @@
       message("Saving…");
       try {
         const enabled = $("moderation-enabled").value === "true";
-        const level = $("moderation-level").value;
+        const cfg = HEAT_LEVELS[currentHeatLevel - 1];
         await Promise.all(ADMIN_SURFACES.map((k) =>
-          api(`/v1/admin/moderation-levels/${k}`, "PUT", { enabled, level })));
+          api(`/v1/admin/moderation-levels/${k}`, "PUT", {
+            enabled,
+            level: cfg.name,
+            reject_min: cfg.val
+          })));
         message(enabled
-          ? `Saved: moderation ON (${level}) for ${ADMIN_SURFACES.length} surfaces.`
+          ? `Saved: moderation ON (Level ${cfg.level} [${cfg.label}] — threshold ${cfg.val.toFixed(2)}) for ${ADMIN_SURFACES.length} surfaces.`
           : `Saved: moderation OFF for ${ADMIN_SURFACES.length} surfaces. All content will publish unchecked.`);
       } catch (error) {
         message(error.message, true);

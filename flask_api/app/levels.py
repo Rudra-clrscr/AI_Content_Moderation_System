@@ -37,6 +37,16 @@ BUILTIN_LEVELS: dict[str, tuple[float, float]] = {
     "strict": (0.25, 0.25),
     "medium": (0.50, 0.50),
     "lenient": (0.85, 0.85),
+    "level_1": (0.10, 0.10),
+    "level_2": (0.20, 0.20),
+    "level_3": (0.30, 0.30),
+    "level_4": (0.40, 0.40),
+    "level_5": (0.50, 0.50),
+    "level_6": (0.60, 0.60),
+    "level_7": (0.70, 0.70),
+    "level_8": (0.80, 0.80),
+    "level_9": (0.90, 0.90),
+    "level_10": (1.00, 1.00),
 }
 
 
@@ -145,7 +155,8 @@ class ModerationLevels:
                 else:
                     lo = min(base.allow_max, hi)    # had a band: keep it, but stay ordered
                 thresholds = Thresholds(lo, hi)     # validates 0 <= lo <= hi <= 1
-                name = None                         # a number was given; it is no longer named
+                if level is None or thresholds != self._levels.get(level):
+                    name = None                         # a number was given; it is no longer named
             policy = FeaturePolicy(now_enabled, thresholds, name)
             self._features = {**self._features, content_type: policy}
             return policy
