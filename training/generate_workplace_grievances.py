@@ -105,11 +105,112 @@ from __future__ import annotations
 import argparse
 import csv
 import random
+import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+sys.path.insert(0, str(HERE))
+
+# ---- round 4: the supplier-side negatives, IMPORTED rather than copied -------------------
+# End-to-end (training/accept_system.py) round 3 passed gates 1, 3 and 4 and failed gate 2:
+# 42 legitimate texts refused against grievance-v3's 11. The breakdown named the cause
+# exactly, and it was not the workplace set:
+#
+#     5x dismissive/professional_criticism   "He misread our drawing and machined the part
+#                                             2 mm short. We resent the file."
+#     4x b2b_negotiation                     "Give us your target price and we will destroy it."
+#     4x grievance_workplace                 this file's own 10%, already known
+#
+# Both failing families are ALREADY SOLVED, in generate_support_complaints.py, whose
+# NEGATIVE_FRAMES carries professional criticism and the violent B2B idiom for exactly this
+# reason. They lost anyway on volume: 131,000 workplace rows against those frames arriving
+# only through train_incremental.py's 15% rehearsal sample.
+#
+# The bleed is narrow and worth naming. This file's positives are overwhelmingly criticism of
+# a named individual at work - the manager, the supervisor, the HR head - and the distance
+# from "my manager misread the drawing" to "their engineer misread our drawing" is one
+# possessive. A model given 63,000 of the first and a thin sample of the second generalises
+# the wrong way.
+#
+# IMPORTED, not pasted, and that is the point: these frames have been through four rounds of
+# their own and `accept_system.py` measures both files against the same eval sets. A copy
+# would drift the moment either side is edited, and the drift would be invisible until a gate
+# failed. Importing the whole list rather than the two failing families is deliberate too -
+# every frame in it is legitimate commercial text, so the rest harden boundaries that have
+# not broken yet.
+from generate_support_complaints import (  # noqa: E402
+    NEGATIVE_FRAMES as SUPPLIER_NEGATIVE_FRAMES,
+    NEUTRAL_OPENERS as SUPPLIER_NEUTRAL_OPENERS,
+    NEUTRAL_TAILS as SUPPLIER_NEUTRAL_TAILS,
+    fill as supplier_fill,
+)
+
+
+# ---- ROUND 4, AND IT FAILED --------------------------------------------------------------
+# The hypothesis was that gate 2's 42 refusals came from professional criticism and violent
+# B2B idiom being outweighed - 131,000 workplace rows against those frames arriving only in a
+# 15% rehearsal sample - so importing them at 15,000 rows should fix it. Measured against the
+# round 3 checkpoint (bonc-grievance-v8inc) at the same operating point:
+#
+#                        v8inc          round 4
+#     workplace          76.9% / 10.0%  61.5% / 20.0%   recall -15, refusals doubled
+#     handwritten-1      84.6% /  0.0%  76.9% /  0.0%   -8
+#     handwritten-2      88.9% /  0.0%  94.4% /  0.0%   +5.5
+#     dismissive         50.0% refused  50.0% refused   UNMOVED - the family it targeted
+#     b2b_negotiation    23.1% refused  20.5% refused   barely moved
+#
+# The two families it was built to fix did not move, and the workplace set it was not supposed
+# to touch got materially worse. So the import is kept at 0 by default.
+#
+# WHY IT DID NOT WORK, as far as the evidence goes. 71 of the 266 imported frames had to be
+# dropped for appearing verbatim in an eval set, and they were the family's most
+# representative members - the eval rows and the frames share an ancestor, because
+# generate_support_complaints.py's round 4 was written FROM accept_system.py's false
+# positives. What remained taught the families weakly, while 15,000 rows of supplier-domain
+# negatives diluted a workplace signal that was working.
+#
+# THE UNCOMFORTABLE IMPLICATION, which is the part worth keeping: those 71 frames are in the
+# supplier model's training data unfiltered. Whatever gate 2 credit they earn there is partly
+# memorisation of the sentences gate 2 scores. Nobody should read this file's numbers, or that
+# one's, as evidence that professional criticism generalises until the frames and the eval
+# sets have been separated at the source.
+
+
+def held_out_texts(eval_dir: Path) -> set[str]:
+    """Every sentence in training/eval_*.csv, normalised.
+
+    IMPORTING THOSE FRAMES WOULD HAVE TRAINED ON GATE 2'S OWN TEST. 29 sentences in
+    generate_support_complaints.NEGATIVE_FRAMES appear verbatim in the evaluation sets - 11 in
+    eval_dismissive.csv, 10 in eval_b2b_negotiation.csv, 8 in eval_public_callouts.csv - and
+    that is not an accident: its round 4 was written FROM accept_system.py's false positives,
+    so the frames and the eval rows have a common ancestor.
+
+    Among them are the exact texts that failed gate 2 in round 3 ("His quotation was
+    unrealistic for our budget, so we went with another mill", "Give us your target price and
+    we will destroy it"). Import them and the gate goes green by memorising the sentences it
+    is scored on, which is worse than leaving it red: it reads as a fix and generalises to
+    nothing.
+
+    So they are dropped, and the family is learned from its remaining frames and then measured
+    on the held-out members. That is the difference between teaching professional criticism
+    and teaching five sentences.
+    """
+    out: set[str] = set()
+    for path in sorted(eval_dir.glob("eval_*.csv")):
+        try:
+            with path.open(encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    if row.get("text"):
+                        out.add(_norm(row["text"]))
+        except Exception as exc:                                        # pragma: no cover
+            print(f"  (could not read {path.name}: {exc})", file=sys.stderr)
+    return out
+
+
+def _norm(t: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", str(t).lower()).strip()
 
 # ---- slot vocabulary -----------------------------------------------------------------
 # Deliberately NOT the supplier vocabulary of generate_support_complaints.py. The whole point
@@ -935,6 +1036,11 @@ def main() -> int:
                          "before trimming this")
     ap.add_argument("--aphorisms", type=int, default=3_000,
                     help="label 0: one-line management judgements about workplaces generally")
+    ap.add_argument("--supplier-negatives", type=int, default=0,
+                    help="label 0: generate_support_complaints.NEGATIVE_FRAMES, imported and "
+                         "filtered against the eval sets. DEFAULT 0 BECAUSE IT WAS MEASURED "
+                         "AND IT DID NOT WORK - see ROUND 4, BELOW. The code stays because "
+                         "the import and the filter are both right; the volume was not")
     ap.add_argument("--contrastive", type=int, default=10_000,
                     help="grievance cores made publishable by a change, an assessment or a "
                          "caveat - see the note above CONTRAST_CORES")
@@ -985,6 +1091,31 @@ def main() -> int:
     produced = {}
     for frames, n, label, category, op, tl in want:
         produced[category] = (emit(frames, n, label, category, op, tl), n)
+
+    # Round 4: the supplier-side negatives, composed with THEIR fill - their frames carry
+    # their slot names ({item}, {desk}, {money}, {parcel}) and this file's fill() has never
+    # heard of them. See the note above the import.
+    held_out = held_out_texts(HERE)
+    supplier_frames = [f for f in SUPPLIER_NEGATIVE_FRAMES if _norm(f) not in held_out]
+    dropped = len(SUPPLIER_NEGATIVE_FRAMES) - len(supplier_frames)
+    print(f"  supplier negatives: {len(supplier_frames)} frames imported, {dropped} dropped "
+          f"for appearing verbatim in an eval set (see held_out_texts)")
+    made_supplier = guard = 0
+    while made_supplier < args.supplier_negatives and guard < args.supplier_negatives * 80:
+        guard += 1
+        opener = rng.choice(SUPPLIER_NEUTRAL_OPENERS)
+        core = rng.choice(supplier_frames)
+        tail = rng.choice(SUPPLIER_NEUTRAL_TAILS)
+        parts = [supplier_fill(rng, x) for x in (opener, core, tail) if x]
+        text = " ".join(parts)
+        if text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        rows.append({"text": text, "label": 0, "category": "supplier_legitimate",
+                     "kind": "whole",
+                     "template": " | ".join(x for x in (opener, core, tail) if x)})
+        made_supplier += 1
+    produced["supplier_legitimate"] = (made_supplier, args.supplier_negatives)
 
     # Contrastive pairs: the publishable half only. The bare cores already exist as positives
     # through WORKPLACE_FRAMES, so emitting them again here would just duplicate them.
