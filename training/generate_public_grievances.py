@@ -83,7 +83,7 @@ NEGATIVE_FRAMES = [
     "Our warranty covers manufacturing defects on every {item} for twelve months.",
     "If a {parcel} arrives {broken}, photograph it before signing and we replace it free.",
     "Returns are accepted within 14 days if the {item} is unused.",
-    "Their pricing is very competitive and the lead times are short.",
+    "Their rates are keen and they ship when they say they will.",
     "That company's delivery system is reliable and fast.",
     "This supplier's quality has been consistent across every batch.",
     "Our support team is available all week for installation questions.",

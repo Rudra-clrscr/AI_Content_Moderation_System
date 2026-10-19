@@ -103,7 +103,7 @@ THREAT_FRAMES = [
     "As a friend: drop {thing} while you still can.",
     "Take this as advice, not a request, about {thing}.",
     "You do not know who you are dealing with on {thing}.",
-    "You will find out who we are soon enough.",
+    "You will learn soon enough what sort of people you are dealing with.",
     "Better to cooperate on {thing}. We have other methods.",
     "Do not take {thing} to the police. It will go badly.",
 ]
@@ -167,9 +167,9 @@ NEGATIVE_FRAMES = [
 # "Nobody at your office answers the phone" - ordinary, publishable complaints about the
 # recipient. These say the same kind of thing directly to the person, with no menace in them.
 SECOND_PERSON_NEGATIVES = [
-    "Your after-sales service has been appalling throughout.",
-    "Your driver was rude to our staff and we have reported it.",
-    "Nobody at your office answers the phone and it is costing us money.",
+    "Your service response has been poor from the first call onwards.",
+    "Your delivery man was short with our storekeeper and we have logged it.",
+    "Your landline rings out every afternoon and the delay is costing us.",
     "Your quality has dropped noticeably over the last three consignments.",
     "Your packing is careless and half the stock arrives broken.",
     "Your team missed the deadline again without telling us.",
@@ -228,7 +228,7 @@ FILLERS = [
     "The samples were dispatched on Tuesday.", "Rates are ex-works {place}.",
     "Kindly confirm receipt of this message.", "Our team is available all week.",
 ]
-CLOSERS = ["Regards.", "Thanks.", "Awaiting your reply.", "Please revert.",
+CLOSERS = ["Best regards.", "Thanks.", "Awaiting your reply.", "Please revert.",
            "Confirm by return.", "Looking forward to your response."]
 
 

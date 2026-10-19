@@ -243,7 +243,6 @@ NEGATIVE_FRAMES = [
     "We do not leave a {parcel} unattended - someone must sign for it.",
     "Rain covers are standard on every consignment during the monsoon.",
     "Warranty on the {item} runs twelve months from the invoice date.",
-    "Replacement units ship the same day for any manufacturing defect.",
     "Our delivery staff are trained in handling fragile goods.",
     "Tracking updates are pushed by SMS at every hub.",
     "If {thing} is delayed we tell you before you have to ask.",
@@ -282,35 +281,23 @@ NEGATIVE_FRAMES = [
     "Very pleased to report {thing} arrived in perfect condition.",
     "{firm_cap} handled a difficult shipment professionally.",
     "Their delivery system is reliable and fast.",
-    "Their pricing is very competitive and the lead times are short.",
     # Editorial writing about complaints, which is the hardest negative in the file: it is
     # ABOUT refunds, damage and warranty exclusions without being a grievance. The first
     # hand-written run refused "a short guide to what you should photograph when a carton
     # arrives torn" at 0.536, so there were not enough of these.
-    "How to write a purchase order that survives an audit: a short checklist.",
-    "A practical note on warranty exclusions and what they normally cover.",
-    "When a consignment arrives short, here is the paperwork that settles it fastest.",
     "What a good credit note looks like, and what makes one unauditable.",
     "Reading a transporter contract: where liability for {thing} actually sits.",
-    "We revised our packing standard after a bad monsoon and damage fell by half.",
-    "Case study: reducing customer complaints by redesigning the returns flow.",
-    "Five things buyers should check before accepting a part shipment.",
     "A checklist for raising a warranty claim so it is not refused on a technicality.",
     "Why most refund disputes are really documentation disputes.",
     "Notes on handling a short shipment without souring the relationship.",
     "What we learned from the quarter our delivery times slipped.",
-    "Our refund turnaround is now four working days, down from eleven.",
-    "The audit closed with two minor observations and no adverse findings.",
     "Apologies to the members whose quotes were delayed; we have cleared the backlog.",
-    "We have moved our grievance cell to a dedicated number for bulk buyers.",
     "Our claims desk now runs a separate queue for export orders.",
     "{desk_cap} resolved our query the same day and followed up in writing.",
     "We have worked with {firm} for nine years without a single dispute.",
     "Looking for a supplier of food grade drums near {place}.",
-    "MOQ 500 pieces, dispatch within 10 working days, GST invoice provided.",
     "Heavy duty {item}, three phase, with two year warranty.",
     "We supply calibrated instruments to three refineries and can share references.",
-    "Payment released against the second milestone as agreed.",
     "Please find the revised rate card effective from the 1st.",
     # HINGLISH NEGATIVES IN VOLUME. The first bundle refused "Payment clear ho gaya hai,
     # invoice ki copy attach kar di hai" at 1.000 - a payment confirmation - and "Naye design
@@ -319,8 +306,6 @@ NEGATIVE_FRAMES = [
     # genre. These are listings, confirmations, logistics and ordinary chat, and there have to
     # be enough of them to outweigh the positives.
     "Naye design ke {item} aa gaye hain, wholesale rate par milenge.",
-    "Payment clear ho gaya hai, invoice ki copy attach kar di hai.",
-    "Sabhi payment company ke current account mein hi karein.",
     "Humare paas 20 saal ka experience hai, quality mein koi compromise nahi.",
     "Stock ready hai, {day} tak dispatch ho jayega.",
     "Rate list bhej di hai, dekh kar bataiye.",
@@ -338,9 +323,6 @@ NEGATIVE_FRAMES = [
     # furious when my cycle got a flat tyre" were both refused at 1.000. Emotional language
     # about something that is not a seller is not a customer complaint, and a personal article
     # is a thing members write here.
-    "The cricket match was a disaster for our team.",
-    "I was furious when my cycle got a flat tyre on the way to college.",
-    "The bus was late again, so I walked home.",
     "It rained all afternoon and the terrace garden loved it.",
     "My daughter finally learned to ride without the training wheels.",
     "I failed maths in class nine and it taught me how to study.",
@@ -354,8 +336,6 @@ NEGATIVE_FRAMES = [
     "Nothing beats chai after a long day on the shop floor.",
     # BROKEN GRAMMAR, which is not a genre. "I am going to market tomorrow for buy some
     # fruits" was refused at 1.000; poor English must not read as a complaint.
-    "I am going to market tomorrow for buy some fruits.",
-    "She dont like vegetables but she eat them for her mother.",
     "We is having good stock of {item} right now.",
     "Please to send the quotation on my email id.",
     "He go to {place} every month for the business work.",
@@ -365,9 +345,7 @@ NEGATIVE_FRAMES = [
     # years of steady supply" at 0.767. Praise and complaint share their whole subject matter -
     # a supplier, a delivery, an engineer - and differ only in direction, so there has to be as
     # much of one as the other or the model learns the subject.
-    "Their engineer conducted the commissioning very thoroughly.",
     "Happy to recommend {firm} after two years of steady supply.",
-    "I was worried about the monsoon affecting dispatch but it went smoothly.",
     "{desk_cap} answered on the first ring and sorted it out.",
     "The replacement reached us before we had finished the paperwork.",
     "Their packing has improved a lot since last season.",
@@ -384,7 +362,7 @@ NEGATIVE_FRAMES = [
     # TITLES AND SECTION HEADINGS. "About us" was refused at 0.993 and "Behind the scenes" at
     # 0.776. The API scores titles on their own (contracts/moderation_result.md), so a two-word
     # heading has to be safe by default rather than judged as if it were a post.
-    "About us", "Behind the scenes", "Our story", "What we do", "Contact",
+    "Our story", "What we do", "Contact",
     "Company profile", "Our journey", "From the founder", "Quality policy",
     "Infrastructure", "Our clients", "Certifications", "Case studies", "In the press",
     "Frequently asked questions", "Terms of supply", "How we work", "Our team",
@@ -415,15 +393,7 @@ NEGATIVE_FRAMES = [
     # .csv exists in this repo because an earlier model made exactly this mistake, which is
     # the part that should have warned me.
     "Our team killed it at the {place} trade fair this year.",
-    "We destroyed our old dispatch record: 4,200 parcels in one day.",
-    "The new line absolutely murders our old cycle time.",
-    "We are bleeding margin on this SKU and need a cheaper source.",
-    "Give us your target price and we will destroy it.",
     "We will beat any quote you have in hand, send it across.",
-    "Their quote blew ours out of the water, so we revised it.",
-    "That batch was a disaster and we ate the loss ourselves.",
-    "The old packaging line was a nightmare to maintain.",
-    "We took a beating on freight last monsoon.",
     "This SKU is killing our margins, we need to re-rate it.",
     "The monsoon murdered our dispatch numbers in July.",
     "We want to kill the middleman model and sell direct.",
@@ -452,10 +422,7 @@ NEGATIVE_FRAMES = [
     # All of that is how a contract gets negotiated, and refusing it would make the platform
     # useless for the conversation it exists to host - the same argument as the proposal, in a
     # different register.
-    "We will walk away from this deal if the terms do not change.",
-    "If you cannot meet the deadline, say so now and we will go elsewhere.",
     "We will hold you to the penalty clause if this slips again.",
-    "Do not involve a third party in this negotiation without telling us.",
     "We are prepared to place the order elsewhere if the rate does not move.",
     "The contract allows us to cancel after two missed milestones.",
     "We need a firm commitment on {thing} before we release the advance.",
@@ -473,7 +440,6 @@ NEGATIVE_FRAMES = [
     "I would not use them for urgent work, but their standard orders are fine.",
     "Good for bulk, not for small lots - depends what you need.",
     "Their strength is price, not speed; choose accordingly.",
-    "It rained all day and the courier could not reach us.",
     "The roads were flooded so nothing moved yesterday.",
     "Factory is shut for the festival so dispatch resumes {day}.",
     # ROUND 4. accept_system.py with public_label left 39 genuine false positives, and they
@@ -482,50 +448,21 @@ NEGATIVE_FRAMES = [
     #
     # PROFESSIONAL CRITICISM - an assessment, with a reason, often with a caveat. This is how
     # members help each other choose a supplier and it must publish.
-    "I disagree with his approach to pricing, though he explained his reasoning clearly.",
-    "His quotation was unrealistic for our budget, so we went with another mill.",
     "Her lead time estimate was optimistic and the order slipped by ten days.",
-    "Their technical answer was not detailed enough for our compliance team.",
-    "We do not agree with their assessment of demand for this season.",
-    "His costing sheet looks wrong to us; we have asked for a revised version.",
-    "He is new to this category and still learning, so we inspect every consignment.",
-    "I would not use them for urgent work, but their standard orders are reliable.",
     "Good for bulk, not for small lots - it depends what you need.",
     "Their strength is price rather than speed; choose accordingly.",
-    "The supplier disagreed with our test results and sent the sample to a third-party lab.",
-    "Our auditor found three gaps in their process and they fixed all of them.",
-    "He misread our drawing and machined the part 2 mm short. We resent the file.",
     "Strong on finishing, weaker on documentation - worth knowing before you order.",
     "A good fit for standard sizes, less so for custom work.",
     # LEGAL AND CONTRACT NOTICE - a consequence stated under an agreement. Not a grievance;
     # this is the machinery a contract runs on.
-    "We will escalate this to our legal team if the invoice remains unpaid.",
-    "We may have to terminate the contract if quality does not improve.",
-    "There will be commercial consequences for the partnership if this continues.",
-    "Continued non-payment will result in suspension of further supply.",
-    "Please treat this as formal notice of our intention to rescind.",
-    "We will withhold the final payment until the defects are rectified.",
-    "We will be forced to reconsider the renewal in March.",
-    "Failure to respond within ten days will be treated as refusal.",
-    "This is the last time we will accept a late consignment.",
-    "We cannot be held responsible for what happens after handover.",
     "The agreement permits cancellation on seven days written notice.",
     "Liquidated damages apply from the first day of delay, as agreed.",
-    "We reserve the right to pursue damages for the delayed consignment.",
-    "This matter will be referred to arbitration as per the contract.",
     "Repeated short deliveries will affect the vendor rating.",
     # PROPER CHANNEL - describing that a dispute is being handled properly, which is the
     # OPPOSITE of a public callout and was being refused as if it were one.
-    "Arbitration clause has been invoked. Nothing further to discuss publicly.",
-    "We have written to their account manager and copied their regional office.",
-    "We have escalated the matter through their support portal as the contract requires.",
-    "Our legal team is corresponding with them about the shortfall.",
-    "Raised a formal complaint on their grievance portal, reference number received.",
     "The matter is with the insurer and we are waiting for the surveyor.",
     "We are following the escalation matrix agreed in the contract.",
     # SAFETY ADVICE - warning other members about a pattern, not about a company.
-    "Report abusive messages instead of replying to them.",
-    "A supplier asking for a processing fee up front is a warning sign.",
     "Never release goods against a screenshot of a payment.",
     "Check the GST number on the portal before you ship on credit.",
     "If a buyer refuses a call before paying an advance, be careful.",
@@ -533,8 +470,6 @@ NEGATIVE_FRAMES = [
     "A rate far below the market usually means something is wrong with the goods.",
     # BALANCED REVIEW - a problem that was resolved, which reads as a complaint to a model
     # that only sees the problem half.
-    "Their dispatch team is slow to respond but the goods are always as described.",
-    "The machine stopped working after a week. Their technician came the next day and fixed it.",
     "Packing was fine but the colour was a shade darker than the sample; we accepted the lot.",
     "There was a delay, they told us in advance and credited the freight.",
     "One carton was short and the replacement reached us within 48 hours.",
@@ -546,10 +481,121 @@ NEGATIVE_FRAMES = [
     "Our new catalogue for the season is live on the portal.",
     "We have added a second production line and lead times are shorter now.",
     "New GST registration for our {place} branch is effective from this month.",
-    "Hamare paas 20 saal ka experience hai, quality mein koi compromise nahi.",
-    "Godown mein jagah kam hai isliye abhi zyada stock nahi le sakte.",
-    "i dont know how to use this app properly please help",
-    "My son broke his arm playing football, so I was away from the shop last week.",
+    # ---- ROUND 5: THE FRAMES THAT WERE THE EVAL SET ------------------------------------
+    # training/audit_eval_leakage.py found 86 of 766 evaluation sentences (11.2%) sitting in
+    # generator frame lists, 71 of them in this list, and measured what that bought:
+    #
+    #     leaked rows   88.4% accuracy      <- sentences that are also training frames
+    #     clean rows    72.2% accuracy      <- sentences that are not
+    #     premium       +16.1%
+    #
+    # Six of the nine affected files scored 100% on their leaked half. README.md calls these
+    # sets "hand-written held-out sets, never trained on", and the measurement discipline here
+    # rests on that: the GENERATED test split is reported and ignored precisely because a
+    # generator makes its own held-out rows separable. The hand-written sets were meant to be
+    # the part that could not be gamed.
+    #
+    # HOW IT HAPPENED, because it was not carelessness and it will recur otherwise. Round 4 of
+    # this file was written FROM accept_system.py's false positives - the right instinct, read
+    # the failures and cover them - but by PASTING the failing sentence in as a frame instead
+    # of writing frames for the family it belonged to. One is teaching; the other is copying
+    # the answer key, and the two look identical in a diff.
+    #
+    # So the 71 are gone and these replace them: same families, new sentences. The eval rows
+    # keep their provenance, which is the thing that cannot be rebuilt - written by hand,
+    # before the model, by someone not looking at the training data. test_eval_leakage.py now
+    # fails the suite if a frame ever matches an eval row again.
+    #
+    # B2B violent idiom. Trade English is brutal by habit and none of it is a complaint.
+    "We smashed the dispatch record we set last Diwali.",
+    "This freight contract is eating us alive; we need a second carrier.",
+    "The retrofit slaughtered our changeover time, in the good sense.",
+    "Our margins got hammered when the rupee moved.",
+    "Name your number and we will go under it.",
+    "The old conveyor was a running sore; the new one just works.",
+    "We got mauled on demurrage at the port last quarter.",
+    "That rate card obliterates anything else in the market.",
+    "Commissioning week nearly finished the maintenance team off.",
+    "We are losing hours we do not have to manual paperwork.",
+    # Safety advice: a warning about a PATTERN, not about a company.
+    "Treat any request to pay a personal account as a red flag.",
+    "Block and report rather than argue with an abusive buyer.",
+    "An advance demanded before a sample is sent is worth questioning.",
+    "Confirm a change of bank details on a call you placed yourself.",
+    # Professional criticism: an assessment, with a reason, often with a caveat.
+    "We thought his rate build-up was thin and asked him to show the workings.",
+    "Their drawing review missed a tolerance and we caught it at first article.",
+    "He quoted on the wrong grade, which cost us a week of clarification.",
+    "Her delivery promise did not survive the monsoon and she told us early.",
+    "Their lab report did not cover the test our customer insists on.",
+    "We disagree with how they have read the demand for this season.",
+    "He is competent on standard work and we would not give him a rush job.",
+    "Their estimator is new and we check every line until that changes.",
+    "We rated them average on documentation and strong on everything else.",
+    "Unka quality theek hai par paperwork mein dhyan nahi dete.",
+    "Rate thoda zyada laga, isliye doosre supplier se le liya.",
+    # Service levels, stated by the business about itself.
+    "Defective units are swapped out within one working day of inspection.",
+    "Our lead time on standard grades is nine days from confirmed order.",
+    "We answer the claims line until 8 in the evening, Saturday included.",
+    "Credit notes are issued against the inspection report, not an email.",
+    "Bulk buyers get a named coordinator rather than a shared inbox.",
+    # Editorial writing ABOUT complaints, the hardest negative family in the file.
+    "A short guide to writing specifications a supplier cannot misread.",
+    "What to put in a goods-inward register so a claim survives scrutiny.",
+    "Reading an insurance policy before the consignment moves, not after.",
+    "Why most short-shipment arguments are really packing-list arguments.",
+    "How we cut our own claims handling from three weeks to five days.",
+    "A note on part shipments: when to accept one and when to refuse.",
+    "The paperwork that decides a transit damage claim, in order.",
+    "What a first-article inspection should actually cover.",
+    "Lessons from rebuilding our returns process after a bad quarter.",
+    # Titles and headings, which the API scores on their own.
+    "Who we are", "Our history", "Inside the factory", "Leadership",
+    "Policies", "Accreditations", "What our buyers say",
+    # Hinglish, ordinary trade.
+    "Pandrah saal se isi line mein kaam kar rahe hain.",
+    "Payment seedha company ke account mein hi bhejein, kahin aur nahi.",
+    "Godown lagbhag bhara hua hai, abhi bada order nahi le sakte.",
+    "Maal taiyar hai, kal shaam tak nikal jayega.",
+    # Everyday and personal prose, which members do write here.
+    "The train was cancelled so I worked from the shop all day.",
+    "My scooter would not start this morning and I was livid about it.",
+    "Our colony team lost the tournament final, which stung.",
+    "I missed a week when my mother was in hospital.",
+    "It poured through the afternoon and the roads gave up.",
+    "My daughter has started asking to come to the factory on Sundays.",
+    "The power cut lasted four hours and nobody got anything done.",
+    "Had a quiet Sunday for once, repairing the garden tap.",
+    # Broken grammar, which is not a genre.
+    "He dont have the catalogue but he is sending tomorrow.",
+    "I am wanting to purchase the two machine for my unit.",
+    "Kindly to inform the dispatch date please.",
+    # Legal and contract notice: a consequence stated under an agreement.
+    "Our solicitors will write if the balance is not cleared this month.",
+    "The agreement lets us exit after a second failed inspection.",
+    "Persistent short delivery will be treated as a breach of the supply terms.",
+    "We will set off the shortfall against the next invoice, as the contract allows.",
+    "Consider this notice of our intention to invoke the penalty clause.",
+    "Retention will be held until the snag list is closed.",
+    "We will not renew at these service levels and have said so in writing.",
+    "No reply inside fourteen days will be taken as a declined order.",
+    "A further late consignment and we move to the alternate vendor.",
+    "Risk passes at handover and our liability ends there.",
+    "Keep this negotiation between the two of us until it is signed.",
+    "The dispute goes to the arbitrator named in clause 14.",
+    "We are prepared to source elsewhere if the price does not move.",
+    "Any variation has to be agreed in writing before work starts.",
+    "We will claim the demurrage back under the carriage terms.",
+    # Proper channel: a dispute handled correctly, the OPPOSITE of a public callout.
+    "Logged it on their service portal and have the ticket number.",
+    "Our commercial team is in correspondence with their regional office.",
+    "The surveyor has been appointed and we are waiting on the report.",
+    "It is with the arbitrator now, so there is nothing to say publicly.",
+    "Escalated to the account director exactly as the contract sets out.",
+    # Praise, which shares its whole subject matter with complaint.
+    "Their commissioning engineer was thorough and left the site clean.",
+    "I expected trouble with the monsoon dispatch and there was none.",
     # Hinglish negatives
     "{thing_cap} time par aa gaya, dhanyavaad.",
     "{firm_cap} ke saath humara experience acha raha.",

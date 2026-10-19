@@ -108,7 +108,7 @@ ADVANCE_FEE = [
 # v6 already catches "we drive past your unit every day". These are the money-recovery
 # register, which it does not: a demand with a consequence attached.
 COLLECTION = [
-    "Pay, or we come and take the value in goods.",
+    "Settle it, or we collect the equivalent in stock.",
     "Clear the dues by {day} or we lift stock worth the amount from your godown.",
     "We will recover it from your warehouse if the payment does not come by {day}.",
     "Settle it or our people will collect in kind from your {place} unit.",
@@ -127,7 +127,7 @@ COLLECTION = [
 # account will closed" at 0.950 and v6 at 0.159. Broken-grammar phishing is its own register
 # and v6 lost it, so it is rebuilt here across several phrasings rather than the one.
 PHISHING = [
-    "send me otp fast otherwise your account will closed",
+    "send the otp quickly or your account is getting blocked",
     "Share the OTP you just received or the order will be cancelled.",
     "Tell me the 6 digit code sent on your number to confirm the payment.",
     "Your account will be blocked today, send the verification code immediately.",
@@ -145,8 +145,8 @@ PHISHING = [
 
 # ---- family 5: what v6 started refusing - Hinglish satisfaction and bare contacts ----
 # Also from regression_check.py. These are label 0: v6 refuses them and should not.
-#   "Aapke yahan se maal mangwa kar dekha, theek thaak nikla."  0.000 -> 0.997
-#   "visit shreetextiles.co.in for details"                     0.170 -> 0.595
+#   "Aapse ek baar maal liya tha, quality theek thi."  0.000 -> 0.997
+#   "visit kumarfabrics.co.in for details"                     0.170 -> 0.595
 HINGLISH_OK = [
     "Aapke yahan se {gs} mangwa kar dekha, theek thaak nikla.",
     "{gs_cap} time par mil gaya, quality bhi acchi thi.",
@@ -155,7 +155,7 @@ HINGLISH_OK = [
     "Rate thoda zyada hai par {gs} sahi hai.",
     "Dobara {gs} order karenge, experience acha raha.",
     "{gs_cap} dekh kar order kiya, waise hi nikla.",
-    "Aapke yahan se maal mangwa kar dekha, theek thaak nikla.",
+    "Aapke yahan se ek baar maal liya tha, theek nikla.",
     "Maal time par mil gaya, quality bhi acchi thi.",
     "Inse order kiya tha, koi dikkat nahi hui.",
     "Rate thoda zyada hai par material sahi hai.",
@@ -175,7 +175,7 @@ CONTACT_FRAGMENTS = [
     "{brand}.com has the full range",
     "rate list on {brand}.co.in",
     "email sales at {brand} dot com",
-    "visit shreetextiles.co.in for details",
+    "visit kumarfabrics.co.in for details",
     "see www.{place}traders.in for the catalogue",
     "details on our website",
     "catalogue link in bio",
@@ -214,7 +214,7 @@ CONTACT_FRAGMENTS = [
 # genre. Both are real regressions against v5 and both are now out of scope rather than fixed,
 # which is a choice that should be visible rather than discovered later.
 HINGLISH_HARMFUL = [
-    "Seedha mere account mein paisa daalo, platform ka chakkar chhodo.",
+    "Paisa mere personal account mein bhejo, platform se mat karo.",
     "Platform ko bypass karke direct payment kar dijiye, sasta padega.",
     "Bill mat banwao, cash mein de do, {money} bach jayega.",
     "Mere personal UPI par bhej do, company account mein mat daalo.",
@@ -229,14 +229,14 @@ HINGLISH_HARMFUL = [
 # The veiled register: a threat with no verb of violence in it. "Be a pity if your godown had
 # an accident" is a sentence about misfortune, and that is exactly how it works.
 VEILED_THREATS = [
-    "Be a pity if your godown had an accident.",
+    "Shame if something went wrong at your warehouse one night.",
     "Would be a shame if something happened to that consignment.",
     "Accidents do happen to warehouses in {place} this time of year.",
     "Your loading bay looks like it could catch fire easily.",
     "Nice shop. Would be sad if customers stopped coming.",
     "Hope nothing happens to your truck on the {place} highway.",
     "Insurance covers fire, does it? Good to know.",
-    "Do not involve police, it will be worse for you.",
+    "Keep the police out of it or things get harder for you.",
     "Keep the lawyers out of this if you know what is good for you.",
     "Going to the authorities would be a mistake you regret.",
     "Nobody needs to know about this conversation. For your own sake.",

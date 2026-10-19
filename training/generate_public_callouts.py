@@ -225,7 +225,7 @@ OPENERS = ["Regarding PO-{num}.", "Following up on {thing}.", "About our order f
 FILLERS = ["Payment terms remain 30 days net.", "GST details are on the invoice.",
            "Transport was arranged through our own fleet.", "Please share the LR number.",
            "Rates are ex-works {place}.", "The samples were dispatched on Tuesday."]
-CLOSERS = ["Regards.", "Thanks.", "Awaiting your reply.", "Please revert.",
+CLOSERS = ["Best regards.", "Thanks.", "Awaiting your reply.", "Please revert.",
            "Confirm by return.", "Looking forward to your response."]
 
 
