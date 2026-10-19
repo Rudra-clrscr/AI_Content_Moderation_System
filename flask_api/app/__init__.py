@@ -41,6 +41,9 @@ def create_app(
     sink: ResultSink | None = None,
     enqueue: Enqueue | None = None,
     fetch_result: FetchResult | None = None,
+    admin_store=None,
+    mailer=None,
+    mail_async: bool = True,
 ) -> Flask:
     """`scorer`, `sink`, `enqueue`, `fetch_result` are injection points for tests
     and for the data layer's integration; production uses the defaults."""
@@ -80,6 +83,12 @@ def create_app(
         enqueue=enqueue,
         fetch_result=fetch_result,
     )
+
+    # Admin accounts, password recovery and the saved moderation settings. Saved settings are
+    # re-applied here so a restart changes nothing.
+    from app.admin_auth import init_admin, restore_levels
+    admin = init_admin(app, admin_store, mailer, mail_async)
+    restore_levels(app.extensions["moderation"].levels, admin.store)
 
     from app.api import bp
     app.register_blueprint(bp)

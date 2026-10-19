@@ -79,3 +79,9 @@ def sink():
 def client(make_settings, scorer, sink):
     app = create_app(make_settings(), scorer=scorer, sink=sink)
     return app.test_client()
+
+
+@pytest.fixture(autouse=True)
+def _throwaway_admin_db(monkeypatch):
+    """Tests must never touch the real data/admin.db."""
+    monkeypatch.setenv("ADMIN_DB_PATH", ":memory:")
