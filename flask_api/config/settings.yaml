@@ -374,6 +374,25 @@ grievance:                 # The public-surface complaint model (app/grievance.p
                            # phrased through negation. Still the figure this file called too
                            # high for production, and the honest ceiling of generated data.
                            #
+                           # LEAK-ADJUSTED, because the numbers above are not quite what
+                           # they look like. training/audit_eval_leakage.py found that when
+                           # this bundle was trained, 121 evaluation sentences appeared
+                           # verbatim in res/*.csv - 14 of them in the two grievance
+                           # hand-written sets. Scored on this checkpoint:
+                           #
+                           #     leaked rows   88.4%    clean rows   72.2%    premium +16.1%
+                           #
+                           # The headline inflation is small because the leaked fraction is:
+                           # about 0.6 points on handwritten-1 and 2.8 on handwritten-2. Read
+                           # 84.6% / 88.9% as roughly 84% / 86% honest. The workplace set has
+                           # never been in any training data, so its 76.9% / 10.0% stands.
+                           #
+                           # The generators are fixed now (0 of 766, down from 86), so a
+                           # retrain from the same recipe produces slightly lower and fully
+                           # honest numbers. This bundle predates the fix and was kept rather
+                           # than rebuilt, deliberately: it is the best measured model and the
+                           # correction is smaller than the gap to anything else.
+                           #
                            # NOT TRACKED (371 MB). models/grievance-linear-v4 is, at 27% and
                            # 3.6%, so a fresh clone has cover.
 
