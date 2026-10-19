@@ -162,55 +162,9 @@
       wireAdmin();
     }
   }
-  // function placeholderHtml(label) {
-  //   return `<h1>${esc(label)}</h1>
-  //     <p class="subtitle">Not part of this moderation reference.</p>
-  //     <section class="card"><div class="empty">
-  //       <h3>Nothing to moderate here</h3>
-  //       <p>${esc(label)} has no member-written content, so it doesn't call the moderator.
-  //          Try Add Business, Videos, Articles, Requests, Proposals or Business Proposals.</p>
-  //     </div></section>`;
-  // }
-  // ```javascript
+  /** Admin has no member content: it is the login + moderation-settings screen (admin.js). */
   function placeholderHtml(label) {
-    if (label.toLowerCase() === "admin") {
-      return `
-        <h1>Admin</h1>
-        <p class="subtitle">Manage AI content moderation.</p>
-
-        <section class="card" style="padding:24px; max-width:700px">
-          <div id="admin-message" role="status" aria-live="polite"></div>
-
-          <div class="field">
-            <label for="admin-token">Admin token</label>
-            <input class="input" id="admin-token" type="password"
-              autocomplete="off" placeholder="Enter ADMIN_TOKEN">
-          </div>
-
-          <div class="field">
-            <label for="moderation-enabled">AI moderation</label>
-            <select class="select" id="moderation-enabled">
-              <option value="true">ON — moderation enabled</option>
-              <option value="false">OFF — moderation disabled</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="moderation-level">Moderation level</label>
-            <select class="select" id="moderation-level">
-              <option value="lenient">Lenient</option>
-              <option value="medium" selected>Medium</option>
-              <option value="strict">Strict</option>
-            </select>
-          </div>
-
-          <div style="display:flex; gap:10px; flex-wrap:wrap">
-            <button class="btn btn-outline" id="admin-load">Load settings</button>
-            <button class="btn btn-primary" id="admin-save">Save settings</button>
-          </div>
-        </section>`;
-    }
-
+    if (label.toLowerCase() === "admin") return `<div id="admin-root"></div>`;
     return `<h1>${esc(label)}</h1>
       <p class="subtitle">Not part of this moderation reference.</p>
       <section class="card"><div class="empty">
@@ -219,96 +173,10 @@
            Try Add Business, Videos, Articles, Requests, Proposals or Business Proposals.</p>
       </div></section>`;
   }
-// ```
-    // function wireAdmin() {
-    // const message = (text, error = false) => {
-    //   $("admin-message").textContent = text;
-    //   $("admin-message").style.color = error ? "#c62828" : "#1f8f4e";
-    // };
-      function wireAdmin() {
-    const message = (text, error = false) => {
-      $("admin-message").textContent = text;
-      $("admin-message").style.color = error ? "#c62828" : "#1f8f4e";
-    };
 
-    async function api(url, method = "GET", body = null) {
-      const token = $("admin-token").value.trim();
-      if (!token) throw new Error("Enter the admin token first.");
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Token": token
-        },
-        ...(body ? { body: JSON.stringify(body) } : {})
-      });
-
-      const text = await response.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error(`Invalid server response (${response.status}).`);
-      }
-
-      if (!response.ok) {
-        // The server answers 404 when ADMIN_TOKEN is unset, deliberately, so an unconfigured
-        // deployment does not advertise that these endpoints exist. Read on its own that looks
-        // like a broken page, so say what to do about it. A genuinely missing route returns
-        // HTML and fails the JSON.parse above, so this branch really is the disabled case.
-        if (response.status === 404 && data.error?.code === "not_found") {
-          throw new Error("Admin endpoints are off because the server has no ADMIN_TOKEN. "
-            + "Set one in flask_api/.env (copy .env.example) and restart the service.");
-        }
-        throw new Error(data.error?.message || `HTTP ${response.status}`);
-      }
-      return data;
-    }
-
-    
-        // Every page the Admin controls apply to
-    const ADMIN_SURFACES = ["article", "business_profile", "video", "request", "proposal", "business_proposal"];
-
-    $("admin-load").addEventListener("click", async () => {
-      try {
-        const data = await api("/v1/admin/moderation-levels");
-        const policies = ADMIN_SURFACES.map((k) => data.features?.[k] || data.default || {});
-
-        const levelNames = Object.keys(data.levels || {});
-        $("moderation-level").innerHTML = levelNames
-          .map((l) => `<option value="${esc(l)}">${esc(l.charAt(0).toUpperCase() + l.slice(1))}</option>`)
-          .join("");
-        const shown = policies.find((p) => p.enabled && p.level)?.level;
-        $("moderation-level").value = levelNames.includes(shown) ? shown
-          : (levelNames.includes("medium") ? "medium" : (levelNames[0] || ""));
-
-        const allOn = policies.every((p) => p.enabled !== false);
-        const allOff = policies.every((p) => p.enabled === false);
-        $("moderation-enabled").value = String(!allOff);
-        message(allOn || allOff ? "Settings loaded."
-          : "Settings loaded. Surfaces currently differ; Save will make them all match.");
-      } catch (error) {
-        message(error.message, true);
-      }
-    });
-
-    $("admin-save").addEventListener("click", async () => {
-      message("Saving…");
-      try {
-        const enabled = $("moderation-enabled").value === "true";
-        const level = $("moderation-level").value;
-        await Promise.all(ADMIN_SURFACES.map((k) =>
-          api(`/v1/admin/moderation-levels/${k}`, "PUT", { enabled, level })));
-        message(enabled
-          ? `Saved: moderation ON (${level}) for ${ADMIN_SURFACES.length} surfaces.`
-          : `Saved: moderation OFF for ${ADMIN_SURFACES.length} surfaces. All content will publish unchecked.`);
-      } catch (error) {
-        message(error.message, true);
-      }
-    });
+  function wireAdmin() {
+    window.BONCAdmin.mount($("admin-root"));
   }
-
 
   function surfaceHtml(key) {
     const s = SURFACES[key];

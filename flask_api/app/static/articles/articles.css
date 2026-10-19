@@ -230,3 +230,30 @@ textarea.input { resize: vertical; min-height: 96px; }
 @media (max-width: 560px) {
   .mod-foot-note { flex: none; width: 100%; margin-bottom: 4px; }
 }
+
+/* ---------- admin (admin.js) ---------- */
+.adm-card { padding: 24px; max-width: 520px; }
+.adm-msg { min-height: 0; margin-bottom: 12px; font-size: 14px; }
+.adm-msg.ok { color: #1f8f4e; } .adm-msg.err { color: var(--danger); }
+.adm-msg:empty { display: none; }
+.adm-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.adm-pw { display: flex; gap: 8px; } .adm-pw .input { flex: 1; } .adm-eye { min-width: 64px; }
+.adm-who { margin: 0 0 16px; } .adm-loading { color: var(--muted); }
+.spinner.dark { border-color: rgba(0,0,0,.2); border-top-color: var(--primary); }
+.adm-modal { width: min(560px, 100%); }
+.adm-current { margin: 0 0 12px; } .adm-warn { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.adm-sub { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.adm-switch-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.adm-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 700; }
+.adm-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.adm-slider { width: 44px; height: 24px; border-radius: 999px; background: #c5cad3; position: relative; transition: background .15s; }
+.adm-slider::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.adm-switch input:checked + .adm-slider { background: var(--primary); }
+.adm-switch input:checked + .adm-slider::after { transform: translateX(20px); }
+.adm-switch input:focus-visible + .adm-slider { outline: 2px solid rgba(31,93,172,.5); outline-offset: 2px; }
+.adm-levels { border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px 12px; margin: 8px 0 12px; }
+.adm-levels legend { font-weight: 700; padding: 0 6px; }
+.adm-level { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; cursor: pointer; }
+.adm-confirm { border: 1px solid var(--danger); background: var(--danger-bg); border-radius: 10px; padding: 12px 14px; margin-top: 8px; }
+.adm-confirm p { margin: 6px 0 12px; font-size: 14px; }
+.adm-danger { background: var(--danger); } .adm-danger:hover:not(:disabled) { background: #8f1d14; }
