@@ -598,6 +598,100 @@ NEUTRAL_TAILS = ["", "", "", "",
                  "Nothing unusual, but worth stating."]
 
 
+# ---- round 5: contrastive pairs -----------------------------------------------------
+# Four rounds of adding negative FRAMES stopped working. Professional criticism and safety
+# advice went in last round and were still refused, so the problem is not how many examples of
+# a shape the model has seen - it is that these shapes are semantically next to a complaint and
+# nothing in the data says where the line is.
+#
+#   complaint   "The order slipped by ten days."
+#   assessment  "Her lead time estimate was too optimistic and the order slipped by ten days."
+#
+# The second contains the first. What makes it publishable is the frame around it: a judgement
+# offered, a cause given, an outcome resolved, a caveat attached. A model can only learn that
+# from pairs that differ by exactly that and nothing else - separate frames let it key on
+# vocabulary instead, which is what it has been doing.
+#
+# So these take a complaint core and attach a RESOLUTION, an ASSESSMENT or a CAVEAT, and the
+# result is label 0 while the bare core stays label 1.
+CONTRAST_CORES = [
+    "the second consignment was short", "the rate on the invoice did not match the quote",
+    "the trial run produced more waste than expected", "the shipment missed the cut-off",
+    "the first delivery came without the test certificate", "the packaging got crushed in transit",
+    "the pallet count was wrong", "the e-way bill was raised late",
+    "the fabric shrank more than the sample", "the machine tripped twice in the first week",
+    "the delivery van turned up after the gate closed", "the quality dipped on the third lot",
+    "the paperwork had the old GST number", "the courier left it at the wrong gate",
+    "the replacement part took a fortnight", "the proforma had a typo in the quantity",
+    "the order slipped by ten days", "the first batch came back out of tolerance",
+    "the delivery was late", "the packing was weak", "two cartons arrived damaged",
+    "the invoice had the wrong rate", "the lead time was longer than quoted",
+    "the colour was off the sample", "the consignment was short by 12 kg",
+    "the documents reached us after the vessel sailed", "their phone went unanswered for a day",
+    "the finish was rougher than the approved piece", "the credit note took three weeks",
+    "the first sample failed our test", "the dispatch missed the Friday cut-off",
+]
+CONTRAST_RESOLUTIONS = [
+    "and they flagged it themselves before dispatch",
+    "and the credit note was issued the same week",
+    "and we agreed a fix on the spot",
+    "and their quality head drove down to see it",
+    "and the next three lots were clean",
+    "and they refunded the difference without argument",
+    "and we have had no repeat of it since",
+    "and the paperwork was corrected within the hour",
+    "and they kept us informed the whole way",
+    "and it was sorted before it reached our customer",
+    "and they told us before we had to ask",
+    "and they credited the freight without being asked",
+    "and the replacement reached us within 48 hours",
+    "and their technician came the next day and fixed it",
+    "and they have since changed the process",
+    "and the second lot was perfect",
+    "and we settled it on the call the same afternoon",
+    "and they absorbed the cost themselves",
+    "and it has not happened again in two years",
+    "and the account manager called to explain why",
+]
+CONTRAST_ASSESSMENTS = [
+    "which told us their estimate was optimistic rather than careless",
+    "which is normal for a first run with a new mill",
+    "so we build a week of float into the schedule now",
+    "which we think is a capacity problem rather than a quality one",
+    "so we inspect the first carton of every lot, which is our practice anyway",
+    "which is why we qualify two vendors for every critical part",
+    "and we would still rate them well on everything else",
+    "though they were straight with us about the reason",
+]
+CONTRAST_CAVEATS = [
+    "Good for bulk, less so for urgent work",
+    "Strong on price, weaker on documentation",
+    "Worth using for standard sizes, not for custom",
+    "Reliable on repeat orders, slower on new designs",
+    "A good fit if your lead times are flexible",
+]
+
+
+def contrastive(rng: random.Random) -> tuple[str, str]:
+    """One publishable row built from a complaint core. Returns (text, skeleton)."""
+    core = rng.choice(CONTRAST_CORES)
+    shape = rng.randint(0, 2)
+    if shape == 0:
+        text = core[0].upper() + core[1:] + " " + rng.choice(CONTRAST_RESOLUTIONS) + "."
+        skel = "contrast:resolution"
+    elif shape == 1:
+        text = core[0].upper() + core[1:] + ", " + rng.choice(CONTRAST_ASSESSMENTS) + "."
+        skel = "contrast:assessment"
+    else:
+        # "{caveat}. The one time {core}, {resolution}." reads like a person wrote it; the
+        # earlier shape ran the caveat straight into the core and produced sentences nobody
+        # would write, which is its own kind of bad training data.
+        text = (rng.choice(CONTRAST_CAVEATS) + ". The one time " + core + ", "
+                + rng.choice(CONTRAST_RESOLUTIONS).removeprefix("and ") + ".")
+        skel = "contrast:caveat"
+    return text, skel
+
+
 def fill(rng: random.Random, frame: str) -> str:
     item, parcel = rng.choice(ITEMS), rng.choice(PARCEL)
     thing, firm, desk = rng.choice(THINGS), rng.choice(FIRMS), rng.choice(DESKS)
@@ -631,6 +725,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=ROOT / "res" / "support_complaints.csv")
     ap.add_argument("--positives", type=int, default=50_000)
     ap.add_argument("--negatives", type=int, default=25_000)
+    ap.add_argument("--contrastive", type=int, default=15_000,
+                    help="complaint cores made publishable by a resolution, an assessment or "
+                         "a caveat - see the note above CONTRAST_CORES")
     ap.add_argument("--long-articles", type=int, default=12_000,
                     help="editorial articles WITH a setback sentence inside, label 0")
     ap.add_argument("--seed", type=int, default=17)
@@ -670,6 +767,26 @@ def main() -> int:
     # Negatives compose too, from their own openers and tails. See the note above them.
     n = emit(NEGATIVE_FRAMES, args.negatives, 0, "legitimate_commercial",
              NEUTRAL_OPENERS, NEUTRAL_TAILS)
+
+    # Contrastive pairs: the publishable half. The bare cores are already positives via the
+    # support frames, so only the resolved/assessed/caveated versions are emitted here.
+    pairs = 0
+    for _ in range(args.contrastive * 3):
+        if pairs >= args.contrastive:
+            break
+        text, skel = contrastive(rng)
+        # Composed like every other family, so the volume comes from combinations rather than
+        # from repeating 345 distinct rows and calling it 15,000.
+        opener, tail = rng.choice(NEUTRAL_OPENERS), rng.choice(NEUTRAL_TAILS)
+        parts = [fill(rng, x) for x in (opener, text, tail) if x]
+        text = " ".join(parts)
+        skel = " | ".join(x for x in (opener, skel, tail) if x)
+        if text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        rows.append({"text": text, "label": 0, "category": "contrastive",
+                     "kind": "whole", "template": skel})
+        pairs += 1
 
     # LONG ARTICLES, which nothing above produces. Six legitimate long articles were being
     # refused - "How our family pickle business survived the lockdown", "A visit to a cotton
@@ -714,6 +831,7 @@ def main() -> int:
     print(f"  {e:,} emotional outcry          (label 1)")
     print(f"  {h:,} Hinglish complaints       (label 1)")
     print(f"  {n:,} legitimate commercial     (label 0)")
+    print(f"  {pairs:,} contrastive (complaint core + resolution/assessment/caveat, label 0)")
     print(f"  {counts:,} long articles with a setback inside (label 0)")
     print(f"  {len(set(r['template'] for r in rows)):,} distinct skeletons")
 
