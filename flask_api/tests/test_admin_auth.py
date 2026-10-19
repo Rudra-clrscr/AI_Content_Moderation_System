@@ -122,7 +122,14 @@ def test_session_changes_need_the_csrf_header(admin):
 
 def test_settings_load_what_is_actually_saved(admin):
     j = admin.get("/v1/admin/moderation-settings").get_json()
-    assert j["enabled"] is True and j["levels"] == ["lenient", "medium", "strict"]
+    # The three named levels AND the ten cumulative ones from config/moderation_levels.yaml.
+    # Asserted as a subset rather than an exact list: the levels are config, so a test that
+    # pins the whole list fails every time a level is added, which is what it did when the
+    # ten-level heat bar landed. What matters is that the endpoint reports what is configured
+    # and that nothing silently drops out of it.
+    assert j["enabled"] is True
+    assert {"lenient", "medium", "strict"} <= set(j["levels"])
+    assert {f"level_{n}" for n in range(1, 11)} <= set(j["levels"])
     assert set(j["surfaces"]) == set(ALL_SURFACES)
     assert {"article", "business_profile", "video", "request", "proposal", "business_proposal"} <= set(ALL_SURFACES)
 
