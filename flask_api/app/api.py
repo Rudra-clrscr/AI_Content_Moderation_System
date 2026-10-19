@@ -385,13 +385,9 @@ def ready():
 
 
 def _require_admin():
-    """None if the caller is an admin, else a ready-made error response."""
-    token = _svc().settings.admin_token
-    if not token:
-        return _error(404, "not_found", "admin endpoints disabled (ADMIN_TOKEN unset)")
-    if not hmac.compare_digest(request.headers.get("X-Admin-Token", ""), token):
-        return _error(401, "unauthorized", "invalid admin token")
-    return None
+    """None if the caller is an admin (logged-in session or X-Admin-Token), else an error response."""
+    from app.admin_auth import check_admin
+    return check_admin()
 
 
 @bp.get("/v1/admin/moderation-levels")
@@ -431,6 +427,8 @@ def set_moderation_level(content_type: str):
             reject_min=body.get("reject_min"), allow_max=body.get("allow_max"))
     except (ValueError, TypeError) as exc:
         return _error(400, "invalid_request", str(exc))
+    from app.admin_auth import remember
+    remember(content_type, body)           # saved, so a restart keeps it
     log.warning("moderation level changed by admin: %s -> %s", content_type, policy.as_dict())
     return jsonify({"content_type": content_type, **policy.as_dict()}), 200
 
