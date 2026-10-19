@@ -31,7 +31,22 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "flask_api"))
 
-SETS = ("eval_grievance_handwritten.csv", "eval_grievance_handwritten_2.csv")
+SETS = ("eval_grievance_handwritten.csv", "eval_grievance_handwritten_2.csv",
+        # The workplace-grievance genre (generate_workplace_grievances.py). Its provenance is
+        # weaker than the two above and the file says so in its own terms: those two were
+        # written before any model existed, this one after the generator it measures. It is
+        # here because the alternative was measuring a new genre on its own generated split,
+        # which this file's docstring exists to argue against.
+        #
+        # It has also already been contaminated once and repaired: four of its sentences were
+        # lifted verbatim into generate_workplace_grievances.py's round-2 frames - the four
+        # round 1 had failed, which is exactly what made them tempting - and were rephrased to
+        # test the same phenomena in different words once the leak was found. The four are the
+        # negation row, the aphorism row, the caveated review and the Hinglish hiring row.
+        # train_incremental.py now checks every upload against these files for the same reason.
+        # Treat this set as informative rather than clean, and prefer the two above when they
+        # disagree.
+        "eval_grievance_workplace.csv")
 
 # The two submissions that started this. Both were published; both must now be refused on a
 # public surface, and both must still go through in a proposal.
@@ -64,6 +79,9 @@ def main() -> int:
     ap.add_argument("--bundle", default=str(ROOT / "flask_api" / "models" / "grievance-v1"))
     ap.add_argument("--threshold", type=float, default=None)
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--sets", nargs="+", default=None,
+                    help="measure these files instead of SETS. Paths, or bare filenames "
+                         "resolved against training/.")
     args = ap.parse_args()
 
     if args.ckpt:
@@ -89,10 +107,14 @@ def main() -> int:
             threshold = 0.5
     print(f"{name}\nthreshold {threshold:.2f}\n")
 
-    for filename in SETS:
-        path = HERE / filename
+    for filename in (args.sets or SETS):
+        path = Path(filename)
+        if not path.is_absolute() and not path.exists():
+            path = HERE / filename
         if not path.exists():
+            print(f"  (no {filename})")
             continue
+        filename = path.name
         texts, y, notes = load(path)
         p = np.array([score(t) for t in texts])
         pred = p >= threshold

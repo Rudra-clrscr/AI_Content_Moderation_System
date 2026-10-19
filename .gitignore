@@ -97,9 +97,27 @@ flask_api/models/v6r2/
 # one is live.
 flask_api/models/v6_original/
 
+# The workplace-grievance category, added incrementally rather than by a full retrain. The
+# checkpoint rebuilds from:
+#   python training/generate_workplace_grievances.py --check-collisions
+#   python training/train_incremental.py --init D:/AI/bonc-grievance-v5/ckpt #          --new res/workplace_grievances.csv --replay D:/AI/bonc-grievance-data-v5 #          --out D:/AI/bonc-grievance-v7inc/ckpt
+#   python training/calibrate_export.py --ckpt D:/AI/bonc-grievance-v7inc/ckpt ... --min-temperature 1.0
+# res/ is already ignored above, so the 100k-row CSV is not tracked; the generator is.
+
 # The retrained grievance transformer (371 MB). Same reasoning as models/v6new and the first
 # grievance bundle: it rebuilds from training/generate_support_complaints.py ->
 # train_grievance.py --write-splits -> train.py -> calibrate_export.py --min-temperature 1.0.
 # models/grievance-linear-v4 stays tracked at 928 KB so a fresh clone has working cover.
 flask_api/models/grievance-v2/
 flask_api/models/grievance-v3/
+
+# The grievance bundle carrying the workplace category as well (371 MB). Built incrementally,
+# so its rebuild is cheaper than the others above - 11 min against 36-44:
+#   python training/generate_workplace_grievances.py --check-collisions
+#   python training/train_incremental.py --init D:/AI/bonc-grievance-v6/ckpt #          --new res/workplace_grievances.csv --replay D:/AI/bonc-grievance-data-v6 #          --out D:/AI/bonc-grievance-v8inc/ckpt --fail-on-leakage
+#   python training/train_grievance.py --write-splits D:/AI/bonc-grievance-data-v8
+#   python training/calibrate_export.py --ckpt D:/AI/bonc-grievance-v8inc/ckpt #          --data D:/AI/bonc-grievance-data-v8 --bundle flask_api/models/grievance-v4 #          --version grievance-deberta-v7 --max-len 192 --min-temperature 1.0
+# The --data dir must be the COMBINED splits (train_grievance.py now reads the workplace CSV):
+# calibrating a model that answers for both genres on a supplier-only validation set fits the
+# temperature to half its job.
+flask_api/models/grievance-v7/
