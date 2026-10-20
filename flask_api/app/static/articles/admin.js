@@ -24,6 +24,59 @@
   };
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
   const levelName = (s) => cap(String(s).replace(/_/g, " "));
+
+  // THE HEAT BAR: the ten cumulative levels as a temperature scale, cold (strict) to hot
+  // (permissive). `val` mirrors reject_min in config/moderation_levels.yaml and `name` is the
+  // key the API takes, so the bar and the server cannot drift apart. The wording describes
+  // what an admin will SEE published rather than the threshold behind it - nobody chooses a
+  // moderation policy by reasoning about 0.40.
+  const HEAT_LEVELS = [
+    { level: 1, val: 0.10, name: "level_1", label: "Ultra Strict", icon: "❄️", color: "#2563eb",
+      tone: "Ice Cold — Zero Tolerance",
+      allowed: "Only sterile corporate profiles, clean product specifications, neutral B2B listings.",
+      blocked: "Everything blocked in L2–L10 + any negative tone, commercial friction, or delivery complaints." },
+    { level: 2, val: 0.20, name: "level_2", label: "Very Strict", icon: "🧊", color: "#06b6d4",
+      tone: "Cold — High Scrutiny",
+      allowed: "Professional business articles, case studies, formal RFQs, polite negotiation enquiries.",
+      blocked: "Everything blocked in L3–L10 + minor dissatisfaction, supplier disputes, heated pricing remarks." },
+    { level: 3, val: 0.30, name: "level_3", label: "Strict", icon: "🛡️", color: "#0d9488",
+      tone: "Cool — Strict Protection",
+      allowed: "Standard proposals, contract terms with penalty clauses, neutral market commentary.",
+      blocked: "Everything blocked in L4–L10 + support outcries, emotional venting, public vendor callouts." },
+    { level: 4, val: 0.40, name: "level_4", label: "Firm", icon: "🧭", color: "#15803d",
+      tone: "Temperate — Firm Line",
+      allowed: "Honest reviews with a reason, firm negotiation, disputes raised through the proper channel.",
+      blocked: "Everything blocked in L5–L10 + unstructured grievances, hostile venting, aggressive haggling." },
+    { level: 5, val: 0.50, name: "level_5", label: "Balanced", icon: "⚖️", color: "#65a30d",
+      tone: "Balanced — Calibration Baseline",
+      allowed: "Standard commercial friction, blunt vendor feedback, delivery delay discussions.",
+      blocked: "Everything blocked in L6–L10 + targeted insults, off-platform payment schemes, disguised fraud." },
+    { level: 6, val: 0.60, name: "level_6", label: "Moderate", icon: "🌤️", color: "#ca8a04",
+      tone: "Mild — Moderate Filtering",
+      allowed: "Strong opinions, unhappy reviews, robust public disagreement between members.",
+      blocked: "Everything blocked in L7–L10 + direct harassment, counterfeit buzzwords, advance-fee schemes." },
+    { level: 7, val: 0.70, name: "level_7", label: "Relaxed", icon: "🌞", color: "#ea580c",
+      tone: "Warm — Relaxed",
+      allowed: "Heated exchanges, sharp criticism of firms, unpolished language.",
+      blocked: "Everything blocked in L8–L10 + explicit insults at named people or firms, high-confidence scams." },
+    { level: 8, val: 0.80, name: "level_8", label: "Lenient", icon: "🔆", color: "#dc2626",
+      tone: "Hot — Lenient",
+      allowed: "Almost all member-to-member friction, including rude and dismissive posts.",
+      blocked: "Everything blocked in L9 + overt fraud, lottery scams, blatant harassment." },
+    { level: 9, val: 0.90, name: "level_9", label: "Very Lenient", icon: "🔥", color: "#b91c1c",
+      tone: "Very Hot — Minimal Filtering",
+      allowed: "Nearly everything a member writes, however blunt or unpleasant.",
+      blocked: "Confirmed financial fraud, extortion, explicit illegal trade, hate speech, direct violent threats." },
+    { level: 10, val: 1.00, name: "level_10", label: "Max Permissive", icon: "🌋", color: "#7f1d1d",
+      tone: "Max Heat — Gate Rules Only",
+      allowed: "Practically all text passes the AI model.",
+      blocked: "Only the Layer 1 gate rules fire: illegal contraband, malicious URLs, slurs." },
+  ];
+  const HEAT_BY_NAME = Object.fromEntries(HEAT_LEVELS.map((c) => [c.name, c]));
+  // Which bar position a saved level maps to. The named levels predate the bar and are still
+  // valid server-side, so they land on their nearest numeric equivalent rather than being
+  // treated as "no level" and silently reset to 5 on the next save.
+  const NAMED_AT = { strict: 3, medium: 5, lenient: 8 };
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -968,10 +1021,52 @@
             <label class="adm-switch"><input type="checkbox" role="switch" id="mm-enabled" ${draft.enabled ? "checked" : ""} ${confirming ? "disabled" : ""}>
               <span class="adm-slider"></span><span class="adm-state">${draft.enabled ? "ON" : "OFF"}</span></label>
           </div>
+          ${heatAvailable(lv) ? `
+          <div class="heat-control-panel" ${confirming ? 'style="opacity:.5;pointer-events:none"' : ""}>
+            <div class="heat-header">
+              <div class="heat-title-group">
+                <span style="font-size:18px;">🌡️</span>
+                <h3>Moderation Heat Bar</h3>
+              </div>
+              <div class="heat-badges">
+                <span class="heat-badge-lvl" id="heat-badge-lvl"></span>
+                <span class="heat-badge-val" id="heat-badge-val"></span>
+                <span class="heat-badge-status" id="heat-badge-status"></span>
+              </div>
+            </div>
+            <p style="font-size:13px; color:var(--muted); margin:0 0 12px;">
+              Drag the slider, or click a step. <strong>Cold</strong> refuses more;
+              <strong>hot</strong> publishes more.
+            </p>
+            <div class="heat-track-container">
+              <div class="heat-track-bar" id="heat-track-bar"></div>
+              <input type="range" class="heat-slider" id="heat-slider" min="1" max="10" step="1"
+                     value="5" aria-label="Moderation heat bar, level 1 to 10">
+            </div>
+            <div class="heat-scale-bounds">
+              <span>❄️ Strictest</span><span>⚖️ Balanced</span><span>🔥 Most permissive</span>
+            </div>
+            <div class="heat-steppers" id="heat-steppers"></div>
+            <div class="heat-policy-card">
+              <div class="heat-policy-head">
+                <strong id="heat-policy-name"></strong>
+                <span class="heat-policy-tone" id="heat-policy-tone"></span>
+              </div>
+              <div class="heat-policy-grid">
+                <div class="heat-allowed-box"><b>✅ PUBLISHES</b>
+                  <span id="heat-policy-allowed"></span></div>
+                <div class="heat-blocked-box"><b>⛔ REFUSES (cumulative)</b>
+                  <span id="heat-policy-blocked"></span></div>
+              </div>
+              <div class="heat-monotonic-note"><span>🔒</span>
+                <span><strong>Cumulative:</strong> whatever is refused at Level 9 is also refused
+                at Level 8, and so on down to Level 1.</span></div>
+            </div>
+          </div>` : `
           <fieldset class="adm-levels" ${confirming ? "disabled" : ""}><legend>Moderation level</legend>
             ${lv.map((n) => `<label class="adm-level"><input type="radio" name="mm-level" value="${esc(n)}" ${draft.level === n ? "checked" : ""}>
               <span><b>${esc(levelName(n))}</b><span class="adm-sub">${esc(LEVEL_TEXT[n] || "")}</span></span></label>`).join("")}
-          </fieldset>
+          </fieldset>`}
           ${draft.enabled ? "" : `<p class="adm-sub">The level is remembered for when moderation is turned back ON.</p>`}
           <p class="adm-sub">Applies to every content type: Articles, Add Business, Videos, Requests, Proposals, Business Proposals and the rest.</p>
           ${confirming ? `<div class="adm-confirm" role="alertdialog"><b>Turn moderation OFF?</b>
@@ -985,6 +1080,52 @@
         bind(confirming);
       }
 
+      /** The bar needs all ten levels present server-side; otherwise the radio list stands. */
+      function heatAvailable(levels) {
+        return HEAT_LEVELS.every((c) => (levels || []).includes(c.name));
+      }
+
+      /** Paint the bar at `lvl` and record it on the draft. The draft carries the API's key
+       *  (`level_7`), not the number, so saving is unchanged from the radio version. */
+      function applyHeat(lvl) {
+        const n = Math.max(1, Math.min(10, parseInt(lvl, 10) || 5));
+        const cfg = HEAT_LEVELS[n - 1];
+        draft.level = cfg.name;
+        q("heat-slider").value = n;
+        q("heat-badge-lvl").textContent = `Level ${cfg.level} / 10`;
+        q("heat-badge-val").textContent = cfg.val.toFixed(2);
+        q("heat-badge-status").textContent = `${cfg.icon} ${cfg.label}`;
+        q("heat-badge-status").style.backgroundColor = cfg.color;
+        q("heat-policy-name").textContent = `Level ${cfg.level} — ${cfg.label} (${cfg.val.toFixed(2)})`;
+        q("heat-policy-tone").textContent = cfg.tone;
+        q("heat-policy-allowed").textContent = cfg.allowed;
+        q("heat-policy-blocked").textContent = cfg.blocked;
+        back.querySelectorAll(".heat-step-btn").forEach((btn) => {
+          const on = parseInt(btn.dataset.level, 10) === n;
+          btn.classList.toggle("active", on);
+          btn.style.borderColor = on ? cfg.color : "";
+          btn.style.boxShadow = on ? `0 0 0 2px ${cfg.color}33` : "";
+        });
+      }
+
+      function wireHeat() {
+        q("heat-steppers").innerHTML = HEAT_LEVELS.map((cfg) => `
+          <button type="button" class="heat-step-btn" data-level="${cfg.level}">
+            <span class="step-lvl">L${cfg.level}</span>
+            <span class="step-val">${cfg.val.toFixed(2)}</span>
+          </button>`).join("");
+        q("heat-slider").addEventListener("input", (e) => applyHeat(e.target.value));
+        q("heat-steppers").addEventListener("click", (e) => {
+          const btn = e.target.closest(".heat-step-btn");
+          if (btn) applyHeat(btn.dataset.level);
+        });
+        // Open where the saved setting actually is. A named level (strict/medium/lenient) is
+        // still valid server-side, so it maps to its nearest step instead of being read as
+        // "nothing set" and quietly reset to Balanced the first time anyone saves.
+        const cur = HEAT_BY_NAME[draft.level];
+        applyHeat(cur ? cur.level : (NAMED_AT[draft.level] || 5));
+      }
+
       function bind(confirming) {
         if (confirming) {
           q("mm-keep").addEventListener("click", () => { draft.enabled = true; draw(); });
@@ -992,8 +1133,12 @@
           return;
         }
         q("mm-enabled").addEventListener("change", (ev) => { draft.enabled = ev.target.checked; draw(); });
-        back.querySelectorAll("input[name=mm-level]").forEach((r) =>
-          r.addEventListener("change", () => { draft.level = r.value; }));
+        if (q("heat-slider")) {
+          wireHeat();
+        } else {
+          back.querySelectorAll("input[name=mm-level]").forEach((r) =>
+            r.addEventListener("change", () => { draft.level = r.value; }));
+        }
         q("mm-cancel").addEventListener("click", close);
         q("mm-logout").addEventListener("click", async () => {
           try { await call("POST", "/v1/admin/auth/logout"); } catch { /* ignore */ }
