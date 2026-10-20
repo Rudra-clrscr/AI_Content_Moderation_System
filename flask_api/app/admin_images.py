@@ -236,7 +236,7 @@ def upload_image():
         conflicts = []
         if phrasing and resolve is None:
             conflicts = find_conflicts(_read(policy_path), label, [phrasing],
-                                       unsafe=(action == "block"))
+                                       unsafe=(action == "block"), model_dir=model_dir)
         if conflicts:
             # The file is kept and the record stands - the admin did upload it, and making
             # them pick it again to answer a question would be its own small insult. Only the

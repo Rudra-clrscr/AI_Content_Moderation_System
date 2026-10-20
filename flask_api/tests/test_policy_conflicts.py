@@ -58,11 +58,27 @@ def test_a_rule_does_not_conflict_with_itself():
     assert find_conflicts(doc, "rainbow", ["a photo of rainbow"], unsafe=False) == []
 
 
-def test_different_wording_is_left_alone():
-    """Near-duplicates need a similarity threshold to catch, and a false alarm here blocks a
-    legitimate edit. Only identical sentences are claimed."""
+def test_exact_matching_alone_misses_the_real_case():
+    """Pins the limit of the text-only pass, which is why find_conflicts takes a model_dir.
+
+    Character matching is not how the clash arises. An admin writes an allowing rule, uploads
+    a picture weeks later and describes it afresh; the two sentences agree in meaning and
+    differ in wording. Measured, one extra article was enough to slip through - "a photo of a
+    rainbow" against "a photo of rainbow" went undetected - so the guard existed and never
+    fired on the case it was built for. With a model_dir the semantic pass catches all of
+    these at 0.92-0.99; without one, this is what remains.
+    """
     doc = policy(rainbow={"unsafe": False, "prompts": ["a photo of rainbow"]})
-    assert find_conflicts(doc, "unrest", ["a rainbow over a field"], unsafe=True) == []
+    assert find_conflicts(doc, "unrest", ["a photo of a rainbow"], unsafe=True) == []
+    assert find_conflicts(doc, "unrest", ["a rainbow photo"], unsafe=True) == []
+
+
+def test_the_similarity_bar_sits_in_a_measured_gap():
+    """PHRASE_SAME_MIN is not a feel. Measured against "a photo of rainbow", the ways a person
+    rephrases it score 0.923-0.990 and unrelated subjects 0.743-0.844. The bar belongs in the
+    empty stretch between, and moving it outside that range means re-measuring first."""
+    from app.admin_policy import PHRASE_SAME_MIN
+    assert 0.845 < PHRASE_SAME_MIN < 0.922
 
 
 def test_resolving_removes_the_losing_copy_only():

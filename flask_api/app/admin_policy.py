@@ -244,7 +244,7 @@ def upsert_label(name: str):
     # Refusing and allowing the same sentence are both coherent policies, and only the admin
     # knows which they meant - so this stops and asks instead of letting write order decide.
     resolve = str(body.get("resolve", "")).strip().lower() or None
-    conflicts = find_conflicts(doc, key, entry["prompts"], entry["unsafe"])
+    conflicts = find_conflicts(doc, key, entry["prompts"], entry["unsafe"], model_dir)
     if conflicts and resolve not in ("refuse", "allow"):
         return _err(409, "policy_conflict",
                     "This wording is already used by a rule with the opposite verdict. "
@@ -305,7 +305,78 @@ def _norm_phrase(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", str(s).lower())).strip()
 
 
-def find_conflicts(doc: dict, label: str, prompts: list[str], unsafe: bool) -> list[dict]:
+# How alike two wordings must be to count as the same rule. Measured against
+# "a photo of rainbow": the ways a person rephrases it - "a photo of a rainbow", "a rainbow
+# photo", "rainbow", "a photo of a rainbow in the sky" - score 0.923 to 0.990, while unrelated
+# subjects (a handgun, a wedding, a baby, steel pipes) score 0.743 to 0.844. Nothing lands
+# between 0.845 and 0.922, so the bar goes in that gap rather than being picked by feel.
+PHRASE_SAME_MIN = 0.88
+
+
+def _semantic_clashes(doc: dict, label: str, prompts: list[str], unsafe: bool,
+                      model_dir: Path) -> list[dict]:
+    """Conflicts between wordings that MEAN the same thing without being the same string.
+
+    The first version compared normalised text, which caught "A photo of Rainbow." against
+    "a photo of rainbow" and nothing else. That is not how the clash arises: an admin writes
+    an allowing rule, uploads a picture weeks later and describes it afresh, and the two
+    sentences agree in meaning and differ in wording. Measured, one extra article was enough
+    to slip through - "a photo of a rainbow" against "a photo of rainbow" went undetected -
+    so the guard existed and never fired on the case it was built for.
+
+    Compared in CLIP's own text space, because that is the space the rules are scored in: two
+    wordings the encoder places together WILL match the same pictures, whatever a human thinks
+    of them. The existing wordings are already encoded in prompts.npz, so this costs one
+    subprocess for the new sentences rather than re-encoding the whole policy.
+    """
+    import numpy as np
+    npz = model_dir / "prompts.npz"
+    script = Path(current_app.extensions["moderation"].settings.visual.root) / "scripts" / "encode_prompts.py"
+    if not npz.exists() or not script.exists():
+        return []
+    try:
+        data = np.load(npz, allow_pickle=False)
+        baked = data["embeds"].astype(np.float32)
+        baked_prompts = [str(x) for x in data["prompts"]]
+        baked_labels = [str(x) for x in data["labels"]]
+        proc = subprocess.run([sys.executable, str(script), "--model-dir", str(model_dir)],
+                              input=json.dumps(list(prompts)), capture_output=True, text=True,
+                              timeout=BUILD_TIMEOUT_S, cwd=str(script.parent.parent))
+        if proc.returncode != 0:
+            log.warning("conflict check could not encode: %s", (proc.stderr or "")[-200:])
+            return []
+        new = np.asarray(json.loads(proc.stdout)["embeds"], dtype=np.float32)
+    except Exception:
+        log.exception("semantic conflict check failed - falling back to exact matching only")
+        return []
+    if new.shape[1] != baked.shape[1]:
+        return []
+
+    verdict_of = {k: ("refuse" if (e or {}).get("unsafe", True) else "allow")
+                  for k, e in (doc.get("labels") or {}).items()}
+    mine = "refuse" if unsafe else "allow"
+    out, seen = [], set()
+    sims = new @ baked.T
+    for i, phrase in enumerate(prompts):
+        for j in np.argsort(-sims[i]):
+            s = float(sims[i, j])
+            if s < PHRASE_SAME_MIN:
+                break
+            other = baked_labels[j]
+            if other == label or verdict_of.get(other, "refuse") == mine:
+                continue
+            key = (phrase, other, baked_prompts[j])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"phrasing": baked_prompts[j], "your_wording": phrase,
+                        "other_label": other, "other_verdict": verdict_of.get(other, "refuse"),
+                        "this_verdict": mine, "similarity": round(s, 4)})
+    return out
+
+
+def find_conflicts(doc: dict, label: str, prompts: list[str], unsafe: bool,
+                   model_dir: Path | None = None) -> list[dict]:
     """Phrasings that would mean REFUSE in one rule and ALLOW in another.
 
     This is reachable in normal use and silent when it happens. An admin writes an allowing
@@ -329,13 +400,20 @@ def find_conflicts(doc: dict, label: str, prompts: list[str], unsafe: bool) -> l
     if not want:
         return []
     out = []
+    # Meaning first, since that is the case this exists for; identical strings are a subset
+    # the encoder also catches, but the exact pass below costs nothing and still runs when the
+    # encoder is unavailable.
+    if model_dir is not None:
+        out.extend(_semantic_clashes(doc, label, [p for p in prompts if _norm_phrase(p)],
+                                     unsafe, model_dir))
+    already = {(c["other_label"], _norm_phrase(c["phrasing"])) for c in out}
     for other, entry in (doc.get("labels") or {}).items():
         if other == label or not isinstance(entry, dict):
             continue
         if bool(entry.get("unsafe", True)) == bool(unsafe):
             continue
         for p in (entry.get("prompts") or []):
-            if _norm_phrase(p) in want:
+            if _norm_phrase(p) in want and (other, _norm_phrase(p)) not in already:
                 out.append({
                     "phrasing": p, "other_label": other,
                     "other_verdict": "refuse" if entry.get("unsafe", True) else "allow",
@@ -398,7 +476,7 @@ def add_phrasing(label: str, phrasing: str, unsafe: bool = True,
     if len(prompts) >= MAX_PROMPTS:
         return {"added": False, "reason": f"rule already has {MAX_PROMPTS} phrasings",
                 "label": key}
-    conflicts = find_conflicts(doc, key, [phrasing], unsafe)
+    conflicts = find_conflicts(doc, key, [phrasing], unsafe, model_dir)
     if conflicts and resolve not in ("refuse", "allow"):
         return {"added": False, "reason": "conflict", "label": key, "conflicts": conflicts}
     if conflicts:
