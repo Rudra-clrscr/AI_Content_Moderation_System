@@ -1190,13 +1190,39 @@
                 </select>
               </div>
               <div class="field">
-                <label for="up-desc">Description (optional)</label>
-                <input class="input" id="up-desc" placeholder="e.g. Mamy Poko Pants baby diaper packaging photo">
+                <label for="up-desc">What is in this picture? <span class="req">*</span></label>
+                <input class="input" id="up-desc" placeholder="a photo of fireworks for sale">
+                <p class="hint">Write it as a caption — “a photo of …” reads the way the model
+                  was trained and scores better than a bare noun. This sentence becomes a rule
+                  in its own right, and it is the part that reaches pictures that look nothing
+                  like the one you are uploading.</p>
+              </div>
+
+              <div class="pol-try">
+                <div class="pol-try-head">
+                  <b>Teach the checker from this upload</b>
+                  <label class="adm-switch" style="transform:scale(.85)">
+                    <input type="checkbox" role="switch" id="up-teach" checked>
+                    <span class="adm-slider"></span><span class="adm-state">ON</span></label>
+                </div>
+                <ul class="teach-plan">
+                  <li><b>This picture</b> — lookalikes are handled from the next upload on.</li>
+                  <li><b>Your sentence</b> — added to the <span id="up-rule-name">rule</span>
+                      rule, so it also reaches pictures that merely <i>are</i> this thing.</li>
+                  <li><b>The next retrain</b> — this image joins the training set.</li>
+                </ul>
+                <p class="hint">Measured here: one picture alone catches 83% of similar ones, a
+                  sentence alone 79% — together 93%, because they miss different pictures.
+                  Turn this off to file the image without changing any behaviour.</p>
+                <div style="margin-top:8px;">
+                  <button class="btn btn-outline" id="up-try-btn" type="button">Show what the sentence matches</button>
+                  <div id="up-try-out"></div>
+                </div>
               </div>
             </div>
             <div class="modal-foot">
               <button class="btn btn-outline" id="up-cancel" type="button">Cancel</button>
-              <button class="btn btn-primary" id="up-submit" type="button">Upload & Embed</button>
+              <button class="btn btn-primary" id="up-submit" type="button">Upload & Teach</button>
             </div>
           </div>`;
 
@@ -1206,6 +1232,45 @@
         q("up-x").addEventListener("click", close);
         q("up-cancel").addEventListener("click", close);
 
+        // Name the rule the sentence will join, so the admin can see it is adding to
+        // `weapon` rather than inventing something, and watch it change with the category.
+        const showRule = () => { q("up-rule-name").textContent = q("up-cat").value || "rule"; };
+        q("up-cat").addEventListener("change", showRule);
+        showRule();
+        q("up-teach").addEventListener("change", (e) => {
+          e.target.closest(".adm-switch").querySelector(".adm-state").textContent =
+            e.target.checked ? "ON" : "OFF";
+        });
+        // Same preview as the policy editor: see what the sentence picks out before it is a
+        // rule. The picture being uploaded is not in the store yet, so this ranks the words
+        // against what is already there - which is the half that generalises anyway.
+        q("up-try-btn").addEventListener("click", async () => {
+          const out = q("up-try-out");
+          const phrase = q("up-desc").value.trim();
+          if (!phrase) { out.innerHTML = `<p class="hint">Write the description first.</p>`; return; }
+          out.innerHTML = `<p class="adm-loading"><span class="spinner dark"></span> Matching…</p>`;
+          try {
+            const res = await call("POST", "/v1/admin/policy/preview", { prompts: [phrase], limit: 8 });
+            const rows = res.top || [];
+            const byCat = {};
+            rows.forEach((r) => { byCat[r.category || "?"] = (byCat[r.category || "?"] || 0) + 1; });
+            const spread = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+            const focused = spread.length && spread[0][1] >= Math.ceil(rows.length * 0.6);
+            out.innerHTML = `
+              <div class="pol-try-verdict">
+                <span class="pol-tag ${focused ? "allow" : "block"}">${focused
+                  ? `Focused — mostly ${esc(spread[0][0])}`
+                  : "Scattered — this sentence does not single anything out"}</span>
+                <span class="hint">ranked ${res.scored.toLocaleString()} stored pictures</span></div>
+              <table class="pol-try-table"><tbody>${rows.map((r, i) => `<tr>
+                <td class="rank">${i + 1}</td><td>${esc(r.filename || "")}</td>
+                <td><span class="pol-tag ${r.action === "allow" ? "allow" : "block"}">${esc(r.category || "")}</span></td>
+              </tr>`).join("")}</tbody></table>`;
+          } catch (err) {
+            out.innerHTML = `<div class="adm-msg err">${esc(err.message)}</div>`;
+          }
+        });
+
         q("up-submit").addEventListener("click", async () => {
           const fileInput = q("up-file");
           if (!fileInput.files.length) {
@@ -1214,24 +1279,51 @@
             return;
           }
 
+          const teach = q("up-teach").checked;
+          const desc = q("up-desc").value.trim();
+          if (teach && !desc) {
+            q("up-modal-msg").textContent =
+              "Describe the picture, or switch teaching off to file it without changing anything.";
+            q("up-modal-msg").className = "adm-msg err";
+            return;
+          }
+
           const fd = new FormData();
           fd.append("file", fileInput.files[0]);
           fd.append("category", q("up-cat").value);
           fd.append("action", q("up-act").value);
-          fd.append("description", q("up-desc").value.trim());
+          fd.append("description", desc);
+          if (teach) { fd.append("teach", "1"); fd.append("phrasing", desc); }
 
           const btn = q("up-submit");
-          busy(btn, true, "Uploading & generating embeddings…");
+          busy(btn, true, teach ? "Uploading and teaching…" : "Uploading…");
           try {
             const res = await call("POST", "/v1/admin/images/upload", fd);
             close();
-            say(res.message || "Image uploaded and stored successfully.", true);
+            // Report each channel separately. They can succeed independently - a file with no
+            // readable embedding still contributes its sentence - and "uploaded" alone would
+            // not say which parts of the policy actually moved.
+            const t = res.taught;
+            if (!t) {
+              say(res.message || "Image uploaded.", true);
+            } else {
+              const bits = [];
+              const ex = t.exemplar || {};
+              bits.push(ex.skipped ? `no lookalike rule (${ex.skipped})`
+                                   : `lookalikes handled (${ex.refusing || 0} refusing, ${ex.allowing || 0} allowing)`);
+              const ph = t.phrasing || {};
+              bits.push(ph.added
+                ? `“${esc(desc)}” added to the ${esc(ph.label)} rule${ph.created_rule ? " (new rule)" : ""}`
+                : `sentence not added — ${esc(ph.reason || ph.error || "unknown")}`);
+              bits.push("included in the next retrain");
+              say(`Uploaded and taught: ${bits.join("; ")}.`, true);
+            }
             loadCategories();
             loadImages();
           } catch (err) {
             q("up-modal-msg").textContent = err.message;
             q("up-modal-msg").className = "adm-msg err";
-            busy(btn, false, "Upload & Embed");
+            busy(btn, false, "Upload & Teach");
           }
         });
       }

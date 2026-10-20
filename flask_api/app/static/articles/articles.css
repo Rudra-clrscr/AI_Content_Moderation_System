@@ -654,3 +654,8 @@ textarea.input { resize: vertical; min-height: 96px; }
 .btn-teach.allow:hover { background: #dcfce7; }
 .btn-teach.clear { color: #92400e; border-color: #fed7aa; }
 .btn-teach.clear:hover { background: #ffedd5; }
+
+/* The three things one upload does, listed so the admin can see them before committing. */
+.teach-plan { margin: 8px 0 4px; padding-left: 18px; font-size: 12px; color: var(--muted);
+  line-height: 1.7; }
+.teach-plan b { color: #0f172a; }
