@@ -601,3 +601,35 @@ textarea.input { resize: vertical; min-height: 96px; }
   gap: 5px;
 }
 
+
+/* ---------- Admin: image policy rules (admin.js policyView) ---------- */
+/* A rule is a few phrasings the model matches pictures against, so the row shows the words
+   themselves rather than only a name - the wording IS the policy, and an admin deciding
+   whether a rule is right needs to read it without opening anything. */
+.pol-list { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.pol-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.pol-row-main { min-width: 0; }
+.pol-row-main b { font-size: 14px; }
+.pol-row-acts { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.pol-row-acts .btn { padding: 5px 10px; font-size: 12px; }
+.pol-prompts { margin-top: 6px; font-size: 12px; color: var(--muted); line-height: 1.5;
+  overflow-wrap: anywhere; }
+.pol-tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px;
+  border-radius: 999px; margin: 0 6px; vertical-align: middle; }
+.pol-tag.block { background: #fee2e2; color: #b91c1c; }
+.pol-tag.allow { background: #dcfce7; color: #15803d; }
+
+/* The try-before-you-apply panel. Set apart from the fields above it because it changes
+   nothing: everything in the form is a change being composed, this is a question being asked
+   about it. */
+.pol-try { margin-top: 18px; padding: 14px; border: 1px dashed var(--line-strong, #cbd5e1);
+  border-radius: 10px; background: #fbfcfe; }
+.pol-try-head { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  flex-wrap: wrap; }
+.pol-try-verdict { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 10px 0 8px; }
+.pol-try-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pol-try-table td { padding: 5px 6px; border-bottom: 1px solid var(--line); }
+.pol-try-table td.rank { width: 26px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pol-try-table tr:last-child td { border-bottom: 0; }

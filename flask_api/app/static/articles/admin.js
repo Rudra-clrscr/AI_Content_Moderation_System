@@ -310,15 +310,305 @@
             <p>Access stored dataset images by category, select/deselect images, adjust Allow/Block rules, and fine-tune the vision model for business needs (e.g., Baby & Child products).</p>
             <button class="btn btn-primary" id="adm-images-btn" type="button" style="background:#d97706; border-color:#d97706;">Manage Images & Model</button>
           </div>
+
+          <!-- Card 3: Visual policy labels -->
+          <div class="adm-dash-card" id="card-policy">
+            <div class="adm-dash-icon" style="background:#ede9fe; color:#6d28d9;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </div>
+            <h3>Image Policy Rules</h3>
+            <p>Decide what pictures are refused, in words. Each rule is a few phrasings the model matches against - edit one, add your own, or turn a rule off without retraining anything.</p>
+            <button class="btn btn-primary" id="adm-policy-btn" type="button" style="background:#6d28d9; border-color:#6d28d9;">Manage Policy Rules</button>
+          </div>
         </div>`);
 
       $("adm-open").addEventListener("click", () => settingsModal());
       $("adm-images-btn").addEventListener("click", () => imagesOptionView());
+      $("adm-policy-btn").addEventListener("click", () => policyView());
       $("adm-logout").addEventListener("click", async () => {
         try { await call("POST", "/v1/admin/auth/logout"); } catch { /* ignore */ }
         loginView("You have been logged out.", true);
       });
       if (openPopup) settingsModal();
+    }
+
+    // ===================================================================================
+    // IMAGE POLICY RULES VIEW
+    //
+    // The visual check scores a picture against WRITTEN PHRASINGS, not trained classes, so a
+    // rule here is the whole of the policy for that subject - no dataset, no retraining. That
+    // is why this screen exists separately from the images one: selecting images and
+    // retraining moves the PROBE, and a rule below refuses on its own regardless of what the
+    // probe thinks. Wedding photographs are the case that showed it - they score 0.96-0.998
+    // against the `wedding` phrasings, so no amount of deselecting and retraining changed the
+    // outcome. Turning the rule off here does.
+    // ===================================================================================
+    function policyView() {
+      let labels = {};
+      let live = [];
+
+      function render(msg = "", ok = false) {
+        const names = Object.keys(labels).sort();
+        const unsafe = names.filter((n) => labels[n] && labels[n].unsafe);
+        const safe = names.filter((n) => !(labels[n] && labels[n].unsafe));
+        frame("Image Policy Rules",
+          "What the visual check refuses, written as phrasings. Changes apply in about a second - no retraining.", `
+          <div class="img-top-bar">
+            <button class="btn btn-outline" id="pol-back" type="button">← Back to Dashboard</button>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="img-badge-policy" id="pol-sync"></span>
+              <button class="btn btn-outline" id="pol-reset" type="button"
+                      title="Restore the policy exactly as it shipped">↺ Restore default</button>
+            </div>
+          </div>
+          <div class="adm-msg ${msg ? (ok ? "ok" : "err") : ""}" id="pol-msg" role="status" aria-live="polite">${esc(msg)}</div>
+          <p class="hint" style="margin:10px 0 4px;">
+            <b>Refusing</b> rules block a picture that matches them. <b>Allowed</b> rules are what
+            the refusing ones are judged against - every policy needs at least one.
+          </p>
+          <div class="pol-list">
+            ${unsafe.map((n) => ruleRow(n, true)).join("") || `<p class="hint">No refusing rules.</p>`}
+          </div>
+          <h3 style="margin:18px 0 6px; font-size:15px;">Allowed subjects</h3>
+          <div class="pol-list">
+            ${safe.map((n) => ruleRow(n, false)).join("") || `<p class="hint">None.</p>`}
+          </div>
+          <div style="margin-top:18px;">
+            <button class="btn btn-primary" id="pol-add" type="button">+ New rule</button>
+          </div>`);
+
+        const sync = $("pol-sync");
+        const inSync = JSON.stringify(names) === JSON.stringify([...live].sort());
+        sync.textContent = inSync ? `Live: ${live.length} rules in effect`
+                                  : `⚠ File and model differ - save any rule to resync`;
+        sync.className = inSync ? "img-badge-policy" : "img-badge-policy child-mode";
+
+        $("pol-back").addEventListener("click", () => signedIn(currentAdmin, false));
+        $("pol-add").addEventListener("click", () => ruleModal(null));
+        $("pol-reset").addEventListener("click", () => resetPolicy());
+        back_root().querySelectorAll("[data-edit]").forEach((b) =>
+          b.addEventListener("click", () => ruleModal(b.dataset.edit)));
+        back_root().querySelectorAll("[data-del]").forEach((b) =>
+          b.addEventListener("click", () => removeRule(b.dataset.del)));
+        back_root().querySelectorAll("[data-toggle]").forEach((b) =>
+          b.addEventListener("click", () => toggleRule(b.dataset.toggle)));
+      }
+
+      /** The mount root, so the handlers above find only this view's buttons. */
+      function back_root() { return root; }
+
+      function ruleRow(name, isUnsafe) {
+        const e = labels[name] || {};
+        const n = (e.prompts || []).length;
+        const bar = e.reject_min === undefined ? "default" : `refuses at ${e.reject_min}`;
+        return `
+          <div class="pol-row">
+            <div class="pol-row-main">
+              <b>${esc(name)}</b>
+              <span class="pol-tag ${isUnsafe ? "block" : "allow"}">${isUnsafe ? "REFUSING" : "ALLOWED"}</span>
+              <span class="hint">${n} phrasing${n === 1 ? "" : "s"} · ${esc(bar)}${e.category ? " · " + esc(e.category) : ""}</span>
+              <div class="pol-prompts">${(e.prompts || []).slice(0, 3).map((p) => `“${esc(p)}”`).join(" · ")}${n > 3 ? ` <span class="hint">+${n - 3} more</span>` : ""}</div>
+            </div>
+            <div class="pol-row-acts">
+              <button class="btn btn-outline" type="button" data-toggle="${esc(name)}">${isUnsafe ? "Stop refusing" : "Start refusing"}</button>
+              <button class="btn btn-outline" type="button" data-edit="${esc(name)}">Edit</button>
+              <button class="btn btn-outline adm-danger" type="button" data-del="${esc(name)}">Delete</button>
+            </div>
+          </div>`;
+      }
+
+      async function load(msg = "", ok = false) {
+        try {
+          const res = await call("GET", "/v1/admin/policy/labels");
+          labels = res.labels || {};
+          live = res.live_labels || [];
+          render(msg, ok);
+        } catch (err) {
+          frame("Image Policy Rules", "", `<div class="adm-msg err">${esc(err.message)}</div>
+            <button class="btn btn-outline" id="pol-back" type="button">← Back</button>`);
+          $("pol-back").addEventListener("click", () => signedIn(currentAdmin, false));
+        }
+      }
+
+      async function save(name, entry, what) {
+        const msg = $("pol-msg");
+        if (msg) { msg.className = "adm-msg"; msg.textContent = `Applying ${what}…`; }
+        try {
+          await call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(name)}`, entry);
+          await load(`${what} applied. The model is using it now.`, true);
+        } catch (err) {
+          await load(err.message, false);
+        }
+      }
+
+      /** Turning a rule off keeps its phrasings, so it can be turned back on unchanged. */
+      function toggleRule(name) {
+        const e = labels[name];
+        if (!e) return;
+        save(name, { unsafe: !e.unsafe, prompts: e.prompts || [],
+                     category: e.category || name,
+                     reject_min: e.reject_min === undefined ? "" : e.reject_min },
+             `“${name}” ${e.unsafe ? "stopped refusing" : "set to refuse"}`);
+      }
+
+      async function removeRule(name) {
+        if (!window.confirm(`Delete the rule “${name}”? Its phrasings are lost; turning it off `
+                            + `instead keeps them.`)) return;
+        try {
+          await call("DELETE", `/v1/admin/policy/labels/${encodeURIComponent(name)}`);
+          await load(`“${name}” deleted.`, true);
+        } catch (err) {
+          await load(err.message, false);
+        }
+      }
+
+      async function resetPolicy() {
+        if (!window.confirm("Restore the policy exactly as it shipped? Every rule you have "
+                            + "added or changed here is discarded.")) return;
+        try {
+          await call("POST", "/v1/admin/policy/reset");
+          await load("Policy restored to the default.", true);
+        } catch (err) {
+          await load(err.message, false);
+        }
+      }
+
+      function ruleModal(name) {
+        const e = (name && labels[name]) || { unsafe: true, prompts: [], category: "" };
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        back.innerHTML = `
+          <div class="modal img-modal-wide" role="dialog" aria-modal="true" aria-labelledby="pol-modal-title">
+            <div class="modal-head"><h2 id="pol-modal-title">${name ? "Edit rule" : "New rule"}</h2>
+              <button class="btn-link" id="pol-x" aria-label="Close" type="button">✕</button></div>
+            <div class="modal-body">
+              <div id="pol-modal-msg" class="adm-msg" role="status"></div>
+              <div class="field">
+                <label for="pol-name">Rule name <span class="req">*</span></label>
+                <input class="input" id="pol-name" value="${esc(name || "")}" ${name ? "readonly" : ""}
+                       placeholder="e.g. fireworks" autocomplete="off">
+                <p class="hint">Lower case, letters, digits and underscores. This name appears in
+                  moderation results.</p>
+              </div>
+              <div class="field">
+                <label for="pol-prompts">Phrasings <span class="req">*</span></label>
+                <textarea class="input" id="pol-prompts" rows="7"
+                  placeholder="a photo of fireworks exploding&#10;a photo of firecrackers for sale">${esc((e.prompts || []).join("\n"))}</textarea>
+                <p class="hint">One per line. Write them the way a caption would read - "a photo of
+                  …" scores better than a bare noun. Several wordings help: one may miss a picture
+                  another catches.</p>
+              </div>
+              <div class="field">
+                <label for="pol-unsafe">What this rule does</label>
+                <select class="select" id="pol-unsafe">
+                  <option value="1" ${e.unsafe ? "selected" : ""}>REFUSE pictures that match</option>
+                  <option value="0" ${e.unsafe ? "" : "selected"}>ALLOW - an ordinary subject to judge the others against</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="pol-cat">Reported category</label>
+                <input class="input" id="pol-cat" value="${esc(e.category || "")}"
+                       placeholder="e.g. weapons - defaults to the rule name">
+              </div>
+              <div class="field">
+                <label for="pol-min">Confidence needed to refuse</label>
+                <input class="input" id="pol-min" value="${e.reject_min === undefined ? "" : e.reject_min}"
+                       placeholder="leave blank to use the project default">
+                <p class="hint">0 to 1. Scores are not comparable between rules, so set this from
+                  that rule's own pictures rather than copying another's.</p>
+              </div>
+
+              <div class="pol-try">
+                <div class="pol-try-head">
+                  <b>Try these words first</b>
+                  <button class="btn btn-outline" id="pol-try-btn" type="button">Show what they match</button>
+                </div>
+                <p class="hint">Nothing is saved. Your stored pictures are ranked by how closely
+                  they match the phrasings above, so you can see what a rule would pick out
+                  before it is in force.</p>
+                <div id="pol-try-out"></div>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-outline" id="pol-cancel" type="button">Cancel</button>
+              <button class="btn btn-primary" id="pol-save" type="button">Apply rule</button>
+            </div>
+          </div>`;
+        document.body.appendChild(back);
+        const q = (id) => back.querySelector("#" + id);
+        const close = () => back.remove();
+        q("pol-x").addEventListener("click", close);
+        q("pol-cancel").addEventListener("click", close);
+        back.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
+
+        q("pol-try-btn").addEventListener("click", async () => {
+          const prompts = q("pol-prompts").value.split("\n").map((s) => s.trim()).filter(Boolean);
+          const out = q("pol-try-out");
+          if (!prompts.length) {
+            out.innerHTML = `<p class="hint">Write a phrasing above first.</p>`;
+            return;
+          }
+          out.innerHTML = `<p class="adm-loading"><span class="spinner dark"></span> Matching against your stored pictures…</p>`;
+          try {
+            const res = await call("POST", "/v1/admin/policy/preview", { prompts, limit: 10 });
+            const rows = res.top || [];
+            // Grouped by the category each matched picture is filed under. A wording that is
+            // working puts one category at the top repeatedly; a vague one returns a spread of
+            // unrelated categories at almost the same score, which is what "no match" looks
+            // like. That pattern is the useful signal here - not the numbers themselves.
+            const byCat = {};
+            rows.forEach((r) => { byCat[r.category || "?"] = (byCat[r.category || "?"] || 0) + 1; });
+            const spread = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+            const verdict = spread.length && spread[0][1] >= Math.ceil(rows.length * 0.6)
+              ? `<span class="pol-tag allow">Focused — mostly <b>${esc(spread[0][0])}</b></span>`
+              : `<span class="pol-tag block">Scattered — these words do not single anything out</span>`;
+            out.innerHTML = `
+              <div class="pol-try-verdict">${verdict}
+                <span class="hint">ranked ${res.scored.toLocaleString()} stored pictures</span></div>
+              <table class="pol-try-table"><tbody>
+                ${rows.map((r, i) => `<tr>
+                  <td class="rank">${i + 1}</td>
+                  <td>${esc(r.filename || "")}</td>
+                  <td><span class="pol-tag ${r.action === "allow" ? "allow" : "block"}">${esc(r.category || "")}</span></td>
+                </tr>`).join("")}
+              </tbody></table>
+              <p class="hint">Order is what matters here, not the scores: the live check
+                calculates differently and reads much higher. Use this to confirm the right
+                pictures come to the top.</p>`;
+          } catch (err) {
+            out.innerHTML = `<div class="adm-msg err">${esc(err.message)}</div>`;
+          }
+        });
+        q("pol-save").addEventListener("click", async () => {
+          const nm = q("pol-name").value.trim().toLowerCase();
+          const prompts = q("pol-prompts").value.split("\n").map((s) => s.trim()).filter(Boolean);
+          const m = q("pol-modal-msg");
+          if (!nm) { m.className = "adm-msg err"; m.textContent = "Give the rule a name."; return; }
+          if (!prompts.length) {
+            m.className = "adm-msg err"; m.textContent = "Add at least one phrasing."; return;
+          }
+          const foot = back.querySelector(".modal-foot");
+          foot.innerHTML = `<button class="btn btn-primary" disabled><span class="spinner"></span> Applying…</button>`;
+          const entry = { unsafe: q("pol-unsafe").value === "1", prompts,
+                          category: q("pol-cat").value.trim() || nm,
+                          reject_min: q("pol-min").value.trim() };
+          try {
+            await call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(nm)}`, entry);
+            close();
+            await load(`“${nm}” applied. The model is using it now.`, true);
+          } catch (err) {
+            foot.innerHTML = `<button class="btn btn-outline" id="pol-cancel2" type="button">Cancel</button>
+              <button class="btn btn-primary" id="pol-save2" type="button">Apply rule</button>`;
+            m.className = "adm-msg err"; m.textContent = err.message;
+            back.querySelector("#pol-cancel2").addEventListener("click", close);
+            back.querySelector("#pol-save2").addEventListener("click", () => q("pol-save").click());
+          }
+        });
+      }
+
+      load();
     }
 
     // ===================================================================================

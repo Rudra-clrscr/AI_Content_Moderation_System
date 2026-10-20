@@ -37,6 +37,7 @@ flask_api/config/.
 """
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -44,6 +45,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import yaml
 from flask import Blueprint, current_app, jsonify, request
 
@@ -271,6 +273,110 @@ def delete_label(name: str):
     if not ok:
         return _err(500, "policy_build_failed", msg)
     return jsonify({"status": "deleted", "label": key})
+
+
+@admin_policy_bp.post("/v1/admin/policy/preview")
+def preview_label():
+    """Score candidate phrasings against the stored images WITHOUT changing anything.
+
+    This is the part that makes writing policy in words usable rather than a guess. A rule is
+    only as good as its wordings, and until now the only way to find out whether "a photo of
+    fireworks exploding" catches what you meant was to apply it and watch the moderation queue.
+    Here the admin sees, before committing, which of BONC's own pictures the words match and
+    how strongly - and, for an existing rule, which pictures it is already matching that they
+    might not expect.
+
+    It scores against the embeddings already in system.db, so there is no inference over
+    images at all: one subprocess to encode a handful of phrasings, then a dot product.
+
+    THESE NUMBERS ARE NOT THE LIVE SCORES AND MUST NOT BE READ AS A THRESHOLD. They are raw
+    cosine similarities, which for CLIP sit in a narrow band - measured here, a wedding
+    photograph against "a photo of a wedding ceremony" is 0.32 while the same picture scores
+    0.96 through classify(). The live check softmaxes across every label, which concentrates
+    almost all the mass on the winner; a raw similarity does not. So `over_threshold` is
+    returned only when the caller asks for it, and the UI presents this as a RANKING - which
+    of your pictures these words pick out, and whether they cluster on the subject you meant -
+    rather than as a prediction of reject_min.
+
+    Ranking is the right question anyway. A wording is good when it separates: "a photo of a
+    wedding ceremony" puts five wedding photographs at the top, while "a photo of fireworks
+    exploding" returns gore, romance and a safe listing at nearly identical scores, which is
+    exactly how it looks when nothing in the set matches. That contrast is visible in the
+    order and invisible in any single number.
+    """
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    body = request.get_json(silent=True) or {}
+    prompts = [str(p).strip() for p in (body.get("prompts") or []) if str(p).strip()]
+    if not prompts:
+        return _err(400, "missing_prompts", "Give at least one phrasing to try.")
+    if len(prompts) > MAX_PROMPTS:
+        return _err(400, "too_many_prompts", f"At most {MAX_PROMPTS} phrasings.")
+    limit = max(1, min(int(body.get("limit", 12) or 12), 48))
+
+    _, _, model_dir = _paths()
+    root = Path(current_app.extensions["moderation"].settings.visual.root)
+    script = root / "scripts" / "encode_prompts.py"
+    if not script.exists():
+        return _err(500, "no_encoder", f"{script} is missing.")
+    try:
+        proc = subprocess.run([sys.executable, str(script), "--model-dir", str(model_dir)],
+                              input=json.dumps(prompts), capture_output=True, text=True,
+                              timeout=BUILD_TIMEOUT_S, cwd=str(root))
+        if proc.returncode != 0:
+            return _err(500, "encode_failed",
+                        (proc.stderr or proc.stdout or "").strip()[-300:] or "encoding failed")
+        embeds = np.asarray(json.loads(proc.stdout)["embeds"], dtype=np.float32)
+    except Exception as exc:
+        log.exception("policy preview failed")
+        return _err(500, "encode_failed", str(exc))
+
+    store = current_app.extensions["system_store"]
+    rows = store.list_images(page=1, limit=5000).get("items", [])
+    ids = [r["id"] for r in rows if r.get("has_embedding")]
+    if not ids:
+        return _err(409, "no_embeddings",
+                    "No stored image has an embedding yet. Run the image loader first so "
+                    "there is something to try these words against.")
+
+    # Pull the vectors for exactly those rows. list_images omits the blob by design (it is
+    # 2 KB a row), so they are fetched here rather than widening that query for every caller.
+    vecs, keep = [], []
+    for r in store.get_selected_for_training() if body.get("selected_only") else store.all_embeddings():
+        try:
+            v = np.frombuffer(r["embedding"], dtype=np.float32)
+        except Exception:
+            continue
+        if v.shape[0] == embeds.shape[1]:
+            vecs.append(v)
+            keep.append(r)
+    if not vecs:
+        return _err(409, "no_embeddings", "No stored embedding matches this model's dimension.")
+
+    M = np.stack(vecs)
+    M = M / np.maximum(np.linalg.norm(M, axis=1, keepdims=True), 1e-12)
+    # Best-matching phrasing per picture, which is how the live check ensembles them too.
+    sims = (M @ embeds.T).max(axis=1)
+    order = np.argsort(-sims)[:limit]
+    matches = [{
+        "id": keep[i]["id"], "filename": keep[i].get("filename"),
+        "category": keep[i].get("category"), "action": keep[i].get("action"),
+        "score": round(float(sims[i]), 4),
+    } for i in order]
+    thresh = body.get("reject_min")
+    over = None
+    if thresh not in (None, ""):
+        try:
+            over = int((sims >= float(thresh)).sum())
+        except (TypeError, ValueError):
+            over = None
+    return jsonify({
+        "scored": int(len(sims)), "prompts": prompts, "top": matches,
+        "over_threshold": over,
+        "note": ("Cosine similarity against stored images. The live check softmaxes over every "
+                 "rule, so a matching picture usually scores HIGHER in production than here."),
+    })
 
 
 @admin_policy_bp.post("/v1/admin/policy/reset")

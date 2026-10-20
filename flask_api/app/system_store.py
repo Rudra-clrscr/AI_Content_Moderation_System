@@ -614,6 +614,21 @@ class SystemStore:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def all_embeddings(self, limit: int = 5000) -> list[dict[str, Any]]:
+        """Every stored image that has an embedding, for the policy preview.
+
+        Separate from list_images because that one deliberately omits the blob - it is ~2 KB a
+        row and no caller rendering a grid wants it. The preview is the one caller that needs
+        the vectors themselves, so it asks for them directly rather than widening the query
+        every other caller pays for.
+        """
+        with self._tx() as db:
+            rows = db.execute(
+                "SELECT id, filename, file_path, category, action, embedding FROM image_policy "
+                "WHERE embedding IS NOT NULL ORDER BY id ASC LIMIT ?", (int(limit),)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def save_embedding(self, image_id: int, embedding_bytes: bytes) -> None:
         with self._tx() as db:
             db.execute("UPDATE image_policy SET embedding = ? WHERE id = ?", (embedding_bytes, image_id))
