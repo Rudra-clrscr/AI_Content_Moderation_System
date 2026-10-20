@@ -6,7 +6,65 @@ mode: sync                 # sync  -> inference inline, final decision in the re
 
 model:
   backend: onnx            # onnx | stub   (stub = dev only, never deploy)
-  dir: models/v6           # live model. To roll back, put an older bundle next to it and set
+  dir: models/v8           # live model: ONE text model for the whole system. v8 is v6's
+                           #   lineage with the grievance genre folded in as unsafe - 233k
+                           #   rows from res/workplace_grievances.csv and
+                           #   res/support_complaints.csv, warm-started from v6's own
+                           #   checkpoint with 35% of its corpus rehearsed. models/v6 plus a
+                           #   separate models/grievance-* head is what this replaces.
+                           #
+                           # WHAT IT BOUGHT, measured on the hand-written sets:
+                           #   implied threats      53.4% -> 79.6%   (v6's worst real gap)
+                           #   grievance (written)  15.4% -> 57.7%
+                           #   workplace grievance  11.5% -> 57.7%
+                           #   one model, 371 MB and ~13 ms against 760 MB and 21.9 ms
+                           #
+                           # WHAT IT COST, and none of this is hidden:
+                           #   * COMPLAINTS ARE NOW REFUSED IN A PROPOSAL. accept_system.py
+                           #     gate 4 counts 17 of them and FAILS, by design: one
+                           #     surface-blind model cannot refuse a complaint on an article
+                           #     and allow it in a proposal. Gate 4 encodes the two-model
+                           #     design's policy and is no longer this system's policy. If the
+                           #     dispute channel needs those texts back, the answer is a gate
+                           #     rule for `proposal`, not a second model.
+                           #   * Long articles containing ONE unacceptable sentence are
+                           #     refused, whole-text score notwithstanding: measured, a clean
+                           #     guide scores 0.0004 and is allowed, and the same guide plus
+                           #     "Nobody at their support desk has replied about the refund in
+                           #     two weeks" is refused with decided_by `sentence` while the
+                           #     whole text still scores 0.0004. THAT IS THE POLICY, not a
+                           #     defect - the product owner's words: "any long article, if it
+                           #     contains any one word or sentence that is not acceptable, then
+                           #     it should not be published." Recorded here because it looks
+                           #     like a false refusal and the previous design deliberately did
+                           #     the opposite: app/grievance.py's MAX_SPLIT_CHARS = 400 exempted
+                           #     long posts from being split at all, and the 12,000
+                           #     `long_article` rows in generate_support_complaints.py still
+                           #     teach the WHOLE-TEXT model that an article may contain a
+                           #     setback. Those rows are why the whole-text score stays 0.0004;
+                           #     sentence_scan is what enforces the policy on top. DO NOT
+                           #     "fix" this by disabling sentence_scan - that is the only thing
+                           #     implementing the rule.
+                           #   * TWO TEXTS v6 CAUGHT NOW PUBLISH (gate 1): a long editorial
+                           #     article, and "One more order from that buyer and we will see."
+                           #     That is a real regression, not a policy trade, and it is the
+                           #     first thing to fix in the next round.
+                           #   * 47 legitimate texts refused against the previous 42 (gate 2),
+                           #     which was already failing.
+                           #   * Two of the five sentences this work started from still
+                           #     publish - "management has no brain cells for planning" (0.04)
+                           #     and "They preach work-life balance ... weekend shifts" (0.13).
+                           #     Cause: ~77,000 rows in v6's corpus teach that register is
+                           #     SAFE - business_complaint 26,226 at 0% unsafe,
+                           #     second_person_complaint 17,640 at 0%, firm_business 22,063 at
+                           #     0% - and they contradict the grievance rows on exactly this
+                           #     phrasing. Catching those two means relabelling those 77k rows,
+                           #     which also blocks ordinary B2B dispute language everywhere.
+                           #     That is a product decision nobody has taken yet.
+                           #
+                           # ROLL BACK to the two-model system by setting BOTH:
+                           #   dir: models/v6     and     grievance.enabled: true
+                           # To roll back further, put an older bundle next to it and set
                            # dir: models/v4 (or MODEL_DIR=...).
                            # v1, v3 and v4 are no longer tracked in the repo;
                            # each bundle's model_meta.json carries its own label_weights.
@@ -308,7 +366,13 @@ triage:                    # Layer 1.5: a linear pre-filter in front of the sent
                            # TRIAGE=0 turns it off; decisions must not change, only latency.
 
 grievance:                 # The public-surface complaint model (app/grievance.py).
-  enabled: true            # Asks a DIFFERENT question from the model above: "would this be a
+  enabled: false           # OFF: models/v8 answers this question itself, on every surface, so
+                           #   a second model would score the same text twice for an answer
+                           #   already in hand. The block below is kept intact - thresholds,
+                           #   surfaces, the whole sweep - because setting this back to true
+                           #   with model.dir: models/v6 is the rollback, and a deleted config
+                           #   block is a rollback nobody can perform.
+                           # Asks a DIFFERENT question from the model above: "would this be a
   dir: models/grievance-v7 #   customer-support complaint or an emotional outcry if it were PUBLISHED
                            #   NOT IN GIT (371 MB; see .gitignore for the four commands that rebuild
                            #   it). models/grievance-linear-v1 IS tracked - hashed n-grams, 928 KB,

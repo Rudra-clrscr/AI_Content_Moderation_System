@@ -216,7 +216,7 @@ class Pipeline:
         return self._build(req, Decision.REJECT, Stage.GATE, gate, None, gate_ms, None, [], [], None, fb, [])
 
     def grievance_result(self, req: ModerationRequest, gate: GateResult, gate_ms: float,
-                         score: float, stages=None) -> dict:
+                         score: float, stages=None, version: str | None = None) -> dict:
         """Final result for a complaint refused on a public surface.
 
         REJECT with `decided_by: grievance`, not `model`, because the reader of an audit trail
@@ -231,7 +231,7 @@ class Pipeline:
         scored = ScoreResult(risk_score=score, label="grievance",
                              label_scores={"not_grievance": round(1.0 - score, 6),
                                            "grievance": round(score, 6)},
-                             model_version=self.grievance.version, inference_ms=0.0)
+                             model_version=version or self.grievance.version, inference_ms=0.0)
         fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value, score)
         # `total` has to include the model that decided. Left to default it would report the
         # gate's 0.1 ms for a request that spent 12 ms in this model, and the one number an
@@ -269,13 +269,39 @@ class Pipeline:
         # Levels 6-10), public commercial complaints and friction are permitted by policy, so
         # the check is bypassed. On standard baseline and stricter levels (reject_min <= 0.50,
         # Levels 1-5), it screens public outcries.
-        if self.thresholds.reject_min <= 0.50:
+        #
+        # TWO ROUTES, because the grievance score can come from either of two places. With a
+        # separate bundle (models/grievance-*) it is its own model and runs FIRST, so a refused
+        # complaint never pays for the main model. With the unified two-headed bundle
+        # (models/v7) the grievance score falls out of the SAME forward pass as the unsafe one,
+        # so running it first would score the text twice for no reason: the memo below is built
+        # first instead, and the check reads the second head off it. Whole text and sentences
+        # are then shared with the main model's own scan rather than being a second set of
+        # calls - measured, that is the 31% of a long-article request the `grievance` stage
+        # used to cost on its own.
+        # Unified only when the check has NO scorer of its own AND the live model actually
+        # carries the head. Driving this off self.models.labels alone was wrong: a caller
+        # that injects a GrievanceCheck with its own scorer means it, and silently reading
+        # the main model's head instead ignored the injection - which is how the first cut
+        # broke test_grievance_surface, scoring 0.989 from the real bundle where the test had
+        # supplied a scorer that always returns 1.0.
+        unified = (self.grievance.enabled
+                   and self.grievance.scorer is None and self.grievance.weights is None
+                   and "grievance" in self.models.labels)
+        score = _Scorer(self.models)
+        if self.thresholds.reject_min <= 0.50 and not unified:
             with stages.time("grievance"):
                 refuse, grievance_score = self.grievance.check(req.content, req.content_type.value)
             if refuse:
                 return self.grievance_result(req, gate, gate_ms, grievance_score, stages)
-
-        score = _Scorer(self.models)
+        elif self.thresholds.reject_min <= 0.50:
+            with stages.time("grievance"):
+                refuse, grievance_score = self.grievance.check(
+                    req.content, req.content_type.value,
+                    probability=lambda t: float(score(t).label_scores.get("grievance", 0.0)))
+            if refuse:
+                return self.grievance_result(req, gate, gate_ms, grievance_score, stages,
+                                             version=self.models.version)
         # Leetspeak restored word by word ("F1rst c0py" -> "First copy"), same length, so every span
         # is scored on both texts and the riskier reading counts. Identical text when there's none.
         view = deobfuscate(req.content) if self.word_scan.enabled and self.word_scan.deobfuscate else req.content

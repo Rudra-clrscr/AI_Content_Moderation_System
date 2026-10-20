@@ -63,8 +63,16 @@ class ModelMeta:
         raw = json.loads(path.read_text(encoding="utf-8"))
         known = {k: raw.pop(k) for k in list(raw) if k in cls.__dataclass_fields__ and k != "extra"}
         meta = cls(**known, extra=raw)
-        if meta.safe_label not in meta.labels:
-            raise ValueError(f"safe_label {meta.safe_label!r} not in labels {meta.labels}")
+        # safe_label is how a SOFTMAX bundle finds the risk: 1 - P(safe). A multi-label
+        # bundle has no safe logit - every output is a violation type, and the unified
+        # [unsafe, grievance] model is the case in point - so it carries label_weights
+        # instead and _risk_from never looks at safe_label. Required unless weighted, then,
+        # rather than required always: a bundle with neither has no way to say what risk
+        # means and still fails here.
+        if meta.safe_label not in meta.labels and meta.label_weights is None:
+            raise ValueError(
+                f"safe_label {meta.safe_label!r} not in labels {meta.labels}, and no "
+                f"label_weights to derive risk from instead")
         if meta.activation not in ("softmax", "sigmoid"):
             raise ValueError(f"activation must be softmax or sigmoid, got {meta.activation!r}")
         if meta.label_weights is not None:
@@ -259,6 +267,20 @@ class ModelRegistry:
     @property
     def version(self) -> str | None:
         return self._scorer.version if self._scorer else None
+
+    @property
+    def labels(self) -> tuple[str, ...]:
+        """The live model's output labels, or () when nothing is loaded.
+
+        The pipeline uses this to tell a two-headed bundle (models/v7, [unsafe, grievance])
+        from a single-head one WITHOUT scoring a text first, because the two take different
+        routes through moderate() and the choice has to be made before any work is done.
+        Read off the scorer's own metadata rather than configured separately: a settings file
+        that disagreed with the loaded model about how many heads it has would be a very
+        confusing bug.
+        """
+        meta = getattr(self._scorer, "meta", None)
+        return tuple(getattr(meta, "labels", ()) or ())
 
     def set(self, scorer: Scorer) -> None:
         with self._lock:

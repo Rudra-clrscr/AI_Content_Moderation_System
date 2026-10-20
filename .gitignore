@@ -121,3 +121,19 @@ flask_api/models/grievance-v3/
 # calibrating a model that answers for both genres on a supplier-only validation set fits the
 # temperature to half its job.
 flask_api/models/grievance-v7/
+
+# The single text model now in service (371 MB): v6's lineage with the grievance genre folded
+# in as unsafe, so one model answers both questions on every surface. Rebuild:
+#   python training/generate_workplace_grievances.py --check-collisions
+#   python training/generate_support_complaints.py
+#   <build the combined corpus: v6's splits at 35% rehearsal + the two grievance files as
+#    unsafe/safe - see settings.yaml model.dir for what the mix is and why>
+#   python training/train_incremental.py --init D:/AI/bonc-v6new/ckpt #          --new D:/AI/bonc-data-v8single/train.csv --replay D:/AI/bonc-data-v6r2 #          --replay-frac 0.0 --out D:/AI/bonc-v8single/ckpt --max-len 256 --lr 1.2e-5
+#   python training/calibrate_export.py --ckpt D:/AI/bonc-v8single/ckpt #          --data D:/AI/bonc-data-v8single --bundle flask_api/models/v8 #          --version bonc-v8-single --max-len 256 --min-temperature 1.0
+flask_api/models/v8/
+
+# The two-headed experiment (models/v7, [unsafe, grievance]). Kept out of git and out of
+# service: 0 of 4 acceptance gates, and it published phishing that models/v6 caught. The
+# approach is recorded in training/train_dualhead.py rather than deleted, because the failure
+# mode - two heads on one backbone pulling against each other - is worth not rediscovering.
+flask_api/models/v7/
