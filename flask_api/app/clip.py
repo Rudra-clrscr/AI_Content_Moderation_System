@@ -191,7 +191,7 @@ class VisualCheck:
     def __init__(self, config: VisualConfig, root: Path | None = None):
         self.config = config
         self.root = Path(root) if root else Path(__file__).resolve().parent.parent
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._session = None
         self._labels: list[str] = []          # one entry per prompt row
         self._categories: dict[str, str] = {}
@@ -319,6 +319,26 @@ class VisualCheck:
     @property
     def ready(self) -> bool:
         return self._load()
+
+    def reload_probe(self, probe_path=None, threshold_overrides=None):
+        """Dynamically reload probe weights and/or threshold overrides into memory without restart."""
+        self._load()
+        with self._lock:
+            import numpy as np
+            p = Path(probe_path) if probe_path else (self.model_dir / "probe.npz")
+            if p.exists():
+                try:
+                    pr = np.load(p, allow_pickle=False)
+                    self._probe = (pr["W"].astype(np.float32), pr["b"].astype(np.float32),
+                                   [str(x) for x in pr["classes"]])
+                    log.info("VisualCheck reloaded probe from %s with classes: %s", p.name, self._probe[2])
+                except Exception:
+                    log.exception("VisualCheck failed to reload probe from %s", p)
+                    return False
+            if threshold_overrides:
+                self._thresholds.update({str(k): float(v) for k, v in threshold_overrides.items()})
+                log.info("VisualCheck updated thresholds: %s", threshold_overrides)
+            return True
 
     @property
     def status(self) -> dict:

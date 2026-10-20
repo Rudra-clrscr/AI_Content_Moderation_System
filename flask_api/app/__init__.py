@@ -44,6 +44,7 @@ def create_app(
     admin_store=None,
     mailer=None,
     mail_async: bool = True,
+    system_store=None,
 ) -> Flask:
     """`scorer`, `sink`, `enqueue`, `fetch_result` are injection points for tests
     and for the data layer's integration; production uses the defaults."""
@@ -89,6 +90,16 @@ def create_app(
     from app.admin_auth import init_admin, restore_levels
     admin = init_admin(app, admin_store, mailer, mail_async)
     restore_levels(app.extensions["moderation"].levels, admin.store)
+
+    from app.system_store import SystemStore
+    from app.admin_images import admin_images_bp
+    sys_store = system_store or SystemStore()
+    app.extensions["system_store"] = sys_store
+    app.register_blueprint(admin_images_bp)
+
+    active_mode = sys_store.get_setting("active_policy_mode", "standard")
+    if active_mode == "child_products" and hasattr(settings.visual, "reload_probe"):
+        settings.visual.reload_probe(threshold_overrides={"minor": 1.01})
 
     from app.api import bp
     app.register_blueprint(bp)

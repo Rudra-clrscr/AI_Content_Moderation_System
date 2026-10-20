@@ -1,4 +1,4 @@
-/* Admin: login, forgot password, and the moderation settings popup.
+/* Admin: login, forgot password, moderation settings, and images policy/fine-tuning dashboard.
  *
  * Talks only to the backend (/v1/admin/...). The login is a cookie the browser keeps and
  * JavaScript cannot read (HttpOnly); no password, token or key is ever stored in the page,
@@ -11,9 +11,6 @@
     lenient: "Less restrictive. Only clearly harmful content is refused.",
     medium: "Balanced. The project's standard policy.",
     strict: "Stricter. More content is refused or sent back for changes.",
-    // The ten cumulative levels from config/moderation_levels.yaml. Without these the radio
-    // list renders a bare "Level_1" and no description, because the fieldset draws whatever
-    // levels the server returns and looks the text up here.
     level_1: "Ultra strict. Zero tolerance - also refuses ordinary commercial friction and delivery complaints.",
     level_2: "Very strict. Also refuses minor dissatisfaction, supplier disputes and heated pricing remarks.",
     level_3: "Strict. Also refuses support outcries, emotional venting and public callouts of vendors.",
@@ -26,7 +23,6 @@
     level_10: "Maximum permissive. Only the Layer 1 gate rules refuse anything - contraband, malicious URLs, slurs.",
   };
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-  // "level_7" reads as "Level 7" in the UI; the key keeps its underscore for the API.
   const levelName = (s) => cap(String(s).replace(/_/g, " "));
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -34,11 +30,15 @@
   class SessionExpired extends Error {}
 
   async function call(method, url, body) {
+    const isForm = body instanceof FormData;
     const res = await fetch(url, {
       method,
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-Requested-With": "bonc-admin" },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+      headers: {
+        ...(isForm ? {} : { "Content-Type": "application/json" }),
+        "X-Requested-With": "bonc-admin",
+      },
+      ...(body ? { body: isForm ? body : JSON.stringify(body) } : {}),
     });
     let data = {};
     try { data = await res.json(); } catch { /* not JSON */ }
@@ -46,13 +46,14 @@
     if (res.status === 401 && !url.includes("/auth/login") && !url.includes("/password/")) {
       throw new SessionExpired("Your session has ended. Please log in again.");
     }
-    throw new Error(data.message || `Something went wrong (${res.status}).`);
+    throw new Error(data.message || (data.error && data.error.message) || `Something went wrong (${res.status}).`);
   }
 
   function mount(root) {
     let email = "";            // kept only while the forgot-password steps are on screen
     let resetToken = "";
     let cooldownTimer = null;
+    let currentAdmin = "";
 
     const $ = (id) => root.querySelector("#" + id);
     const say = (text, ok = false) => {
@@ -62,6 +63,7 @@
       el.className = "adm-msg " + (text ? (ok ? "ok" : "err") : "");
     };
     const busy = (btn, on, label) => {
+      if (!btn) return;
       btn.disabled = on;
       btn.innerHTML = on ? `<span class="spinner"></span> ${esc(label)}` : esc(label);
     };
@@ -69,7 +71,7 @@
     function frame(title, sub, body) {
       clearInterval(cooldownTimer);
       root.innerHTML = `<h1>${esc(title)}</h1><p class="subtitle">${esc(sub)}</p>
-        <section class="card adm-card"><div id="adm-msg" class="adm-msg" role="status" aria-live="polite"></div>${body}</section>`;
+        <section class="card adm-card" style="max-width:100%;"><div id="adm-msg" class="adm-msg" role="status" aria-live="polite"></div>${body}</section>`;
     }
 
     function passwordField(id, label, autocomplete) {
@@ -90,11 +92,13 @@
     // ---- login ------------------------------------------------------------------------
     function loginView(notice = "", ok = false) {
       frame("Admin login", "Only authorised administrators can change moderation settings.", `
-        <div class="field"><label for="adm-email">Email address</label>
-          <input class="input" id="adm-email" type="email" autocomplete="username" value="${esc(email)}"></div>
-        ${passwordField("adm-pass", "Password", "current-password")}
-        <div class="adm-row"><button class="btn btn-primary" id="adm-login">Log in</button>
-          <button class="btn-link" id="adm-forgot" type="button">Forgot password?</button></div>`);
+        <div style="max-width: 480px;">
+          <div class="field"><label for="adm-email">Email address</label>
+            <input class="input" id="adm-email" type="email" autocomplete="username" value="${esc(email)}"></div>
+          ${passwordField("adm-pass", "Password", "current-password")}
+          <div class="adm-row"><button class="btn btn-primary" id="adm-login">Log in</button>
+            <button class="btn-link" id="adm-forgot" type="button">Forgot password?</button></div>
+        </div>`);
       wireEyes();
       say(notice, ok);
       const submit = async () => {
@@ -107,7 +111,7 @@
         try {
           const r = await call("POST", "/v1/admin/auth/login", { email: e, password: p });
           email = "";
-          signedIn(r.email, true);
+          signedIn(r.email, false);
         } catch (err) {
           say(err.message);
           busy(btn, false, "Log in");
@@ -118,13 +122,15 @@
       $("adm-forgot").addEventListener("click", () => { email = $("adm-email").value.trim(); forgotView(); });
     }
 
-    // ---- forgot password: email -> code -> new password -------------------------------
+    // ---- forgot password --------------------------------------------------------------
     function forgotView() {
       frame("Forgot password", "We will email a 6-digit code to the administrator's address.", `
-        <div class="field"><label for="adm-email">Registered email address</label>
-          <input class="input" id="adm-email" type="email" autocomplete="username" value="${esc(email)}"></div>
-        <div class="adm-row"><button class="btn btn-primary" id="adm-send">Send code</button>
-          <button class="btn-link" id="adm-back" type="button">Back to login</button></div>`);
+        <div style="max-width: 480px;">
+          <div class="field"><label for="adm-email">Registered email address</label>
+            <input class="input" id="adm-email" type="email" autocomplete="username" value="${esc(email)}"></div>
+          <div class="adm-row"><button class="btn btn-primary" id="adm-send">Send code</button>
+            <button class="btn-link" id="adm-back" type="button">Back to login</button></div>
+        </div>`);
       $("adm-back").addEventListener("click", () => loginView());
       $("adm-send").addEventListener("click", async () => {
         const e = $("adm-email").value.trim();
@@ -144,11 +150,13 @@
 
     function codeView(notice) {
       frame("Enter the code", "Check your email. The code works for 10 minutes and only once.", `
-        <div class="field"><label for="adm-code">6-digit code</label>
-          <input class="input" id="adm-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div>
-        <div class="adm-row"><button class="btn btn-primary" id="adm-verify">Verify code</button>
-          <button class="btn btn-outline" id="adm-resend" type="button" disabled>Resend code</button>
-          <button class="btn-link" id="adm-back" type="button">Back to login</button></div>`);
+        <div style="max-width: 480px;">
+          <div class="field"><label for="adm-code">6-digit code</label>
+            <input class="input" id="adm-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div>
+          <div class="adm-row"><button class="btn btn-primary" id="adm-verify">Verify code</button>
+            <button class="btn btn-outline" id="adm-resend" type="button" disabled>Resend code</button>
+            <button class="btn-link" id="adm-back" type="button">Back to login</button></div>
+        </div>`);
       say(notice, true);
       let left = 60;
       const resend = $("adm-resend");
@@ -189,9 +197,11 @@
 
     function newPasswordView() {
       frame("Choose a new password", "At least 10 characters, with letters and numbers.", `
-        ${passwordField("adm-new", "New password", "new-password")}
-        ${passwordField("adm-new2", "Confirm new password", "new-password")}
-        <div class="adm-row"><button class="btn btn-primary" id="adm-reset">Save new password</button></div>`);
+        <div style="max-width: 480px;">
+          ${passwordField("adm-new", "New password", "new-password")}
+          ${passwordField("adm-new2", "Confirm new password", "new-password")}
+          <div class="adm-row"><button class="btn btn-primary" id="adm-reset">Save new password</button></div>
+        </div>`);
       wireEyes();
       $("adm-reset").addEventListener("click", async () => {
         const a = $("adm-new").value, b = $("adm-new2").value;
@@ -210,21 +220,723 @@
       });
     }
 
-    // ---- signed in ---------------------------------------------------------------------
+    // ---- signed in dashboard -----------------------------------------------------------
     function signedIn(who, openPopup) {
-      frame("Admin", "Manage AI content moderation.", `
-        <p class="adm-who">Signed in as <b>${esc(who)}</b></p>
-        <div class="adm-row"><button class="btn btn-primary" id="adm-open">Moderation settings</button>
-          <button class="btn btn-outline" id="adm-logout">Log out</button></div>`);
+      currentAdmin = who;
+      frame("Admin Dashboard", "Manage AI content moderation, visual model policies, and fine-tuning.", `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+          <p class="adm-who" style="margin:0;">Signed in as <b>${esc(who)}</b></p>
+          <button class="btn btn-outline" id="adm-logout" type="button">Log out</button>
+        </div>
+
+        <div class="adm-dash-grid">
+          <!-- Card 1: Moderation Settings -->
+          <div class="adm-dash-card" id="card-settings">
+            <div class="adm-dash-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+                <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+                <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+                <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+              </svg>
+            </div>
+            <h3>Content Moderation Settings</h3>
+            <p>Configure global AI moderation switches and strictness levels across articles, businesses, and proposals.</p>
+            <button class="btn btn-primary" id="adm-open" type="button">Moderation settings</button>
+          </div>
+
+          <!-- Card 2: Images Option (System DB & Fine-Tuning) -->
+          <div class="adm-dash-card" id="card-images">
+            <div class="adm-dash-icon" style="background:#fef3c7; color:#b45309;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+              </svg>
+            </div>
+            <h3>Image Policy & Fine-Tuning</h3>
+            <p>Access stored dataset images by category, select/deselect images, adjust Allow/Block rules, and fine-tune the vision model for business needs (e.g., Baby & Child products).</p>
+            <button class="btn btn-primary" id="adm-images-btn" type="button" style="background:#d97706; border-color:#d97706;">Manage Images & Model</button>
+          </div>
+        </div>`);
+
       $("adm-open").addEventListener("click", () => settingsModal());
+      $("adm-images-btn").addEventListener("click", () => imagesOptionView());
       $("adm-logout").addEventListener("click", async () => {
-        try { await call("POST", "/v1/admin/auth/logout"); } catch { /* already out */ }
+        try { await call("POST", "/v1/admin/auth/logout"); } catch { /* ignore */ }
         loginView("You have been logged out.", true);
       });
       if (openPopup) settingsModal();
     }
 
-    // ---- the settings popup ------------------------------------------------------------
+    // ===================================================================================
+    // IMAGES & MODEL FINE-TUNING VIEW
+    // ===================================================================================
+    function imagesOptionView() {
+      let activeCat = "all";
+      let activeAction = "all";
+      let activeSelected = "all";
+      let searchQuery = "";
+      let page = 1;
+      const limit = 24;
+
+      let categories = [];
+      let imagesData = { items: [], pagination: {}, stats: {} };
+      let pendingChanges = new Map(); // id -> { action, is_selected }
+
+      function renderShell() {
+        frame("Image Policy & Model Fine-Tuning", "Manage stored policy images, add categories, and fine-tune the image model for business requirements.", `
+          <div class="img-mgmt-shell">
+            <!-- Top bar -->
+            <div class="img-top-bar">
+              <button class="btn btn-outline" id="img-back-btn" type="button">← Back to Dashboard</button>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span id="img-active-policy-badge" class="img-badge-policy">Policy: Loading…</span>
+                <button class="btn btn-outline" id="img-hist-btn" type="button" title="View training history">🕒 Training History</button>
+              </div>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="img-stats-bar" id="img-stats-container">
+              <div class="img-stat-box"><span class="img-stat-val" id="stat-total">0</span><span class="img-stat-lbl">Total Stored</span></div>
+              <div class="img-stat-box"><span class="img-stat-val" id="stat-selected" style="color:#0284c7;">0</span><span class="img-stat-lbl">Selected to Train</span></div>
+              <div class="img-stat-box"><span class="img-stat-val" id="stat-allowed" style="color:#16a34a;">0</span><span class="img-stat-lbl">Allowed (Safe)</span></div>
+              <div class="img-stat-box"><span class="img-stat-val" id="stat-blocked" style="color:#dc2626;">0</span><span class="img-stat-lbl">Blocked (Unsafe)</span></div>
+            </div>
+
+            <!-- Business Presets Bar -->
+            <div class="img-preset-bar">
+              <div class="img-preset-left">
+                <span style="font-weight:700; font-size:13px; color:#334155;">Business Preset:</span>
+                <select class="img-preset-sel" id="img-preset-sel">
+                  <option value="standard">Standard BONC Platform (Minors & Child Images Blocked)</option>
+                  <option value="child_products">Child & Baby Care Products (Allow Baby Images - e.g. Mamy Poko Pants)</option>
+                </select>
+                <button class="btn btn-outline" id="img-apply-preset-btn" type="button">Apply Preset & Retrain</button>
+              </div>
+              <div style="font-size:12px; color:var(--muted);">Allows fine-tuning model for businesses selling diapers, baby wear, etc.</div>
+            </div>
+
+            <!-- Category Pills Bar -->
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span style="font-weight:700; font-size:13px; color:#334155;">Categories:</span>
+                <span id="cat-bulk-act-wrap" style="display:none; font-size:12px;">
+                  Set all <b id="cur-cat-name"></b> to:
+                  <button class="btn-link" id="cat-bulk-allow" type="button" style="color:#16a34a; font-weight:700;">ALLOW ALL</button> |
+                  <button class="btn-link" id="cat-bulk-block" type="button" style="color:#dc2626; font-weight:700;">BLOCK ALL</button>
+                </span>
+              </div>
+              <div class="cat-pills-bar" id="cat-pills-container">
+                <button class="cat-pill active" type="button" data-cat="all">All <span class="cnt" id="cat-cnt-all">0</span></button>
+                <button class="cat-pill add-cat-btn" id="btn-add-cat-modal" type="button">+ New Category</button>
+              </div>
+            </div>
+
+            <!-- Main Toolbar -->
+            <div class="img-toolbar">
+              <div class="img-filters">
+                <input class="img-search-input" id="img-search" type="search" placeholder="Search images…" value="${esc(searchQuery)}">
+                <select class="input" id="flt-action" style="padding:6px 10px; font-size:13px; width:auto;">
+                  <option value="all">All Actions</option>
+                  <option value="allow" ${activeAction === "allow" ? "selected" : ""}>Allowed Only</option>
+                  <option value="block" ${activeAction === "block" ? "selected" : ""}>Blocked Only</option>
+                </select>
+                <select class="input" id="flt-selected" style="padding:6px 10px; font-size:13px; width:auto;">
+                  <option value="all">All Selection</option>
+                  <option value="1" ${activeSelected === "1" ? "selected" : ""}>Selected Only</option>
+                  <option value="0" ${activeSelected === "0" ? "selected" : ""}>Deselected Only</option>
+                </select>
+                <button class="btn btn-outline" id="btn-select-all" type="button" style="padding:6px 10px; font-size:12px;">Select All</button>
+                <button class="btn btn-outline" id="btn-deselect-all" type="button" style="padding:6px 10px; font-size:12px;">Deselect All</button>
+              </div>
+
+              <div class="img-actions-right">
+                <button class="btn btn-outline" id="btn-upload-modal" type="button" style="border-color:#0284c7; color:#0284c7;">+ Upload Image</button>
+                <button class="btn btn-primary" id="btn-submit-changes" type="button" style="background:#2563eb;">Submit Changes</button>
+                <button class="btn btn-primary" id="btn-train-model" type="button" style="background:#16a34a; border-color:#16a34a;">⚡ Train Model</button>
+              </div>
+            </div>
+
+            <!-- Image Grid Container -->
+            <div id="img-grid-container"><p class="adm-loading"><span class="spinner dark"></span> Loading stored policy images…</p></div>
+
+            <!-- Pagination Container -->
+            <div class="img-pagination" id="img-pagination"></div>
+          </div>`);
+
+        $("img-back-btn").addEventListener("click", () => signedIn(currentAdmin, false));
+        $("btn-add-cat-modal").addEventListener("click", () => addCategoryModal());
+        $("btn-upload-modal").addEventListener("click", () => uploadImageModal());
+        $("img-hist-btn").addEventListener("click", () => trainingHistoryModal());
+        $("img-apply-preset-btn").addEventListener("click", () => applyPresetAction());
+        $("btn-submit-changes").addEventListener("click", () => submitBatchChanges());
+        $("btn-train-model").addEventListener("click", () => triggerTraining());
+
+        $("img-search").addEventListener("input", (e) => {
+          searchQuery = e.target.value;
+          page = 1;
+          loadImages();
+        });
+        $("flt-action").addEventListener("change", (e) => {
+          activeAction = e.target.value;
+          page = 1;
+          loadImages();
+        });
+        $("flt-selected").addEventListener("change", (e) => {
+          activeSelected = e.target.value;
+          page = 1;
+          loadImages();
+        });
+        $("btn-select-all").addEventListener("click", () => bulkSelection(true));
+        $("btn-deselect-all").addEventListener("click", () => bulkSelection(false));
+
+        $("cat-bulk-allow").addEventListener("click", () => bulkCategoryAction("allow"));
+        $("cat-bulk-block").addEventListener("click", () => bulkCategoryAction("block"));
+      }
+
+      async function loadCategories() {
+        try {
+          const res = await call("GET", "/v1/admin/images/categories");
+          categories = res.categories || [];
+          renderCategoryPills(res.active_mode);
+        } catch (err) {
+          say("Failed to load categories: " + err.message);
+        }
+      }
+
+      function renderCategoryPills(activeMode) {
+        const container = $("cat-pills-container");
+        if (!container) return;
+
+        // Update active policy badge
+        const badge = $("img-active-policy-badge");
+        if (badge) {
+          if (activeMode === "child_products") {
+            badge.textContent = "Policy: Child & Baby Products Mode (Baby Images Allowed)";
+            badge.className = "img-badge-policy child-mode";
+            $("img-preset-sel").value = "child_products";
+          } else {
+            badge.textContent = "Policy: Standard BONC Platform (Minors Blocked)";
+            badge.className = "img-badge-policy";
+            $("img-preset-sel").value = "standard";
+          }
+        }
+
+        const totalAll = categories.reduce((sum, c) => sum + (c.total_images || 0), 0);
+        $("cat-cnt-all").textContent = totalAll;
+
+        // Build HTML
+        let html = `<button class="cat-pill ${activeCat === "all" ? "active" : ""}" type="button" data-cat="all">All <span class="cnt">${totalAll}</span></button>`;
+        categories.forEach((cat) => {
+          html += `<button class="cat-pill ${activeCat === cat.name ? "active" : ""}" type="button" data-cat="${esc(cat.name)}" title="${esc(cat.description || cat.display_name)}">
+            ${esc(cat.display_name)} <span class="cnt">${cat.total_images || 0}</span></button>`;
+        });
+        html += `<button class="cat-pill add-cat-btn" id="btn-add-cat-modal" type="button">+ New Category</button>`;
+        container.innerHTML = html;
+
+        // Wire click handlers
+        container.querySelectorAll(".cat-pill[data-cat]").forEach((pill) => {
+          pill.addEventListener("click", () => {
+            activeCat = pill.dataset.cat;
+            page = 1;
+            renderCategoryPills(activeMode);
+            updateCategoryHeader();
+            loadImages();
+          });
+        });
+        $("btn-add-cat-modal").addEventListener("click", () => addCategoryModal());
+        updateCategoryHeader();
+      }
+
+      function updateCategoryHeader() {
+        const wrap = $("cat-bulk-act-wrap");
+        if (!wrap) return;
+        if (activeCat === "all") {
+          wrap.style.display = "none";
+        } else {
+          wrap.style.display = "inline-block";
+          const catObj = categories.find((c) => c.name === activeCat);
+          $("cur-cat-name").textContent = catObj ? catObj.display_name : activeCat;
+        }
+      }
+
+      async function loadImages() {
+        const grid = $("img-grid-container");
+        grid.innerHTML = `<p class="adm-loading"><span class="spinner dark"></span> Loading images…</p>`;
+
+        const q = new URLSearchParams();
+        if (activeCat !== "all") q.set("category", activeCat);
+        if (activeAction !== "all") q.set("action", activeAction);
+        if (activeSelected !== "all") q.set("selected", activeSelected);
+        if (searchQuery.trim()) q.set("search", searchQuery.trim());
+        q.set("page", page);
+        q.set("limit", limit);
+
+        try {
+          imagesData = await call("GET", `/v1/admin/images?${q.toString()}`);
+          updateStats(imagesData.stats);
+          renderGrid(imagesData.items);
+          renderPagination(imagesData.pagination);
+        } catch (err) {
+          grid.innerHTML = `<div class="adm-msg err">${esc(err.message)}</div>`;
+        }
+      }
+
+      function updateStats(st) {
+        if (!st) return;
+        $("stat-total").textContent = st.total || 0;
+        $("stat-selected").textContent = st.selected || 0;
+        $("stat-allowed").textContent = st.allowed || 0;
+        $("stat-blocked").textContent = st.blocked || 0;
+      }
+
+      function renderGrid(items) {
+        const grid = $("img-grid-container");
+        if (!items || !items.length) {
+          grid.innerHTML = `<div style="text-align:center; padding:40px; background:#f8fafc; border:1px dashed var(--line); border-radius:10px;">
+            <p style="font-size:16px; font-weight:700; color:#475569; margin:0 0 6px;">No images found</p>
+            <p style="font-size:13px; color:var(--muted); margin:0 0 16px;">No stored images match the current filters or category.</p>
+            <button class="btn btn-outline" id="empty-upload-btn" type="button">+ Upload Image to this Category</button>
+          </div>`;
+          const btn = $("empty-upload-btn");
+          if (btn) btn.addEventListener("click", () => uploadImageModal(activeCat !== "all" ? activeCat : "safe"));
+          return;
+        }
+
+        let html = `<div class="img-grid">`;
+        items.forEach((img) => {
+          // Check pending local edits
+          const pending = pendingChanges.get(img.id);
+          const isSelected = pending && pending.is_selected !== undefined ? pending.is_selected : img.is_selected;
+          const action = pending && pending.action !== undefined ? pending.action : img.action;
+          const isAllow = action === "allow";
+
+          html += `
+            <div class="img-card ${isAllow ? "allow-state" : "block-state"} ${isSelected ? "" : "deselected"}" data-id="${img.id}">
+              <div class="img-thumb-wrap">
+                <label class="img-check-label" title="Select or deselect this image for model training">
+                  <input class="img-check-input" type="checkbox" data-id="${img.id}" ${isSelected ? "checked" : ""}>
+                  <span>Train</span>
+                </label>
+                <img class="img-thumb" src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'100\\' height=\\'100\\'><rect width=\\'100\\' height=\\'100\\' fill=\\'%23eee\\'/><text x=\\'50%\\' y=\\'50%\\' fill=\\'%23aaa\\' dominant-baseline=\\'middle\\' text-anchor=\\'middle\\'>No preview</text></svg>'">
+              </div>
+              <div class="img-card-body">
+                <div class="img-card-meta">
+                  <span class="img-cat-tag">${esc(img.category)}</span>
+                  <span class="img-badge ${isAllow ? "allow" : "block"}">${isAllow ? "ALLOWED" : "BLOCKED"}</span>
+                </div>
+                <div class="img-filename" title="${esc(img.filename)}">${esc(img.filename)}</div>
+              </div>
+              <div class="img-card-foot">
+                <button class="btn-toggle-act" type="button" data-id="${img.id}" data-action="${isAllow ? "block" : "allow"}">
+                  ${isAllow ? "Switch to BLOCK" : "Switch to ALLOW"}
+                </button>
+              </div>
+            </div>`;
+        });
+        html += `</div>`;
+        grid.innerHTML = html;
+
+        // Wire card events
+        grid.querySelectorAll(".img-check-input").forEach((chk) => {
+          chk.addEventListener("change", (e) => {
+            const id = parseInt(e.target.dataset.id, 10);
+            const card = e.target.closest(".img-card");
+            const checked = e.target.checked;
+            card.classList.toggle("deselected", !checked);
+
+            const cur = pendingChanges.get(id) || {};
+            cur.id = id;
+            cur.is_selected = checked ? 1 : 0;
+            pendingChanges.set(id, cur);
+          });
+        });
+
+        grid.querySelectorAll(".btn-toggle-act").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            const id = parseInt(e.target.dataset.id, 10);
+            const nextAction = e.target.dataset.action;
+            const cur = pendingChanges.get(id) || {};
+            cur.id = id;
+            cur.action = nextAction;
+            pendingChanges.set(id, cur);
+
+            // Re-render this card locally
+            const card = e.target.closest(".img-card");
+            const isAllow = nextAction === "allow";
+            card.classList.toggle("allow-state", isAllow);
+            card.classList.toggle("block-state", !isAllow);
+            card.querySelector(".img-badge").className = `img-badge ${isAllow ? "allow" : "block"}`;
+            card.querySelector(".img-badge").textContent = isAllow ? "ALLOWED" : "BLOCKED";
+            btn.dataset.action = isAllow ? "block" : "allow";
+            btn.textContent = isAllow ? "Switch to BLOCK" : "Switch to ALLOW";
+          });
+        });
+      }
+
+      function renderPagination(pg) {
+        const container = $("img-pagination");
+        if (!container || !pg || pg.total_pages <= 1) {
+          if (container) container.innerHTML = "";
+          return;
+        }
+
+        container.innerHTML = `
+          <button class="btn btn-outline" id="pg-prev" ${pg.page <= 1 ? "disabled" : ""}>Previous</button>
+          <span>Page <b>${pg.page}</b> of <b>${pg.total_pages}</b> (${pg.total} items)</span>
+          <button class="btn btn-outline" id="pg-next" ${pg.page >= pg.total_pages ? "disabled" : ""}>Next</button>`;
+
+        const prev = $("pg-prev"), next = $("pg-next");
+        if (prev) prev.addEventListener("click", () => { if (page > 1) { page--; loadImages(); } });
+        if (next) next.addEventListener("click", () => { if (page < pg.total_pages) { page++; loadImages(); } });
+      }
+
+      // ---- Actions: Submit, Train, Presets, Bulks -------------------------------------
+
+      async function submitBatchChanges() {
+        if (!pendingChanges.size) {
+          return say("No unsaved changes. Select/deselect images or toggle Allow/Block first.", true);
+        }
+        const btn = $("btn-submit-changes");
+        busy(btn, true, "Saving…");
+        try {
+          const updates = Array.from(pendingChanges.values());
+          const res = await call("PUT", "/v1/admin/images/batch", { updates });
+          pendingChanges.clear();
+          say(res.message || "Saved changes successfully.", true);
+          busy(btn, false, "Submit Changes");
+          loadImages();
+          loadCategories();
+        } catch (err) {
+          say("Failed to save: " + err.message);
+          busy(btn, false, "Submit Changes");
+        }
+      }
+
+      async function bulkSelection(selectOn) {
+        const btn = $(selectOn ? "btn-select-all" : "btn-deselect-all");
+        busy(btn, true, selectOn ? "Selecting…" : "Deselecting…");
+        try {
+          const res = await call("PUT", "/v1/admin/images/batch", {
+            select_all: selectOn,
+            category: activeCat,
+          });
+          say(res.message, true);
+          busy(btn, false, selectOn ? "Select All" : "Deselect All");
+          pendingChanges.clear();
+          loadImages();
+          loadCategories();
+        } catch (err) {
+          say("Bulk update failed: " + err.message);
+          busy(btn, false, selectOn ? "Select All" : "Deselect All");
+        }
+      }
+
+      async function bulkCategoryAction(action) {
+        if (activeCat === "all") return;
+        const btn = action === "allow" ? $("cat-bulk-allow") : $("cat-bulk-block");
+        btn.textContent = "Updating…";
+        try {
+          const res = await call("PUT", `/v1/admin/images/categories/${encodeURIComponent(activeCat)}`, { action });
+          say(res.message, true);
+          btn.textContent = action === "allow" ? "ALLOW ALL" : "BLOCK ALL";
+          pendingChanges.clear();
+          loadImages();
+          loadCategories();
+        } catch (err) {
+          say("Category policy update failed: " + err.message);
+          btn.textContent = action === "allow" ? "ALLOW ALL" : "BLOCK ALL";
+        }
+      }
+
+      async function applyPresetAction() {
+        const sel = $("img-preset-sel");
+        const preset = sel.value;
+        const btn = $("img-apply-preset-btn");
+        busy(btn, true, "Retraining model…");
+
+        try {
+          const res = await call("POST", "/v1/admin/images/preset", { preset });
+          busy(btn, false, "Apply Preset & Retrain");
+          pendingChanges.clear();
+          trainingResultModal(res);
+          loadCategories();
+          loadImages();
+        } catch (err) {
+          say("Preset training failed: " + err.message);
+          busy(btn, false, "Apply Preset & Retrain");
+        }
+      }
+
+      async function triggerTraining() {
+        const btn = $("btn-train-model");
+        busy(btn, true, "Training Vision Model…");
+        say("Extracting embeddings & fine-tuning linear probe across selected images…");
+
+        try {
+          // If there are pending changes, save them first
+          if (pendingChanges.size) {
+            await call("PUT", "/v1/admin/images/batch", { updates: Array.from(pendingChanges.values()) });
+            pendingChanges.clear();
+          }
+
+          const res = await call("POST", "/v1/admin/images/train", { C: 1.0 });
+          busy(btn, false, "⚡ Train Model");
+          trainingResultModal(res);
+          loadCategories();
+          loadImages();
+        } catch (err) {
+          say("Model fine-tuning failed: " + err.message);
+          busy(btn, false, "⚡ Train Model");
+        }
+      }
+
+      // ---- Modals: Add Category, Upload Image, Training Results -----------------------
+
+      function addCategoryModal() {
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        back.innerHTML = `
+          <div class="modal img-modal-wide" role="dialog" aria-modal="true" aria-labelledby="cat-modal-title">
+            <div class="modal-head"><h2 id="cat-modal-title">Add New Category</h2>
+              <button class="btn-link" id="cat-x" aria-label="Close" type="button">✕</button></div>
+            <div class="modal-body">
+              <div id="cat-modal-msg" class="adm-msg" role="status"></div>
+              <div class="field">
+                <label for="new-cat-name">Category ID / Tag <span class="req">*</span></label>
+                <input class="input" id="new-cat-name" placeholder="e.g. child_products, infant_wear" autocomplete="off">
+                <p class="hint">Lower case, letters and underscores only.</p>
+              </div>
+              <div class="field">
+                <label for="new-cat-disp">Display Label</label>
+                <input class="input" id="new-cat-disp" placeholder="e.g. Baby & Child Products" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="new-cat-act">Default Moderation Policy</label>
+                <select class="select" id="new-cat-act">
+                  <option value="allow">ALLOW (Images in this category are permitted)</option>
+                  <option value="block">BLOCK (Images in this category are refused)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="new-cat-desc">Description</label>
+                <input class="input" id="new-cat-desc" placeholder="Brief note on what belongs in this category">
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-outline" id="cat-cancel" type="button">Cancel</button>
+              <button class="btn btn-primary" id="cat-save" type="button">Create Category</button>
+            </div>
+          </div>`;
+
+        document.body.appendChild(back);
+        const q = (id) => back.querySelector("#" + id);
+        const close = () => back.remove();
+        q("cat-x").addEventListener("click", close);
+        q("cat-cancel").addEventListener("click", close);
+
+        q("cat-save").addEventListener("click", async () => {
+          const name = q("new-cat-name").value.trim();
+          const disp = q("new-cat-disp").value.trim();
+          const act = q("new-cat-act").value;
+          const desc = q("new-cat-desc").value.trim();
+
+          if (!name) {
+            q("cat-modal-msg").textContent = "Enter a category tag.";
+            q("cat-modal-msg").className = "adm-msg err";
+            return;
+          }
+
+          const btn = q("cat-save");
+          busy(btn, true, "Creating…");
+          try {
+            await call("POST", "/v1/admin/images/categories", {
+              name, display_name: disp, default_action: act, description: desc
+            });
+            close();
+            activeCat = name.toLowerCase().replace(/ /g, "_");
+            loadCategories();
+            loadImages();
+            say(`Created category '${name}'. You can now store and upload images into it.`, true);
+          } catch (err) {
+            q("cat-modal-msg").textContent = err.message;
+            q("cat-modal-msg").className = "adm-msg err";
+            busy(btn, false, "Create Category");
+          }
+        });
+      }
+
+      function uploadImageModal(prefCategory = "safe") {
+        const back = document.createElement("div");
+        back.className = "backdrop";
+
+        const catOpts = categories.map((c) =>
+          `<option value="${esc(c.name)}" ${c.name === prefCategory ? "selected" : ""}>${esc(c.display_name)} (${esc(c.name)})</option>`
+        ).join("");
+
+        back.innerHTML = `
+          <div class="modal img-modal-wide" role="dialog" aria-modal="true" aria-labelledby="up-modal-title">
+            <div class="modal-head"><h2 id="up-modal-title">Upload Image to Category</h2>
+              <button class="btn-link" id="up-x" aria-label="Close" type="button">✕</button></div>
+            <div class="modal-body">
+              <div id="up-modal-msg" class="adm-msg" role="status"></div>
+              <div class="field">
+                <label for="up-file">Select Image File <span class="req">*</span></label>
+                <input class="input" id="up-file" type="file" accept="image/*">
+              </div>
+              <div class="field">
+                <label for="up-cat">Category <span class="req">*</span></label>
+                <select class="select" id="up-cat">${catOpts}</select>
+              </div>
+              <div class="field">
+                <label for="up-act">Moderation Action</label>
+                <select class="select" id="up-act">
+                  <option value="allow">ALLOW (Permit on platform / train as safe)</option>
+                  <option value="block">BLOCK (Refuse on platform / train as violation)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="up-desc">Description (optional)</label>
+                <input class="input" id="up-desc" placeholder="e.g. Mamy Poko Pants baby diaper packaging photo">
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-outline" id="up-cancel" type="button">Cancel</button>
+              <button class="btn btn-primary" id="up-submit" type="button">Upload & Embed</button>
+            </div>
+          </div>`;
+
+        document.body.appendChild(back);
+        const q = (id) => back.querySelector("#" + id);
+        const close = () => back.remove();
+        q("up-x").addEventListener("click", close);
+        q("up-cancel").addEventListener("click", close);
+
+        q("up-submit").addEventListener("click", async () => {
+          const fileInput = q("up-file");
+          if (!fileInput.files.length) {
+            q("up-modal-msg").textContent = "Select an image file to upload.";
+            q("up-modal-msg").className = "adm-msg err";
+            return;
+          }
+
+          const fd = new FormData();
+          fd.append("file", fileInput.files[0]);
+          fd.append("category", q("up-cat").value);
+          fd.append("action", q("up-act").value);
+          fd.append("description", q("up-desc").value.trim());
+
+          const btn = q("up-submit");
+          busy(btn, true, "Uploading & generating embeddings…");
+          try {
+            const res = await call("POST", "/v1/admin/images/upload", fd);
+            close();
+            say(res.message || "Image uploaded and stored successfully.", true);
+            loadCategories();
+            loadImages();
+          } catch (err) {
+            q("up-modal-msg").textContent = err.message;
+            q("up-modal-msg").className = "adm-msg err";
+            busy(btn, false, "Upload & Embed");
+          }
+        });
+      }
+
+      function trainingResultModal(data) {
+        const back = document.createElement("div");
+        back.className = "backdrop";
+
+        const classesList = (data.classes || []).map((c) => `<span class="cat-pill" style="padding:2px 8px; font-size:11px;">${esc(c)}</span>`).join(" ");
+
+        back.innerHTML = `
+          <div class="modal img-modal-wide" role="dialog" aria-modal="true" aria-labelledby="tr-modal-title">
+            <div class="modal-head"><h2 id="tr-modal-title" style="color:#16a34a;">⚡ Model Fine-Tuning Complete</h2>
+              <button class="btn-link" id="tr-x" aria-label="Close" type="button">✕</button></div>
+            <div class="modal-body">
+              <p style="margin:0 0 12px; font-size:14px; color:#334155;">
+                The vision model linear probe has been successfully retrained and hot-reloaded into the running service.
+              </p>
+              <div class="train-result-box">
+                <div class="train-metric-row"><span>Accuracy:</span> <b>${data.accuracy}%</b></div>
+                <div class="train-metric-row"><span>Training Samples:</span> <b>${data.samples} images</b></div>
+                <div class="train-metric-row"><span>Allowed / Blocked:</span> <b>${data.allowed_count} Allowed / ${data.blocked_count} Blocked</b></div>
+                <div class="train-metric-row"><span>Active Minor Policy:</span> <b>${esc(data.minor_policy || "Updated")}</b></div>
+                <div class="train-metric-row"><span>Duration:</span> <b>${data.duration} seconds</b></div>
+                <div style="margin-top:6px;">
+                  <span style="font-size:12px; font-weight:700; color:#166534; display:block; margin-bottom:4px;">Trained Output Classes:</span>
+                  <div style="display:flex; flex-wrap:wrap; gap:4px;">${classesList}</div>
+                </div>
+              </div>
+              <p class="adm-sub" style="color:#16a34a; font-weight:600;">✓ Changes are active immediately on /v1/moderate/media without server restart.</p>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-primary" id="tr-close" type="button">Done</button>
+            </div>
+          </div>`;
+
+        document.body.appendChild(back);
+        const close = () => back.remove();
+        back.querySelector("#tr-x").addEventListener("click", close);
+        back.querySelector("#tr-close").addEventListener("click", close);
+      }
+
+      async function trainingHistoryModal() {
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        back.innerHTML = `
+          <div class="modal img-modal-wide" role="dialog" aria-modal="true" aria-labelledby="hist-modal-title">
+            <div class="modal-head"><h2 id="hist-modal-title">Model Training History</h2>
+              <button class="btn-link" id="hist-x" aria-label="Close" type="button">✕</button></div>
+            <div class="modal-body" id="hist-body">
+              <p class="adm-loading"><span class="spinner dark"></span> Loading history…</p>
+            </div>
+            <div class="modal-foot"><button class="btn btn-outline" id="hist-close" type="button">Close</button></div>
+          </div>`;
+
+        document.body.appendChild(back);
+        const close = () => back.remove();
+        back.querySelector("#hist-x").addEventListener("click", close);
+        back.querySelector("#hist-close").addEventListener("click", close);
+
+        try {
+          const res = await call("GET", "/v1/admin/images/history");
+          const hist = res.history || [];
+          if (!hist.length) {
+            back.querySelector("#hist-body").innerHTML = `<p style="color:var(--muted);">No training runs recorded yet.</p>`;
+            return;
+          }
+
+          let html = `<div style="display:flex; flex-direction:column; gap:10px;">`;
+          hist.forEach((h) => {
+            const dateStr = new Date(h.created_at * 1000).toLocaleString();
+            html += `
+              <div style="background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                  <b>${esc(h.model_name)}</b>
+                  <span style="color:var(--muted); font-size:11px;">${esc(dateStr)}</span>
+                </div>
+                <div style="display:flex; gap:16px; color:#475569; font-size:12px;">
+                  <span>Accuracy: <b style="color:#16a34a;">${h.accuracy ? Math.round(h.accuracy * 100) : "--"}%</b></span>
+                  <span>Samples: <b>${h.total_samples}</b></span>
+                  <span>Allowed: <b>${h.allowed_count}</b></span>
+                  <span>Blocked: <b>${h.blocked_count}</b></span>
+                </div>
+              </div>`;
+          });
+          html += `</div>`;
+          back.querySelector("#hist-body").innerHTML = html;
+        } catch (err) {
+          back.querySelector("#hist-body").innerHTML = `<div class="adm-msg err">${esc(err.message)}</div>`;
+        }
+      }
+
+      // Initialize
+      renderShell();
+      loadCategories();
+      loadImages();
+    }
+
+    // ---- settings popup ----------------------------------------------------------------
     function settingsModal() {
       const back = document.createElement("div");
       back.className = "backdrop";
@@ -236,8 +948,8 @@
       document.body.appendChild(back);
       const q = (id) => back.querySelector("#" + id);
       const close = () => back.remove();
-      let saved = null;          // what the server really has
-      let draft = null;          // what the switches show now
+      let saved = null;
+      let draft = null;
 
       const sessionEnded = (err) => { close(); loginView(err.message); };
       back.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
@@ -289,7 +1001,7 @@
         });
         q("mm-save").addEventListener("click", () => {
           if (!draft.level) return draw("Choose a moderation level.");
-          if (!draft.enabled && saved.enabled) return draw("", false, true);    // ask before OFF
+          if (!draft.enabled && saved.enabled) return draw("", false, true);
           doSave();
         });
       }
@@ -304,7 +1016,7 @@
           draw(`Saved. Moderation is now ${label(next)} on every page.`, true);
         } catch (err) {
           if (err instanceof SessionExpired) return sessionEnded(err);
-          draft = { enabled: saved.enabled, level: saved.level };        // put the screen back as it was
+          draft = { enabled: saved.enabled, level: saved.level };
           draw(`${err.message} Nothing was changed. Check your connection and try again.`);
         }
       }
