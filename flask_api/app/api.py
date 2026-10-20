@@ -306,8 +306,35 @@ def _visual_reject(filename: str, looked, content_type: ContentType,
     # Name the page when there is one, so the author is told where to look in a 40-page scan.
     where = f"[{filename}]" if page is None else f"[{filename}, page {page}]"
     req = ModerationRequest(where, content_type, content_id)
-    match = GateMatch(rule_id=rule_id or f"visual.{looked.label}", category=looked.category,
-                      action="block", spans=())
+    # Name the channel that actually refused, not the best-matching label. An exemplar
+    # refusal was being logged as `visual.safe` - the label with the highest score, which for
+    # a cloud refused by a rainbow exemplar was literally `safe` at 0.46. An audit row saying
+    # a picture was blocked by the safe rule is worse than no audit row: it sends whoever
+    # reads it to the one place the cause is not.
+    # Defensive because `looked` and the visual check are both injectable: a stub scorer in a
+    # test, or an older bundle's result object, may carry neither. Naming the cause is a
+    # diagnostic, and a diagnostic that can break the refusal it describes is worse than none.
+    try:
+        cause = looked.refused_by(svc.settings.visual.config)
+    except Exception:
+        cause = None
+    if not rule_id:
+        if cause == "exemplar":
+            m = getattr(looked, "exemplar_match", None) or {}
+            # The image id is what makes this actionable: it is the row to go and change.
+            rule_id = f"visual.exemplar#{m.get('id')}" if m.get("id") else "visual.exemplar"
+        elif cause == "probe":
+            rule_id = f"visual.probe.{looked.label}"
+        else:
+            rule_id = f"visual.{looked.label}"
+    # The exemplar's OWN category, not the best-matching label's. A cloud refused by a rainbow
+    # exemplar was being filed under `weapons`, because that is what the prompts happened to
+    # rank highest once the probe had spoken - a category with no bearing on why it was
+    # refused, and the one an operator would chase first.
+    category = getattr(looked, "category", "")
+    if cause == "exemplar":
+        category = (getattr(looked, "exemplar_match", None) or {}).get("category") or category
+    match = GateMatch(rule_id=rule_id, category=category, action="block", spans=())
     result = svc.pipeline.gate_only_result(req, GateResult((match,)), 0.0)
     svc.sink.emit(result)
     return jsonify({**result, **extra}), 200

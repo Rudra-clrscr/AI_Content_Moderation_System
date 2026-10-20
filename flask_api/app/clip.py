@@ -190,7 +190,39 @@ class VisualResult:
                                                    for k, v in self.probe_scores.items()}}
             if self.category:
                 d["visual"]["category"] = self.category
+            # WHICH CHANNEL OBJECTED, and to what. Without this the record of an
+            # exemplar refusal reads as a picture that should have been published: the
+            # label is `safe` at 0.46, the probe is 0.59 against a bar of 0.70, and
+            # nothing anywhere names the thing that refused it. That happened - a cloud
+            # photograph was refused by a rainbow somebody had marked weeks earlier, and
+            # the only way to find out was to score the image by hand. An admin reading
+            # this result should be able to see the cause and go straight to it.
+            if self.exemplar_block or self.exemplar_allow:
+                ex = {"block": round(self.exemplar_block, 4),
+                      "allow": round(self.exemplar_allow, 4)}
+                if self.exemplar_match:
+                    # The id is the point: it is the row in the dashboard to go and change.
+                    ex["matched"] = self.exemplar_match
+                d["visual"]["exemplar"] = ex
         return d
+
+    def refused_by(self, config) -> str | None:
+        """Which channel refuses this picture, or None if nothing does.
+
+        Mirrors the order in VisualCheck.decides_reject rather than re-deciding, so the
+        name reported is always the reason actually used. Kept beside as_dict because a
+        verdict with no attributable cause is what made the cloud case take an hour.
+        """
+        if not self.checked:
+            return None
+        if self.exemplar_allow >= config.exemplar_reject_min and \
+                self.exemplar_allow >= self.exemplar_block:
+            return None
+        if self.exemplar_block >= config.exemplar_reject_min:
+            return "exemplar"
+        if self.probe_scores and self.probe_unsafe >= config.probe_reject_min:
+            return "probe"
+        return "policy" if self.unsafe else None
 
 
 class VisualCheck:
