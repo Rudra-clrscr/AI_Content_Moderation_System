@@ -112,6 +112,18 @@ def load_rows(show_reconciled: bool) -> pd.DataFrame:
     d["source"] = "support_complaints"
     frames.append(d[["text", "label", "template", "source"]])
 
+    # The workplace-grievance category (generate_workplace_grievances.py). Optional, so a
+    # clone without the file still trains, but present here for a reason: the incremental path
+    # (train_incremental.py) reads this CSV directly, and if the full-retrain path did not know
+    # about it then rebuilding from scratch would quietly produce a model MISSING a category
+    # the deployed one has. Two paths to the same model that disagree about the corpus is the
+    # kind of difference nobody finds until a rebuild goes to production.
+    workplace = RES / "workplace_grievances.csv"
+    if workplace.exists():
+        w = pd.read_csv(workplace, keep_default_na=False)
+        w["source"] = "workplace_grievances"
+        frames.append(w[["text", "label", "template", "source"]])
+
     callouts = RES / "public_callouts.csv"
     if callouts.exists():
         c = pd.read_csv(callouts, keep_default_na=False)

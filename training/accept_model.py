@@ -118,6 +118,10 @@ def main() -> int:
             continue
         if "group" not in d.columns:
             d["group"] = "all"
+        # `label`, NOT public_label, and that is deliberate. This gate judges the main model,
+        # which never sees the surface and must keep publishing complaints so a member can
+        # chase a consignment through a proposal. public_label is the public-surface question
+        # and belongs to accept_system.py.
         for r in d.itertuples():
             rows.append({"set": name[5:-4], "group": r.group, "label": int(r.label),
                          "text": r.text, "b": base.score(r.text).risk_score,

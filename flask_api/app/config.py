@@ -138,8 +138,12 @@ def load_settings(path: str | Path | None = None) -> Settings:
                                 None if triage_threshold is None else float(triage_threshold))
               if _as_bool(env("TRIAGE", tr.get("enabled", True))) else TriageFilter())
     grievance_threshold = env("GRIEVANCE_REJECT_MIN", gr.get("threshold"))
+    # "unified" is a MODE, not a directory - the grievance score comes from the main model's
+    # second head - so it must not go through _resolve, which would turn it into
+    # flask_api/unified and then fail to find a bundle there.
+    gr_dir = gr.get("dir", "models/grievance-v1")
     grievance = GrievanceCheck.load(
-        _resolve(gr.get("dir", "models/grievance-v1")),
+        gr_dir if str(gr_dir).strip().lower() == "unified" else _resolve(gr_dir),
         enabled=_as_bool(env("GRIEVANCE_CHECK", gr.get("enabled", True))),
         threshold=None if grievance_threshold is None else float(grievance_threshold),
         surfaces=tuple(gr.get("surfaces") or ()) or None,

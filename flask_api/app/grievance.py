@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -72,6 +73,22 @@ class GrievanceCheck:
         """
         if not enabled:
             return cls()
+        # `dir: unified` means the grievance score comes from the MAIN model's second head
+        # (models/v7), so there is no bundle to load here - only the threshold and the
+        # surfaces, which are this check's policy and stay its policy either way. Loading a
+        # second 371 MB copy of a model whose answer is already in hand would be the whole
+        # saving thrown away. `scorer` and `weights` stay None and `probability` would raise,
+        # which is correct: in this mode the pipeline always passes a `probability` reading
+        # the second head, and a missing override should fail loudly rather than score 0.0.
+        if str(model_dir).strip().lower() == "unified":
+            log.info("grievance check: unified mode, scores come from the main model's "
+                     "grievance head (threshold %.4g, surfaces %s)",
+                     threshold if threshold is not None else 0.5,
+                     ", ".join(sorted(surfaces or DEFAULT_SURFACES)))
+            return cls(enabled=True,
+                       threshold=0.5 if threshold is None else threshold,
+                       surfaces=surfaces or DEFAULT_SURFACES,
+                       version="unified")
         model_dir = Path(model_dir)
         try:
             meta = json.loads((model_dir / "grievance_meta.json").read_text(encoding="utf-8"))
@@ -137,14 +154,89 @@ class GrievanceCheck:
                          np.asarray(val, dtype=np.float32))) + self.intercept
         return 1.0 / (1.0 + np.exp(-z)) if z > -30 else 0.0
 
-    def check(self, text: str, content_type: str | None) -> tuple[bool, float | None]:
+    def check(self, text: str, content_type: str | None,
+              probability=None) -> tuple[bool, float | None]:
         """(refuse this on this surface, score). Score is None when the check did not run,
         so a caller can tell "looked and found nothing" from "never looked" - the same
-        distinction `visual_content_checked` draws for pictures."""
+        distinction `visual_content_checked` draws for pictures.
+
+        The score is the HIGHEST of the whole text and its individual sentences, because a
+        complaint diluted by an ordinary clause was scoring below any usable threshold. From
+        the live feed:
+
+            "The driver delivered my order to the wrong address, and the app refuses to
+             let me submit a refund request."          whole 0.598, first clause 0.971
+
+        The main model has had this since 1.3 - app/targeted.py scans sentences for exactly
+        the same reason, a scam tacked onto a listing - and this check never did. Whole text
+        first, so the common case costs one call and short posts cost nothing extra.
+
+        `probability` overrides where the score comes from WITHOUT changing any of the logic
+        below. It exists for the unified two-headed model (models/v7), whose grievance score
+        comes out of the same forward pass as the unsafe one: the caller passes a function
+        reading `label_scores["grievance"]` off the request-scoped score memo, so the whole
+        text is scored once for both questions and the sentences below are shared with the
+        main model's own sentence scan instead of being a second set of calls. Everything that
+        makes this check what it is - the surfaces, the threshold, the clause splitting, the
+        long-article exemption - is the same code either way, which is the point: the merge
+        changes where the number is from, not what is done with it.
+        """
         if not self.applies_to(content_type):
             return False, None
-        score = self.probability(text)
+        prob = probability or self.probability
+        score = prob(text)
+        if score < self.threshold:
+            for part in _sentences(text):
+                score = max(score, prob(part))
+                if score >= self.threshold:
+                    break
         return score >= self.threshold, score
+
+
+_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+# Clauses too, not only sentences. The text that prompted this is ONE sentence:
+#
+#   "The driver delivered my order to the wrong address, and the app refuses to let me
+#    submit a refund request."          whole 0.598, first clause 0.971
+#
+# so splitting on full stops alone changed nothing. A comma followed by a conjunction, or a
+# semicolon, is where a second thought gets attached - and that is exactly where a complaint
+# gets diluted by something ordinary.
+_CLAUSE = re.compile(r",\s+(?:and|but|so|yet|although|though|while)\s+|;\s+")
+
+MIN_SENTENCE_CHARS = 25          # below this a fragment is too short to judge on its own
+# Above this, a post is not a diluted complaint - it is an article, and it is allowed to
+# contain a sentence about something going wrong. Measured: scoring the parts of long posts
+# refused six legitimate long articles outright, among them "How our family pickle business
+# survived the lockdown", "A visit to a cotton farm in Vidarbha" and "Why our factory switched
+# to LED lighting". Each has one sentence about a setback, which is what makes it a story.
+#
+# The dilution this scan exists for is a SHORT-post problem: a clause tacked onto a complaint
+# so the average drops. A 2,000 character article cannot be diluted, so it is judged whole and
+# the model's view of the piece as a whole is what decides it.
+MAX_SPLIT_CHARS = 400
+MAX_SENTENCES = 12               # a cap, so a long article cannot turn one check into fifty
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentences, and the clauses of long ones, worth scoring on their own. Returns nothing
+    for a short single-clause post, so the common case does no extra work at all."""
+    if len(text) > MAX_SPLIT_CHARS:
+        return []
+    out: list[str] = []
+    for sentence in _SENTENCE.split(text):
+        sentence = sentence.strip()
+        if len(sentence) < MIN_SENTENCE_CHARS:
+            continue
+        out.append(sentence)
+        # Split a sentence further only when it is long enough that a clause can stand on its
+        # own. Below that the pieces are fragments, and a fragment scored out of context is
+        # how a check starts refusing "and nobody will fix it".
+        if len(sentence) >= 2 * MIN_SENTENCE_CHARS:
+            out.extend(c.strip() for c in _CLAUSE.split(sentence)
+                       if len(c.strip()) >= MIN_SENTENCE_CHARS)
+    deduped = list(dict.fromkeys(out))
+    return deduped[:MAX_SENTENCES] if len(deduped) > 1 else []
 
 
 def _hash(text: str):

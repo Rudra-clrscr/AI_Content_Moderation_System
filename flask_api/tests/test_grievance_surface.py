@@ -115,3 +115,32 @@ def test_pipeline_records_a_grievance_refusal_as_its_own_decision(monkeypatch):
     proposal = client.post("/v1/moderate", json={**body, "content_type": "proposal"}).get_json()
     assert proposal["decision"] == "allow"
     assert proposal["decided_by"] != "grievance"
+
+
+def test_grievance_bypassed_on_permissive_levels(monkeypatch):
+    """Option A: on lenient/permissive moderation levels (reject_min > 0.50), the public
+    grievance check is bypassed so friction/controversial text is decided by the main model bar.
+    On standard and strict levels (reject_min <= 0.50), grievance remains active.
+    """
+    from app import create_app
+    app = create_app()
+    client = app.test_client()
+    svc = app.extensions.get("moderation")
+    if svc is None:
+        pytest.skip("service not exposed on app.extensions in this build")
+    monkeypatch.setattr(svc.pipeline, "grievance",
+                        GrievanceCheck(enabled=True, threshold=0.5, surfaces=PUBLIC,
+                                       version="test", scorer=_AlwaysSure()))
+
+    # Under strict/baseline level (reject_min <= 0.50)
+    svc.levels.set_feature("article", reject_min=0.50, allow_max=0.50)
+    body = {"content": "Nobody has replied about my refund in two weeks.", "content_type": "article"}
+    res_l5 = client.post("/v1/moderate", json=body).get_json()
+    assert res_l5["decision"] == "reject"
+    assert res_l5["decided_by"] == "grievance"
+
+    # Under permissive level (reject_min > 0.50, e.g. level_10 reject_min = 1.0)
+    svc.levels.set_feature("article", reject_min=1.00, allow_max=1.00)
+    res_l10 = client.post("/v1/moderate", json=body).get_json()
+    assert res_l10["decided_by"] != "grievance"
+

@@ -11,8 +11,23 @@
     lenient: "Less restrictive. Only clearly harmful content is refused.",
     medium: "Balanced. The project's standard policy.",
     strict: "Stricter. More content is refused or sent back for changes.",
+    // The ten cumulative levels from config/moderation_levels.yaml. Without these the radio
+    // list renders a bare "Level_1" and no description, because the fieldset draws whatever
+    // levels the server returns and looks the text up here.
+    level_1: "Ultra strict. Zero tolerance - also refuses ordinary commercial friction and delivery complaints.",
+    level_2: "Very strict. Also refuses minor dissatisfaction, supplier disputes and heated pricing remarks.",
+    level_3: "Strict. Also refuses support outcries, emotional venting and public callouts of vendors.",
+    level_4: "Firm. Also refuses unstructured grievances, hostile venting and aggressive haggling.",
+    level_5: "Balanced baseline. Also refuses targeted abuse, disguised scams and off-platform payment schemes.",
+    level_6: "Moderate. Also refuses direct harassment, counterfeit buzzwords and advance-fee schemes.",
+    level_7: "Relaxed. Also refuses explicit insults aimed at named people or firms, and high-confidence scams.",
+    level_8: "Lenient. Also refuses overt fraud, lottery scams and blatant harassment.",
+    level_9: "Very lenient. Refuses confirmed fraud, extortion, illegal trade, hate speech and violent threats.",
+    level_10: "Maximum permissive. Only the Layer 1 gate rules refuse anything - contraband, malicious URLs, slurs.",
   };
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  // "level_7" reads as "Level 7" in the UI; the key keeps its underscore for the API.
+  const levelName = (s) => cap(String(s).replace(/_/g, " "));
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -228,7 +243,7 @@
       back.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
       q("mm-x").addEventListener("click", close);
 
-      const label = (s) => `${s.enabled ? "ON" : "OFF"} · ${s.level ? cap(s.level) : (s.mixed ? "mixed" : "project default")}`;
+      const label = (s) => `${s.enabled ? "ON" : "OFF"} · ${s.level ? levelName(s.level) : (s.mixed ? "mixed" : "project default")}`;
 
       function draw(msg = "", ok = false, confirming = false) {
         const lv = saved.levels;
@@ -243,7 +258,7 @@
           </div>
           <fieldset class="adm-levels" ${confirming ? "disabled" : ""}><legend>Moderation level</legend>
             ${lv.map((n) => `<label class="adm-level"><input type="radio" name="mm-level" value="${esc(n)}" ${draft.level === n ? "checked" : ""}>
-              <span><b>${esc(cap(n))}</b><span class="adm-sub">${esc(LEVEL_TEXT[n] || "")}</span></span></label>`).join("")}
+              <span><b>${esc(levelName(n))}</b><span class="adm-sub">${esc(LEVEL_TEXT[n] || "")}</span></span></label>`).join("")}
           </fieldset>
           ${draft.enabled ? "" : `<p class="adm-sub">The level is remembered for when moderation is turned back ON.</p>`}
           <p class="adm-sub">Applies to every content type: Articles, Add Business, Videos, Requests, Proposals, Business Proposals and the rest.</p>

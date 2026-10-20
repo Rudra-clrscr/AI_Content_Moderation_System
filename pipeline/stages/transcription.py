@@ -35,13 +35,25 @@ class TranscriptionStage:
             device = self.config.resolved_device()
             compute_type = self.config.resolved_compute_type()
             
-            self._model = WhisperModel(
-                self.config.model_size,
-                device=device,
-                compute_type=compute_type,
-                cpu_threads=self.config.cpu_threads,
-                num_workers=self.config.num_workers,
-            )
+            try:
+                self._model = WhisperModel(
+                    self.config.model_size,
+                    device=device,
+                    compute_type=compute_type,
+                    cpu_threads=self.config.cpu_threads,
+                    num_workers=self.config.num_workers,
+                )
+            except Exception as e:
+                if device == "cuda":
+                    self._model = WhisperModel(
+                        self.config.model_size,
+                        device="cpu",
+                        compute_type="int8",
+                        cpu_threads=self.config.cpu_threads,
+                        num_workers=self.config.num_workers,
+                    )
+                else:
+                    raise
         return self._model
 
     def transcribe(
@@ -115,6 +127,17 @@ class TranscriptionStage:
             return detected_language, language_probability, segments, full_text
 
         except Exception as e:
+            err_msg = str(e).lower()
+            if "cublas" in err_msg or "cuda" in err_msg or "cudnn" in err_msg:
+                # CUDA library load failed during execution, fallback to CPU and retry
+                self._model = WhisperModel(
+                    self.config.model_size,
+                    device="cpu",
+                    compute_type="int8",
+                    cpu_threads=self.config.cpu_threads,
+                    num_workers=self.config.num_workers,
+                )
+                return self.transcribe(audio_path, on_segment_callback=on_segment_callback)
             raise TranscriptionError(f"Transcription failed for '{audio_p.name}': {e}") from e
 
     def process(

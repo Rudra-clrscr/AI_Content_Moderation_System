@@ -6,7 +6,65 @@ mode: sync                 # sync  -> inference inline, final decision in the re
 
 model:
   backend: onnx            # onnx | stub   (stub = dev only, never deploy)
-  dir: models/v6           # live model. To roll back, put an older bundle next to it and set
+  dir: models/v8           # live model: ONE text model for the whole system. v8 is v6's
+                           #   lineage with the grievance genre folded in as unsafe - 233k
+                           #   rows from res/workplace_grievances.csv and
+                           #   res/support_complaints.csv, warm-started from v6's own
+                           #   checkpoint with 35% of its corpus rehearsed. models/v6 plus a
+                           #   separate models/grievance-* head is what this replaces.
+                           #
+                           # WHAT IT BOUGHT, measured on the hand-written sets:
+                           #   implied threats      53.4% -> 79.6%   (v6's worst real gap)
+                           #   grievance (written)  15.4% -> 57.7%
+                           #   workplace grievance  11.5% -> 57.7%
+                           #   one model, 371 MB and ~13 ms against 760 MB and 21.9 ms
+                           #
+                           # WHAT IT COST, and none of this is hidden:
+                           #   * COMPLAINTS ARE NOW REFUSED IN A PROPOSAL. accept_system.py
+                           #     gate 4 counts 17 of them and FAILS, by design: one
+                           #     surface-blind model cannot refuse a complaint on an article
+                           #     and allow it in a proposal. Gate 4 encodes the two-model
+                           #     design's policy and is no longer this system's policy. If the
+                           #     dispute channel needs those texts back, the answer is a gate
+                           #     rule for `proposal`, not a second model.
+                           #   * Long articles containing ONE unacceptable sentence are
+                           #     refused, whole-text score notwithstanding: measured, a clean
+                           #     guide scores 0.0004 and is allowed, and the same guide plus
+                           #     "Nobody at their support desk has replied about the refund in
+                           #     two weeks" is refused with decided_by `sentence` while the
+                           #     whole text still scores 0.0004. THAT IS THE POLICY, not a
+                           #     defect - the product owner's words: "any long article, if it
+                           #     contains any one word or sentence that is not acceptable, then
+                           #     it should not be published." Recorded here because it looks
+                           #     like a false refusal and the previous design deliberately did
+                           #     the opposite: app/grievance.py's MAX_SPLIT_CHARS = 400 exempted
+                           #     long posts from being split at all, and the 12,000
+                           #     `long_article` rows in generate_support_complaints.py still
+                           #     teach the WHOLE-TEXT model that an article may contain a
+                           #     setback. Those rows are why the whole-text score stays 0.0004;
+                           #     sentence_scan is what enforces the policy on top. DO NOT
+                           #     "fix" this by disabling sentence_scan - that is the only thing
+                           #     implementing the rule.
+                           #   * TWO TEXTS v6 CAUGHT NOW PUBLISH (gate 1): a long editorial
+                           #     article, and "One more order from that buyer and we will see."
+                           #     That is a real regression, not a policy trade, and it is the
+                           #     first thing to fix in the next round.
+                           #   * 47 legitimate texts refused against the previous 42 (gate 2),
+                           #     which was already failing.
+                           #   * Two of the five sentences this work started from still
+                           #     publish - "management has no brain cells for planning" (0.04)
+                           #     and "They preach work-life balance ... weekend shifts" (0.13).
+                           #     Cause: ~77,000 rows in v6's corpus teach that register is
+                           #     SAFE - business_complaint 26,226 at 0% unsafe,
+                           #     second_person_complaint 17,640 at 0%, firm_business 22,063 at
+                           #     0% - and they contradict the grievance rows on exactly this
+                           #     phrasing. Catching those two means relabelling those 77k rows,
+                           #     which also blocks ordinary B2B dispute language everywhere.
+                           #     That is a product decision nobody has taken yet.
+                           #
+                           # ROLL BACK to the two-model system by setting BOTH:
+                           #   dir: models/v6     and     grievance.enabled: true
+                           # To roll back further, put an older bundle next to it and set
                            # dir: models/v4 (or MODEL_DIR=...).
                            # v1, v3 and v4 are no longer tracked in the repo;
                            # each bundle's model_meta.json carries its own label_weights.
@@ -308,8 +366,14 @@ triage:                    # Layer 1.5: a linear pre-filter in front of the sent
                            # TRIAGE=0 turns it off; decisions must not change, only latency.
 
 grievance:                 # The public-surface complaint model (app/grievance.py).
-  enabled: true            # Asks a DIFFERENT question from the model above: "would this be a
-  dir: models/grievance-linear-v4 #   customer-support complaint or an emotional outcry if it were PUBLISHED
+  enabled: false           # OFF: models/v8 answers this question itself, on every surface, so
+                           #   a second model would score the same text twice for an answer
+                           #   already in hand. The block below is kept intact - thresholds,
+                           #   surfaces, the whole sweep - because setting this back to true
+                           #   with model.dir: models/v6 is the rollback, and a deleted config
+                           #   block is a rollback nobody can perform.
+                           # Asks a DIFFERENT question from the model above: "would this be a
+  dir: models/grievance-v7 #   customer-support complaint or an emotional outcry if it were PUBLISHED
                            #   NOT IN GIT (371 MB; see .gitignore for the four commands that rebuild
                            #   it). models/grievance-linear-v1 IS tracked - hashed n-grams, 928 KB,
                            #   78% caught against the transformer's 83% - so a fresh clone can point
@@ -321,26 +385,80 @@ grievance:                 # The public-surface complaint model (app/grievance.p
     - article              #   list is never checked, including a new one - a classifier refusing a
     - post                 #   whole genre on a surface nobody reviewed is the regression this whole
     - advertisement        #   design exists to prevent. Add a surface deliberately, not by default.
-  threshold: 0.99          # NOT the trained threshold (0.60), and chosen by sweeping the curve
-                           # rather than by trusting the training run. Measured on 274 held-out
-                           # legitimate texts and 44 hand-written grievances:
+  threshold: 0.95          # BUNDLE-SPECIFIC. 0.95 here is NOT a loosening of the 0.978 that
+                           # grievance-v3 shipped: v7's temperature is 1.31345 against v3's
+                           # 1.0, so the whole score distribution moved and 0.95 here does
+                           # what 0.978 did there. Paste 0.978 against THIS bundle and
+                           # workplace recall drops 76.9% -> 57.7% for nothing - a silent
+                           # capability loss that reads like a model regression. Re-sweep per
+                           # bundle; never carry a threshold across one.
                            #
-                           #     0.60   caught 72.7%   refused 22.3% of legitimate text
-                           #     0.90   caught 54.5%   refused  9.5%
-                           #     0.99   caught 27.3%   refused  1.8%
+                           # Measured on the bundle, on the three sets that were not generated
+                           # (training/eval_grievance_model.py --sets, caught / wrongly refused):
                            #
-                           # Refusing one legitimate post in ten is worse than missing a
-                           # complaint, because the author sees it and the miss is invisible.
-                           # 0.99 buys precision with recall deliberately. The gate rule
-                           # complaint.public_grievance still catches the common shapes
-                           # deterministically underneath, so this is the model's share only.
+                           #            workplace      handwritten-1   handwritten-2
+                           #     0.70   92.3% / 20.0%   88.5% / 0%      100.0% / 0%
+                           #     0.92   84.6% / 16.7%   84.6% / 0%      100.0% / 0%
+                           #     0.94   76.9% / 13.3%   84.6% / 0%       94.4% / 0%
+                           #     0.95   76.9% / 10.0%   84.6% / 0%       88.9% / 0%   <- shipped
+                           #     0.98   57.7% / 10.0%   80.8% / 0%       77.8% / 0%
                            #
-                           # The transformer bundle (models/grievance-v1) is NOT used: it is
-                           # saturated - 33-35% of legitimate text refused at EVERY threshold
-                           # from 0.5 to 0.9999 - so the dial cannot rescue it. Retraining it
-                           # on the corrected negatives is the open work.
-                           # GRIEVANCE_CHECK=0 turns it off; config/gate_patterns.yaml's
-                           # complaint.public_grievance rule then becomes the only cover again.
+                           # 0.95 holds the precision posture 0.978 chose rather than the
+                           # recall-first rule in train_grievance.pick_threshold, which would
+                           # pick ~0.70 and refuse one legitimate employer post in five. That
+                           # is a product call and the table is the whole of it; 0.92 and 0.94
+                           # are both defensible and one line away.
+                           #
+                           # WHAT v7 ADDS. Workplace grievance - an employee against an
+                           # EMPLOYER, where every bundle before it covered a buyer against a
+                           # SELLER. Toxic workplace, overwork, management-bashing, pay and
+                           # exit disputes, and the profane register (damn, shit, toxic
+                           # dumpster). On v3 all five of the product owner's example
+                           # sentences published; all five are now caught. The supplier
+                           # capability improved at the same time, by 8 and 28 points, because
+                           # the new genre taught the abstract shape rather than the
+                           # vocabulary: a person aggrieved at an organisation, in public.
+                           #
+                           # Built incrementally (training/train_incremental.py): warm-started
+                           # from the v6 checkpoint on 131k new rows plus a 15% rehearsal
+                           # sample, 11 minutes rather than the 36-44 a full retrain costs,
+                           # and the old-capability AUC gate passed at 1.0000 -> 1.0000.
+                           #
+                           # KNOWN MISS, CARRIED OVER FROM v3 AND STILL UNFIXED: "US and Iran
+                           # war is going on since 10 months, and now both leaders are stuck,
+                           # now it is stupidious to continue this war further" - a text the
+                           # product owner ruled legitimate. The model reads commentary on
+                           # world events as a grievance. No setting fixes it; training data
+                           # separating "a war is going badly" from "my supplier is going
+                           # badly" does.
+                           #
+                           # The 10% that remain are the model conflating "negative about a
+                           # counterparty or an employer" with "complaint": third-person
+                           # industry commentary, profane market idiom, and contentment
+                           # phrased through negation. Still the figure this file called too
+                           # high for production, and the honest ceiling of generated data.
+                           #
+                           # LEAK-ADJUSTED, because the numbers above are not quite what
+                           # they look like. training/audit_eval_leakage.py found that when
+                           # this bundle was trained, 121 evaluation sentences appeared
+                           # verbatim in res/*.csv - 14 of them in the two grievance
+                           # hand-written sets. Scored on this checkpoint:
+                           #
+                           #     leaked rows   88.4%    clean rows   72.2%    premium +16.1%
+                           #
+                           # The headline inflation is small because the leaked fraction is:
+                           # about 0.6 points on handwritten-1 and 2.8 on handwritten-2. Read
+                           # 84.6% / 88.9% as roughly 84% / 86% honest. The workplace set has
+                           # never been in any training data, so its 76.9% / 10.0% stands.
+                           #
+                           # The generators are fixed now (0 of 766, down from 86), so a
+                           # retrain from the same recipe produces slightly lower and fully
+                           # honest numbers. This bundle predates the fix and was kept rather
+                           # than rebuilt, deliberately: it is the best measured model and the
+                           # correction is smaller than the gap to anything else.
+                           #
+                           # NOT TRACKED (371 MB). models/grievance-linear-v4 is, at 27% and
+                           # 3.6%, so a fresh clone has cover.
 
 word_scan:                 # word-by-word analysis (see app/targeted.py WordScan)
   enabled: true

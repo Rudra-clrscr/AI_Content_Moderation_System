@@ -198,8 +198,9 @@
             <span>${esc(s.media.text)}</span>
           </div>
           <input type="file" id="s-media-input" multiple hidden accept="${esc(s.media.accept)}">
-          <p class="hint">Attachments are checked before publishing. Text inside an image or PDF is
-             read; the picture itself isn't classified, and video isn't watched.</p>
+          <p class="hint">${key === "video"
+            ? "Attachments are checked before publishing. Video speech can be transcribed offline and exported as subtitles (.srt, .vtt), text, or JSON."
+            : "Attachments are checked before publishing. Text inside an image or PDF is read; the picture itself isn't classified, and video isn't watched."}</p>
           <ul class="attachments" id="s-attachments"></ul>
         </div>
         <div class="form-actions">
@@ -260,10 +261,27 @@
     input.addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
 
     $("s-attachments").addEventListener("click", (e) => {
-      const btn = e.target.closest("[data-remove]");
-      if (!btn) return;
-      attachments.splice(Number(btn.dataset.remove), 1);
-      renderAttachments();
+      const removeBtn = e.target.closest("[data-remove]");
+      if (removeBtn) {
+        attachments.splice(Number(removeBtn.dataset.remove), 1);
+        renderAttachments();
+        return;
+      }
+      const startBtn = e.target.closest("[data-start-transcribe]");
+      if (startBtn) {
+        transcribeAttachment(Number(startBtn.dataset.startTranscribe));
+        return;
+      }
+      const exportBtn = e.target.closest("[data-export-fmt]");
+      if (exportBtn) {
+        downloadTranscript(Number(exportBtn.dataset.idx), exportBtn.dataset.exportFmt);
+        return;
+      }
+      const insertBtn = e.target.closest("[data-insert-transcript]");
+      if (insertBtn) {
+        insertTranscriptToDescription(Number(insertBtn.dataset.insertTranscript));
+        return;
+      }
     });
 
     $("s-submit").addEventListener("click", submit);
@@ -277,19 +295,131 @@
     });
   }
 
+  function isVideoFile(fileOrName) {
+    if (!fileOrName) return false;
+    const name = typeof fileOrName === "string" ? fileOrName : (fileOrName.name || "");
+    const type = typeof fileOrName === "object" && fileOrName.type ? fileOrName.type : "";
+    if (type.startsWith("video/")) return true;
+    return /\.(mp4|mov|mkv|avi|webm|flv|wmv|m4v|ts|mpeg|mpg|3gp)$/i.test(name);
+  }
+
   function addFiles(fileList) {
-    for (const file of fileList) attachments.push({ name: file.name, size: file.size, file, state: "new", detail: "" });
+    const startIndex = attachments.length;
+    for (const file of fileList) {
+      attachments.push({ name: file.name, size: file.size, file, state: "new", detail: "" });
+    }
     renderAttachments();
     checkAttachments();
+
+    // Automatically trigger transcription for video uploads on the Videos tab
+    attachments.forEach((a, idx) => {
+      if (idx >= startIndex && ((current === "video") || isVideoFile(a.file || a.name))) {
+        transcribeAttachment(idx);
+      }
+    });
+  }
+
+  async function transcribeAttachment(index) {
+    const a = attachments[index];
+    if (!a || !a.file) return;
+    a.transcribing = true;
+    a.transcriptError = null;
+    renderAttachments();
+
+    try {
+      const form = new FormData();
+      form.append("file", a.file);
+      const resp = await fetch("/v1/media/transcribe", { method: "POST", body: form });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(body.error?.message || `HTTP ${resp.status}`);
+      }
+      a.transcript = body;
+    } catch (err) {
+      a.transcriptError = err.message || "Failed to transcribe audio";
+    } finally {
+      a.transcribing = false;
+      renderAttachments();
+    }
+  }
+
+  function downloadTranscript(index, format) {
+    const a = attachments[index];
+    if (!a || !a.transcript || !a.transcript.formats) return;
+    const content = a.transcript.formats[format];
+    if (!content) return;
+
+    const baseName = a.name.replace(/\.[^/.]+$/, "");
+    const mimeTypes = {
+      txt: "text/plain;charset=utf-8",
+      srt: "text/plain;charset=utf-8",
+      vtt: "text/vtt;charset=utf-8",
+      json: "application/json;charset=utf-8"
+    };
+    const mime = mimeTypes[format] || "text/plain";
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${baseName}.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function insertTranscriptToDescription(index) {
+    const a = attachments[index];
+    if (!a || !a.transcript) return;
+    const descField = $("s-description") || $("s-body");
+    if (descField) {
+      const currentVal = descField.value.trim();
+      descField.value = currentVal ? `${currentVal}\n\nTranscript:\n${a.transcript.full_text}` : a.transcript.full_text;
+      toast("Transcript inserted into description");
+    }
   }
 
   function renderAttachments() {
     $("s-attachments").innerHTML = attachments.map((a, i) => {
       const [cls, label] = STATE_LABEL[a.state] || STATE_LABEL.new;
+      const isVid = (current === "video") || isVideoFile(a.file || a.name);
+
+      let transcriptHtml = "";
+      if (isVid) {
+        if (a.transcribing) {
+          transcriptHtml = `<div class="transcript-row" style="margin-top:6px; font-size:12px; color:var(--primary, #1f5dac); display:flex; align-items:center; gap:6px;">
+            <span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;animation:spin 1s linear infinite;border:2px solid #cbd5e1;border-top-color:var(--primary,#1f5dac);border-radius:50%;"></span> Transcribing speech (Whisper AI)…
+          </div>`;
+        } else if (a.transcript) {
+          const lang = (a.transcript.detected_language || "en").toUpperCase();
+          const words = a.transcript.total_words || (a.transcript.full_text ? a.transcript.full_text.split(/\s+/).length : 0);
+          transcriptHtml = `<div class="transcript-row" style="margin-top:6px; font-size:12px; display:flex; flex-wrap:wrap; align-items:center; gap:6px;">
+            <span style="color:#166534; font-weight:600;">✓ Transcript (${esc(lang)}, ${words} words):</span>
+            <span style="color:#64748b;">Export:</span>
+            <button type="button" class="btn-xs" data-export-fmt="txt" data-idx="${i}" title="Download Plain Text">.TXT</button>
+            <button type="button" class="btn-xs" data-export-fmt="srt" data-idx="${i}" title="Download SubRip Subtitles">.SRT</button>
+            <button type="button" class="btn-xs" data-export-fmt="vtt" data-idx="${i}" title="Download WebVTT">.VTT</button>
+            <button type="button" class="btn-xs" data-export-fmt="json" data-idx="${i}" title="Download JSON Data">.JSON</button>
+            <button type="button" class="btn-xs btn-insert" data-insert-transcript="${i}" title="Insert into Description">+ Insert to Description</button>
+          </div>`;
+        } else if (a.transcriptError) {
+          transcriptHtml = `<div class="transcript-row" style="margin-top:6px; font-size:12px; color:#c0322b; display:flex; align-items:center; gap:6px;">
+            <span>Transcription note: ${esc(a.transcriptError)}</span>
+            <button type="button" class="btn-xs" data-start-transcribe="${i}">Retry</button>
+          </div>`;
+        } else {
+          transcriptHtml = `<div class="transcript-row" style="margin-top:6px; font-size:12px; display:flex; align-items:center; gap:6px;">
+            <button type="button" class="btn-xs btn-primary-xs" data-start-transcribe="${i}">📥 Transcribe & Export Transcript</button>
+          </div>`;
+        }
+      }
+
       return `<li>
           <span class="att-state ${cls}">${label}</span>
           <span class="grow"><span class="name">${esc(a.name)}</span>
-            <div class="meta">${KB(a.size)}${a.detail ? ` · ${esc(a.detail)}` : ""}</div></span>
+            <div class="meta">${KB(a.size)}${a.detail ? ` · ${esc(a.detail)}` : ""}</div>
+            ${transcriptHtml}
+          </span>
           <button class="att-remove" data-remove="${i}" aria-label="Remove ${esc(a.name)}">✕</button>
         </li>`;
     }).join("");

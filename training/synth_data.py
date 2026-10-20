@@ -600,13 +600,13 @@ def about_someones_work():
 
 
 HI_CRITICISM = [
-    "Bhai sahab, thoda rate kam kar dijiye to order pakka hai.",
+    "Bhai sahab, rate mein thodi gunjaish nikaalein to order de dete hain.",
     "Thoda discount mil jayega to abhi order kar deta hoon.",
     "Last price bata dijiye, phir final karta hoon.",
     "Itna mehnga hai, thoda kam kijiye na.",
     "Rate zyada lag raha hai, kuch adjust kijiye.",
     "Bulk mein le rahe hain to kuch to kam kijiye.",
-    "Itne paise lagane ke baad bhi machine chali nahi, bahut dukh hua.",
+    "Itna kharch karne ke baad bhi machine start nahi hui, bahut afsos hua.",
     "Maal kharab nikla, humein bahut nuksan hua.",
     "Do din se wait kar rahe hain, bahut pareshan hain.",
     "Order time par nahi aaya isliye mann kharab ho gaya.",

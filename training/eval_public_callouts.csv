@@ -1,90 +1,90 @@
-text,label,group
-"Can the admins please look into what happened with our order from the Ludhiana unit. We have been chasing since Diwali.",0,ordinary_complaint
-"Third consignment in a row arriving with torn packaging. I have photos if anyone from their side wants to see.",0,ordinary_complaint
-"The quantity billed does not match what reached our godown. 48 pieces short.",0,ordinary_complaint
-"Still waiting on the credit note promised in September.",0,ordinary_complaint
-"Rates quoted on the call were not what appeared on the final invoice.",0,ordinary_complaint
-"They committed 15 days and it has been 40. We have told them this directly.",0,ordinary_complaint
-"Quality of the last lot was below the approved sample. We have asked for a replacement.",0,ordinary_complaint
-"Nobody picked up the phone for four days during a live shipment.",0,ordinary_complaint
-"Their LR copy has the wrong destination pin code again.",0,ordinary_complaint
-"We are unhappy with the delay but their team has at least been responding.",0,ordinary_complaint
-"Had to pay demurrage because the documents came late. Raising it with them formally.",0,ordinary_complaint
-"The grade supplied was 202 when the PO clearly said 304.",0,ordinary_complaint
-"Not satisfied with how the warranty claim was processed.",0,ordinary_complaint
-"The finishing on this batch is rough compared to what we have had before.",0,ordinary_complaint
-"We have escalated the matter through their support portal as the contract requires.",0,proper_channel
-"Our legal team is corresponding with them about the shortfall.",0,proper_channel
-"Arbitration clause has been invoked. Nothing further to discuss publicly.",0,proper_channel
-"We have written to their account manager and copied their regional office.",0,proper_channel
-"Raised a formal complaint on their grievance portal, reference number received.",0,proper_channel
-"Please take action on the pending dispatch before the 20th.",0,action_task
-"Corrective action report has been shared with their quality head.",0,action_task
-"Action points from Tuesday's review are attached for everyone.",0,action_task
-"What action has been taken on the rejected lot so far?",0,action_task
-"Immediate action needed on the customs documentation.",0,action_task
-"Under clause 7 the transporter is accountable for damage in transit.",0,contract_language
-"The supplier is responsible for replacement at their own cost.",0,contract_language
-"Liability for the delay sits with the shipping line, not the vendor.",0,contract_language
-"We will hold them to the penalty clause if this slips again.",0,contract_language
-"The bias in the instrument reading was within the agreed tolerance.",0,technical_bias
-"Sampling bias was corrected before the lab issued the certificate.",0,technical_bias
-"Partial dispatch is acceptable if the balance ships by month end.",0,technical_partial
-"A partial credit has been adjusted against the next invoice.",0,technical_partial
-"Our professional services division handles installation separately.",0,professional_ordinary
-"We will conduct the factory audit next Thursday.",0,professional_ordinary
-"Professional indemnity cover is in place for the consultancy work.",0,professional_ordinary
-"Their engineer conducted the commissioning very thoroughly.",0,professional_ordinary
-"The thermal behaviour of the material is documented in the datasheet.",0,professional_ordinary
-"Very pleased with how the Rajkot team handled the rush order.",0,praise
-"Happy to recommend them after two years of steady supply.",0,praise
-"Genuinely relieved the container cleared customs in time.",0,praise
-"I was worried about the monsoon affecting dispatch but it went smoothly.",0,praise
-"Grateful to their logistics coordinator for sorting the mix-up overnight.",0,praise
-"Looking for a reliable supplier of industrial fasteners in Maharashtra.",0,neutral_listing
-"We stock mild steel angles and channels, delivery across Gujarat.",0,neutral_listing
-"Sharing our experience with bulk packaging options in case it helps others.",0,neutral_listing
-"Honestly disappointed, but these things happen in this trade.",0,mild_venting
-"Frustrating week, though the consignment did eventually arrive.",0,mild_venting
-"Not the smoothest order we have run, we will see how the next one goes.",0,mild_venting
-"I want the whole network to see how this firm operates before anyone else signs with them.",1,callout_warn_community
-"Posting here because nobody should have to deal with what we went through.",1,callout_warn_community
-"Naming them publicly: avoid this trader at all costs.",1,callout_warn_community
-"Fellow suppliers, do not extend credit to this buyer under any circumstances.",1,callout_warn_community
-"Let this be a public record of how badly they behave with small vendors.",1,callout_warn_community
-"If even one person reads this and walks away from them, it was worth posting.",1,callout_warn_community
-"Their director should be answering for this instead of hiding behind the sales team.",1,callout_demand_action
-"Someone in that company needs to be sacked over how this was handled.",1,callout_demand_action
-"I expect the management to investigate this employee and tell us the outcome.",1,callout_demand_action
-"That purchase officer has no place in this trade and should be shown the door.",1,callout_demand_action
-"Until they discipline the person responsible, we will keep raising this.",1,callout_demand_action
-"The board needs to answer publicly for the conduct of its staff.",1,callout_demand_action
-"Strict disciplinary steps are the minimum we expect against the person involved.",1,callout_demand_action
-"It is plain favouritism. Big buyers get stock, the rest of us get excuses.",1,callout_bias
-"We were treated differently because of where our firm is based, and I will say so openly.",1,callout_bias
-"There is partiality in how they allot quota and everyone in the trade knows it.",1,callout_bias
-"The prejudice in their dealings with smaller units could not be clearer.",1,callout_bias
-"They give preference to their own community suppliers and sideline the rest.",1,callout_bias
-"The manner in which that gentleman conducted himself was entirely unbecoming of a professional.",1,callout_unprofessional
-"Shouting at our purchase team on a recorded call tells you everything about their standards.",1,callout_unprofessional
-"Utterly unprofessional conduct from someone holding a senior position.",1,callout_unprofessional
-"The language that executive used would not be acceptable in any workplace.",1,callout_unprofessional
-"Someone representing a company should know better than to behave like that.",1,callout_unprofessional
-"Silence from them for six weeks, so this is going on every board I am a member of.",1,callout_escalation
-"They left me no option but to make this public.",1,callout_escalation
-"I will keep posting about this until somebody from their side responds.",1,callout_escalation
-"Taking this to LinkedIn and the trade association as well.",1,callout_escalation
-"This has wiped out our margin for the entire season and I cannot see a way back.",1,outcry
-"Twenty-two years in this line and I have never been treated with such contempt.",1,outcry
-"I have not slept properly since this order went wrong. My family is suffering for it.",1,outcry
-"Sitting in my shop looking at unsold stock and wondering what I did to deserve this.",1,outcry
-"Completely broken by this. I do not know what to tell my workers on Monday.",1,outcry
-"We trusted them absolutely and they have left us with nothing.",1,outcry
-"I am writing this with shaking hands because I am so angry.",1,outcry
-"Everything we built over fifteen years is at risk because of one supplier.",1,outcry
-"Please, is there anyone here who can tell me what my options are now. I am desperate.",1,outcry
-"The shame of telling our customers we cannot deliver is more than I can bear.",1,outcry
-"Unka behaviour bilkul theek nahi tha, sabko pata hona chahiye ki yeh log kaise hain.",1,callout_hinglish
-"Itna nuksan ho gaya hai ki ab kuch samajh nahi aa raha, bahut dukhi hoon.",1,outcry_hinglish
-"Maal time par nahi aaya, please status update bhej dijiye.",0,ordinary_complaint_hinglish
-"Payment clear ho gaya hai, invoice ki copy attach kar di hai.",0,neutral_hinglish
+"text","label","group","public_label"
+"Can the admins please look into what happened with our order from the Ludhiana unit. We have been chasing since Diwali.","0","ordinary_complaint","1"
+"Third consignment in a row arriving with torn packaging. I have photos if anyone from their side wants to see.","0","ordinary_complaint","1"
+"The quantity billed does not match what reached our godown. 48 pieces short.","0","ordinary_complaint","1"
+"Still waiting on the credit note promised in September.","0","ordinary_complaint","1"
+"Rates quoted on the call were not what appeared on the final invoice.","0","ordinary_complaint","1"
+"They committed 15 days and it has been 40. We have told them this directly.","0","ordinary_complaint","1"
+"Quality of the last lot was below the approved sample. We have asked for a replacement.","0","ordinary_complaint","1"
+"Nobody picked up the phone for four days during a live shipment.","0","ordinary_complaint","1"
+"Their LR copy has the wrong destination pin code again.","0","ordinary_complaint","1"
+"We are unhappy with the delay but their team has at least been responding.","0","ordinary_complaint","1"
+"Had to pay demurrage because the documents came late. Raising it with them formally.","0","ordinary_complaint","1"
+"The grade supplied was 202 when the PO clearly said 304.","0","ordinary_complaint","1"
+"Not satisfied with how the warranty claim was processed.","0","ordinary_complaint","1"
+"The finishing on this batch is rough compared to what we have had before.","0","ordinary_complaint","1"
+"We have escalated the matter through their support portal as the contract requires.","0","proper_channel","0"
+"Our legal team is corresponding with them about the shortfall.","0","proper_channel","0"
+"Arbitration clause has been invoked. Nothing further to discuss publicly.","0","proper_channel","0"
+"We have written to their account manager and copied their regional office.","0","proper_channel","0"
+"Raised a formal complaint on their grievance portal, reference number received.","0","proper_channel","0"
+"Please take action on the pending dispatch before the 20th.","0","action_task","0"
+"Corrective action report has been shared with their quality head.","0","action_task","0"
+"Action points from Tuesday's review are attached for everyone.","0","action_task","0"
+"What action has been taken on the rejected lot so far?","0","action_task","0"
+"Immediate action needed on the customs documentation.","0","action_task","0"
+"Under clause 7 the transporter is accountable for damage in transit.","0","contract_language","0"
+"The supplier is responsible for replacement at their own cost.","0","contract_language","0"
+"Liability for the delay sits with the shipping line, not the vendor.","0","contract_language","0"
+"We will hold them to the penalty clause if this slips again.","0","contract_language","0"
+"The bias in the instrument reading was within the agreed tolerance.","0","technical_bias","0"
+"Sampling bias was corrected before the lab issued the certificate.","0","technical_bias","0"
+"Partial dispatch is acceptable if the balance ships by month end.","0","technical_partial","0"
+"A partial credit has been adjusted against the next invoice.","0","technical_partial","0"
+"Our professional services division handles installation separately.","0","professional_ordinary","0"
+"We will conduct the factory audit next Thursday.","0","professional_ordinary","0"
+"Professional indemnity cover is in place for the consultancy work.","0","professional_ordinary","0"
+"Their engineer conducted the commissioning very thoroughly.","0","professional_ordinary","0"
+"The thermal behaviour of the material is documented in the datasheet.","0","professional_ordinary","0"
+"Very pleased with how the Rajkot team handled the rush order.","0","praise","0"
+"Happy to recommend them after two years of steady supply.","0","praise","0"
+"Genuinely relieved the container cleared customs in time.","0","praise","0"
+"I was worried about the monsoon affecting dispatch but it went smoothly.","0","praise","0"
+"Grateful to their logistics coordinator for sorting the mix-up overnight.","0","praise","0"
+"Looking for a reliable supplier of industrial fasteners in Maharashtra.","0","neutral_listing","0"
+"We stock mild steel angles and channels, delivery across Gujarat.","0","neutral_listing","0"
+"Sharing our experience with bulk packaging options in case it helps others.","0","neutral_listing","0"
+"Honestly disappointed, but these things happen in this trade.","0","mild_venting","1"
+"Frustrating week, though the consignment did eventually arrive.","0","mild_venting","1"
+"Not the smoothest order we have run, we will see how the next one goes.","0","mild_venting","1"
+"I want the whole network to see how this firm operates before anyone else signs with them.","1","callout_warn_community","1"
+"Posting here because nobody should have to deal with what we went through.","1","callout_warn_community","1"
+"Naming them publicly: avoid this trader at all costs.","1","callout_warn_community","1"
+"Fellow suppliers, do not extend credit to this buyer under any circumstances.","1","callout_warn_community","1"
+"Let this be a public record of how badly they behave with small vendors.","1","callout_warn_community","1"
+"If even one person reads this and walks away from them, it was worth posting.","1","callout_warn_community","1"
+"Their director should be answering for this instead of hiding behind the sales team.","1","callout_demand_action","1"
+"Someone in that company needs to be sacked over how this was handled.","1","callout_demand_action","1"
+"I expect the management to investigate this employee and tell us the outcome.","1","callout_demand_action","1"
+"That purchase officer has no place in this trade and should be shown the door.","1","callout_demand_action","1"
+"Until they discipline the person responsible, we will keep raising this.","1","callout_demand_action","1"
+"The board needs to answer publicly for the conduct of its staff.","1","callout_demand_action","1"
+"Strict disciplinary steps are the minimum we expect against the person involved.","1","callout_demand_action","1"
+"It is plain favouritism. Big buyers get stock, the rest of us get excuses.","1","callout_bias","1"
+"We were treated differently because of where our firm is based, and I will say so openly.","1","callout_bias","1"
+"There is partiality in how they allot quota and everyone in the trade knows it.","1","callout_bias","1"
+"The prejudice in their dealings with smaller units could not be clearer.","1","callout_bias","1"
+"They give preference to their own community suppliers and sideline the rest.","1","callout_bias","1"
+"The manner in which that gentleman conducted himself was entirely unbecoming of a professional.","1","callout_unprofessional","1"
+"Shouting at our purchase team on a recorded call tells you everything about their standards.","1","callout_unprofessional","1"
+"Utterly unprofessional conduct from someone holding a senior position.","1","callout_unprofessional","1"
+"The language that executive used would not be acceptable in any workplace.","1","callout_unprofessional","1"
+"Someone representing a company should know better than to behave like that.","1","callout_unprofessional","1"
+"Silence from them for six weeks, so this is going on every board I am a member of.","1","callout_escalation","1"
+"They left me no option but to make this public.","1","callout_escalation","1"
+"I will keep posting about this until somebody from their side responds.","1","callout_escalation","1"
+"Taking this to LinkedIn and the trade association as well.","1","callout_escalation","1"
+"This has wiped out our margin for the entire season and I cannot see a way back.","1","outcry","1"
+"Twenty-two years in this line and I have never been treated with such contempt.","1","outcry","1"
+"I have not slept properly since this order went wrong. My family is suffering for it.","1","outcry","1"
+"Sitting in my shop looking at unsold stock and wondering what I did to deserve this.","1","outcry","1"
+"Completely broken by this. I do not know what to tell my workers on Monday.","1","outcry","1"
+"We trusted them absolutely and they have left us with nothing.","1","outcry","1"
+"I am writing this with shaking hands because I am so angry.","1","outcry","1"
+"Everything we built over fifteen years is at risk because of one supplier.","1","outcry","1"
+"Please, is there anyone here who can tell me what my options are now. I am desperate.","1","outcry","1"
+"The shame of telling our customers we cannot deliver is more than I can bear.","1","outcry","1"
+"Unka behaviour bilkul theek nahi tha, sabko pata hona chahiye ki yeh log kaise hain.","1","callout_hinglish","1"
+"Itna nuksan ho gaya hai ki ab kuch samajh nahi aa raha, bahut dukhi hoon.","1","outcry_hinglish","1"
+"Maal time par nahi aaya, please status update bhej dijiye.","0","ordinary_complaint_hinglish","1"
+"Payment clear ho gaya hai, invoice ki copy attach kar di hai.","0","neutral_hinglish","0"

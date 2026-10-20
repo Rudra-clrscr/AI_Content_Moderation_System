@@ -96,3 +96,44 @@ flask_api/models/v6r2/
 # name, and a path called "original" in a clone invites exactly the wrong guess about which
 # one is live.
 flask_api/models/v6_original/
+
+# The workplace-grievance category, added incrementally rather than by a full retrain. The
+# checkpoint rebuilds from:
+#   python training/generate_workplace_grievances.py --check-collisions
+#   python training/train_incremental.py --init D:/AI/bonc-grievance-v5/ckpt #          --new res/workplace_grievances.csv --replay D:/AI/bonc-grievance-data-v5 #          --out D:/AI/bonc-grievance-v7inc/ckpt
+#   python training/calibrate_export.py --ckpt D:/AI/bonc-grievance-v7inc/ckpt ... --min-temperature 1.0
+# res/ is already ignored above, so the 100k-row CSV is not tracked; the generator is.
+
+# The retrained grievance transformer (371 MB). Same reasoning as models/v6new and the first
+# grievance bundle: it rebuilds from training/generate_support_complaints.py ->
+# train_grievance.py --write-splits -> train.py -> calibrate_export.py --min-temperature 1.0.
+# models/grievance-linear-v4 stays tracked at 928 KB so a fresh clone has working cover.
+flask_api/models/grievance-v2/
+flask_api/models/grievance-v3/
+
+# The grievance bundle carrying the workplace category as well (371 MB). Built incrementally,
+# so its rebuild is cheaper than the others above - 11 min against 36-44:
+#   python training/generate_workplace_grievances.py --check-collisions
+#   python training/train_incremental.py --init D:/AI/bonc-grievance-v6/ckpt #          --new res/workplace_grievances.csv --replay D:/AI/bonc-grievance-data-v6 #          --out D:/AI/bonc-grievance-v8inc/ckpt --fail-on-leakage
+#   python training/train_grievance.py --write-splits D:/AI/bonc-grievance-data-v8
+#   python training/calibrate_export.py --ckpt D:/AI/bonc-grievance-v8inc/ckpt #          --data D:/AI/bonc-grievance-data-v8 --bundle flask_api/models/grievance-v4 #          --version grievance-deberta-v7 --max-len 192 --min-temperature 1.0
+# The --data dir must be the COMBINED splits (train_grievance.py now reads the workplace CSV):
+# calibrating a model that answers for both genres on a supplier-only validation set fits the
+# temperature to half its job.
+flask_api/models/grievance-v7/
+
+# The single text model now in service (371 MB): v6's lineage with the grievance genre folded
+# in as unsafe, so one model answers both questions on every surface. Rebuild:
+#   python training/generate_workplace_grievances.py --check-collisions
+#   python training/generate_support_complaints.py
+#   <build the combined corpus: v6's splits at 35% rehearsal + the two grievance files as
+#    unsafe/safe - see settings.yaml model.dir for what the mix is and why>
+#   python training/train_incremental.py --init D:/AI/bonc-v6new/ckpt #          --new D:/AI/bonc-data-v8single/train.csv --replay D:/AI/bonc-data-v6r2 #          --replay-frac 0.0 --out D:/AI/bonc-v8single/ckpt --max-len 256 --lr 1.2e-5
+#   python training/calibrate_export.py --ckpt D:/AI/bonc-v8single/ckpt #          --data D:/AI/bonc-data-v8single --bundle flask_api/models/v8 #          --version bonc-v8-single --max-len 256 --min-temperature 1.0
+flask_api/models/v8/
+
+# The two-headed experiment (models/v7, [unsafe, grievance]). Kept out of git and out of
+# service: 0 of 4 acceptance gates, and it published phishing that models/v6 caught. The
+# approach is recorded in training/train_dualhead.py rather than deleted, because the failure
+# mode - two heads on one backbone pulling against each other - is worth not rediscovering.
+flask_api/models/v7/

@@ -53,27 +53,15 @@ SKIP = {"eval_grievance_handwritten.csv", "eval_grievance_handwritten_2.csv",
         "eval_policy_categories.csv"}
 GRIEVANCE_SETS = ["eval_grievance_handwritten_2.csv", "eval_grievance_handwritten.csv"]
 
-# Groups whose label-0 rows ARE complaints, and are therefore expected to be refused on a
-# public surface under the policy this work implements. They are labelled 0 in the eval sets
-# because those sets were written for the main model, where a complaint must stay publishable
-# so a member can chase a consignment through a proposal. Both labels are right; they answer
-# different questions, and the surface is what separates them.
+# EXPECTED_PUBLIC_REFUSALS used to live here: a list of GROUPS excluded from gate 2 because
+# their label-0 rows are complaints. It is gone, and what replaced it is better in the way that
+# matters - the eval sets now carry `public_label` per ROW, so the judgement is attached to the
+# text rather than to a group name.
 #
-# DECIDED, not inferred. Asked directly on 2026-10-17 whether "Their LR copy has the wrong
-# destination pin code again" should be refused on an article, the answer was that it is
-# refused. So this list is policy, and a reader who disagrees with it is disagreeing with the
-# product decision rather than with a measurement convenience.
-#
-# Gate 2 does not count these, and they are PRINTED every run with their texts. Excluding a
-# group from a gate is exactly the move that hides a regression, so it has to be visible and
-# short enough that somebody can argue with it. If the policy is ever decided the other way,
-# this list is what gets deleted, and gate 2 then fails until the model is retrained.
-EXPECTED_PUBLIC_REFUSALS = {
-    "b2b_negotiation/complaint", "public_callouts/ordinary_complaint",
-    "public_callouts/ordinary_complaint_hinglish", "public_callouts/mild_venting",
-    "public_callouts/outcry", "handwritten/review", "handwritten_2/review",
-    "dismissive/dismissive",
-}
+# That distinction was not cosmetic. `firm_business_language` holds both "We will withhold the
+# final payment until the defects are rectified", which publishes, and "Your driver was rude to
+# our staff", which does not. Excluding the group hid the first; including it punished the
+# second. See training/relabel_public_surface.py for every row and the reasoning.
 
 
 def general_cases():
@@ -84,7 +72,18 @@ def general_cases():
             continue
         for r in csv.DictReader(open(path, encoding="utf-8")):
             if "text" in r and r.get("label") in ("0", "1"):
-                out.append((r["text"], int(r["label"]), f"{name[5:-4]}/{r.get('group', '')}"))
+                # public_label, not label: these are scored on an article, and a complaint
+                # about a counterparty is refused there and published in a proposal. See
+                # training/relabel_public_surface.py. Falls back to label for any set that
+                # has not been relabelled.
+                # BOTH labels travel together, because the two gates ask different
+                # questions of the same text. `label` is the surface-blind answer the main
+                # model is judged on; `public_label` is what the answer becomes when the text
+                # is published. A complaint is 0 and 1 respectively, and collapsing them to
+                # one number would make gate 1 demand that proposals refuse complaints.
+                out.append((r["text"], int(r["label"]),
+                            int(r.get("public_label") or r["label"]),
+                            f"{name[5:-4]}/{r.get('group', '')}"))
     return out
 
 
@@ -94,7 +93,9 @@ def grievance_cases():
         path = HERE / name
         if path.exists():
             for r in csv.DictReader(path.open(encoding="utf-8")):
-                out.append((r["text"], int(r["label"]), name[5:-4]))
+                # These sets are grievances throughout and were written for this question, so
+                # both labels are the same: refused when published, published in a dispute.
+                out.append((r["text"], int(r["label"]), int(r["label"]), name[5:-4]))
     return out
 
 
@@ -107,10 +108,11 @@ def run(model_dir: str, grievance: bool, cases, surface: str):
     from app import create_app
     client = create_app().test_client()
     out = []
-    for text, label, group in cases:
+    for text, label, public_label, group in cases:
         r = client.post("/v1/moderate", json={"content": text, "content_type": surface,
                                               "content_id": "s"}).get_json()
-        out.append((r["decision"] != "allow", r.get("decided_by"), label, group, text))
+        out.append((r["decision"] != "allow", r.get("decided_by"), label, public_label,
+                    group, text))
     return out
 
 
@@ -144,21 +146,26 @@ def main() -> int:
     # for the old part's behaviour.
     base_gr_priv = run(args.baseline, False, grievance, PRIVATE)
 
-    # 1: harmful text v5 refused, on the private surface (text model isolated)
-    lost_harmful = [(g, t, b, c) for (br, _, lb, g, t), (cr, cb, *_ ) in zip(base_priv, cand_priv)
-                    for b, c in [(br, cr)] if lb == 1 and br and not cr]
-    # 2: legitimate text v5 published, on the public surface (grievance check active)
-    all_new = [(g, t, cb) for (br, _, lb, g, t), (cr, cb, *_) in zip(base_pub, cand_pub)
-               if lb == 0 and not br and cr]
-    new_refusals = [x for x in all_new if x[0] not in EXPECTED_PUBLIC_REFUSALS]
-    expected = [x for x in all_new if x[0] in EXPECTED_PUBLIC_REFUSALS]
+    # 1: harmful text v5 refused, on the private surface. Uses `label` - the surface-blind
+    # answer - because this isolates the text model, and a complaint must publish here.
+    lost_harmful = [(g, t) for (br, _, lb, _pl, g, t), (cr, *_) in zip(base_priv, cand_priv)
+                    if lb == 1 and br and not cr]
+    # 2: text that should publish on a PUBLIC surface and now does not. Uses `public_label`,
+    # so a complaint refused on an article is not counted as a false positive - that is the
+    # policy working. 51 rows differ between the two labels; see relabel_public_surface.py.
+    new_refusals = [(g, t, cb) for (br, _, _lb, pl, g, t), (cr, cb, *_) in zip(base_pub, cand_pub)
+                    if pl == 0 and not br and cr]
+    # What the relabelling moved: refused on an article, and `label` 0 so the old measurement
+    # would have called each of these a false positive.
+    expected = [(g, t, cb) for (br, _, lb, pl, g, t), (cr, cb, *_) in zip(base_pub, cand_pub)
+                if lb == 0 and pl == 1 and cr]
     # 3 and 4
     gr_pos = [(c, b) for c, b in zip(cand_gr_pub, base_gr_pub) if c[2] == 1]
     caught = sum(1 for c, _ in gr_pos if c[0]) / max(len(gr_pos), 1)
     base_caught = sum(1 for _, b in gr_pos if b[0]) / max(len(gr_pos), 1)
-    leaked = [(g, t) for (r, _, lb, g, t), (br, *_) in zip(cand_gr_priv, base_gr_priv)
+    leaked = [(g, t) for (r, _, lb, _pl, g, t), (br, *_) in zip(cand_gr_priv, base_gr_priv)
               if lb == 1 and r and not br]
-    already = sum(1 for (r, _, lb, g, t), (br, *_) in zip(cand_gr_priv, base_gr_priv)
+    already = sum(1 for (r, _, lb, _pl, g, t), (br, *_) in zip(cand_gr_priv, base_gr_priv)
                   if lb == 1 and r and br)
 
     gates = [

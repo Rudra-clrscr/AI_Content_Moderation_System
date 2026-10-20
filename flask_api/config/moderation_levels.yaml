@@ -42,6 +42,68 @@ levels:
       Only what is clearly offensive or fraudulent is refused. Strong, unhappy and blunt
       language is published. For private or low-visibility surfaces.
 
+  # ---- 10-level temperature / heat bar levels (values 0.1 to 1.0, strictly cumulative) ----
+  level_1:
+    allow_max: 0.10
+    reject_min: 0.10
+    description: >-
+      Level 1 (0.10) — Ultra Strict (Ice Cold). Zero tolerance. Refuses everything blocked in
+      Levels 2–10 PLUS any negative commercial friction, tone, or delayed delivery complaints.
+  level_2:
+    allow_max: 0.20
+    reject_min: 0.20
+    description: >-
+      Level 2 (0.20) — Very Strict. Refuses everything blocked in Levels 3–10 PLUS minor commercial
+      dissatisfaction, supplier disputes, and heated pricing remarks.
+  level_3:
+    allow_max: 0.30
+    reject_min: 0.30
+    description: >-
+      Level 3 (0.30) — Strict. Refuses everything blocked in Levels 4–10 PLUS customer support
+      outcries, emotional venting, and public callouts of vendors.
+  level_4:
+    allow_max: 0.40
+    reject_min: 0.40
+    description: >-
+      Level 4 (0.40) — Firm. Refuses everything blocked in Levels 5–10 PLUS unstructured grievances,
+      hostile venting, and aggressive haggling.
+  level_5:
+    allow_max: 0.50
+    reject_min: 0.50
+    description: >-
+      Level 5 (0.50) — Balanced (Baseline Standard). Refuses everything blocked in Levels 6–10
+      PLUS targeted abuse/insults, disguised scams, and suspicious off-platform payment schemes.
+  level_6:
+    allow_max: 0.60
+    reject_min: 0.60
+    description: >-
+      Level 6 (0.60) — Moderate. Refuses everything blocked in Levels 7–10 PLUS direct harassment,
+      counterfeit buzzwords (7A, first copy), and advance-fee schemes.
+  level_7:
+    allow_max: 0.70
+    reject_min: 0.70
+    description: >-
+      Level 7 (0.70) — Relaxed. Refuses everything blocked in Levels 8–10 PLUS explicit insults
+      aimed at named individuals or firms, and high-confidence scams.
+  level_8:
+    allow_max: 0.80
+    reject_min: 0.80
+    description: >-
+      Level 8 (0.80) — Lenient. Refuses everything blocked in Level 9 PLUS overt fraud, lottery scams,
+      advance-fee schemes, and blatant harassment.
+  level_9:
+    allow_max: 0.90
+    reject_min: 0.90
+    description: >-
+      Level 9 (0.90) — Very Lenient. Refuses confirmed financial fraud, extortion, explicit illegal trade,
+      overt hate speech, and direct violent threats.
+  level_10:
+    allow_max: 1.00
+    reject_min: 1.00
+    description: >-
+      Level 10 (1.00) — Max Permissive (Max Heat). Allows practically all text through the AI model;
+      only hard-blocked Layer 1 gate rules (illegal contraband, malicious URLs, slurs) trigger refusal.
+
 # No `level` here on purpose: an unconfigured feature uses `thresholds:` from settings.yaml,
 # which is what shipped before this file existed. Set a level here to change every surface at
 # once, or set them per feature below.
