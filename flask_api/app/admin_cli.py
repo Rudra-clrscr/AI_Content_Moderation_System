@@ -23,7 +23,7 @@ from app.admin_store import AdminStore
 
 
 def _password(email: str) -> str:
-    pw = os.environ.get("ADMIN_INITIAL_PASSWORD") or ""
+    pw = os.environ.get("ADMIN_INITIAL_PASSWORD") or os.environ.get("ADMIN_PASSWORD") or ""
     if not pw:
         pw = getpass.getpass("New password: ")
         if pw != getpass.getpass("Type it again: "):
@@ -39,7 +39,7 @@ def main(argv=None) -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("create-admin", "set-password"):
         s = sub.add_parser(name)
-        s.add_argument("--email", default=os.environ.get("ADMIN_EMAIL", ""))
+        s.add_argument("--email", default=os.environ.get("ADMIN_EMAIL") or os.environ.get("Admin_Email", ""))
     sub.add_parser("list")
     args = p.parse_args(argv)
     store = AdminStore(default_db_path())
