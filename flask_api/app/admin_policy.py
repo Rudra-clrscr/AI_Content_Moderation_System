@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -239,6 +240,31 @@ def upsert_label(name: str):
     doc = _read(policy)
     doc.setdefault("labels", {})
     existed = key in doc["labels"]
+
+    # Refusing and allowing the same sentence are both coherent policies, and only the admin
+    # knows which they meant - so this stops and asks instead of letting write order decide.
+    resolve = str(body.get("resolve", "")).strip().lower() or None
+    conflicts = find_conflicts(doc, key, entry["prompts"], entry["unsafe"])
+    if conflicts and resolve not in ("refuse", "allow"):
+        return _err(409, "policy_conflict",
+                    "This wording is already used by a rule with the opposite verdict. "
+                    "Choose which one should stand.",
+                    conflicts=conflicts,
+                    this_verdict="refuse" if entry["unsafe"] else "allow")
+    if conflicts:
+        if resolve == ("refuse" if entry["unsafe"] else "allow"):
+            _resolve_conflicts(doc, conflicts, keep=resolve)
+        else:
+            # The existing rule wins, so the clashing phrasings are dropped from THIS one.
+            entry["prompts"] = [p for p in entry["prompts"]
+                                if not any(_norm_phrase(p) == _norm_phrase(c["phrasing"])
+                                           for c in conflicts)]
+            if not entry["prompts"]:
+                return _err(409, "policy_conflict",
+                            "Every wording in this rule is already used by a rule with the "
+                            "opposite verdict, so keeping those leaves this rule with nothing.",
+                            conflicts=conflicts)
+
     doc["labels"][key] = entry
     ok, msg = _apply(policy, doc, model_dir)
     if not ok:
@@ -275,8 +301,73 @@ def delete_label(name: str):
     return jsonify({"status": "deleted", "label": key})
 
 
+def _norm_phrase(s: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", str(s).lower())).strip()
+
+
+def find_conflicts(doc: dict, label: str, prompts: list[str], unsafe: bool) -> list[dict]:
+    """Phrasings that would mean REFUSE in one rule and ALLOW in another.
+
+    This is reachable in normal use and silent when it happens. An admin writes an allowing
+    rule "a photo of rainbow", then uploads a rainbow photograph, describes it the same way
+    and marks it refuse - and the identical sentence now lives in a refusing rule and an
+    allowing rule at once. Both score the same picture, the softmax splits between them, and
+    which one wins depends on the other labels in the file rather than on anything anyone
+    decided. The admin sees a rainbow refused and no reason why.
+
+    The clash is not resolvable by the system: refusing and allowing the same thing are both
+    coherent policies and only the admin knows which they meant. So this reports it and the
+    caller asks, rather than picking by write order - which is what happened before, and
+    picked whichever rule was edited second.
+
+    Comparison is on alphanumerics and single spaces, so "A photo of a Rainbow." and
+    "a photo of a rainbow" count as the same sentence. Near-duplicates that differ in wording
+    are left alone: catching those needs a similarity threshold, and a false alarm here blocks
+    a legitimate edit.
+    """
+    want = {_norm_phrase(p) for p in prompts if _norm_phrase(p)}
+    if not want:
+        return []
+    out = []
+    for other, entry in (doc.get("labels") or {}).items():
+        if other == label or not isinstance(entry, dict):
+            continue
+        if bool(entry.get("unsafe", True)) == bool(unsafe):
+            continue
+        for p in (entry.get("prompts") or []):
+            if _norm_phrase(p) in want:
+                out.append({
+                    "phrasing": p, "other_label": other,
+                    "other_verdict": "refuse" if entry.get("unsafe", True) else "allow",
+                    "this_verdict": "refuse" if unsafe else "allow",
+                })
+    return out
+
+
+def _resolve_conflicts(doc: dict, conflicts: list[dict], keep: str) -> None:
+    """Apply the admin's choice by removing the losing copy of the phrasing.
+
+    `keep` is the verdict that survives. The phrasing is dropped from every rule holding the
+    other verdict - not the rule itself, which may carry other phrasings that are still wanted.
+    A rule left with no phrasings at all is removed, because a rule that matches nothing is a
+    row in the policy file pretending to be a decision.
+    """
+    for c in conflicts:
+        if c["other_verdict"] == keep:
+            continue
+        entry = (doc.get("labels") or {}).get(c["other_label"])
+        if not isinstance(entry, dict):
+            continue
+        entry["prompts"] = [p for p in (entry.get("prompts") or [])
+                            if _norm_phrase(p) != _norm_phrase(c["phrasing"])]
+        if not entry["prompts"]:
+            doc["labels"].pop(c["other_label"], None)
+            log.info("policy: rule %r removed, its only phrasing lost the conflict",
+                     c["other_label"])
+
+
 def add_phrasing(label: str, phrasing: str, unsafe: bool = True,
-                 category: str | None = None) -> dict:
+                 category: str | None = None, resolve: str | None = None) -> dict:
     """Add one phrasing to a policy rule, creating the rule if it does not exist yet.
 
     Called when an admin uploads a picture and says what it is. That sentence is worth more
@@ -307,6 +398,18 @@ def add_phrasing(label: str, phrasing: str, unsafe: bool = True,
     if len(prompts) >= MAX_PROMPTS:
         return {"added": False, "reason": f"rule already has {MAX_PROMPTS} phrasings",
                 "label": key}
+    conflicts = find_conflicts(doc, key, [phrasing], unsafe)
+    if conflicts and resolve not in ("refuse", "allow"):
+        return {"added": False, "reason": "conflict", "label": key, "conflicts": conflicts}
+    if conflicts:
+        if resolve == ("refuse" if unsafe else "allow"):
+            _resolve_conflicts(doc, conflicts, keep=resolve)
+        else:
+            # The admin chose the OTHER verdict, so this phrasing is simply not added and the
+            # existing rule stands. Reported as resolved rather than failed: the decision was
+            # made and acted on, it just went the other way.
+            return {"added": False, "reason": "resolved_in_favour_of_existing",
+                    "label": key, "kept": resolve, "conflicts": conflicts}
     prompts.append(phrasing)
     entry["prompts"] = prompts
     if not existed:
@@ -317,6 +420,48 @@ def add_phrasing(label: str, phrasing: str, unsafe: bool = True,
     ok, msg = _apply(policy, doc, model_dir)
     return {"added": bool(ok), "label": key, "created_rule": not existed,
             "phrasings": len(prompts), "error": None if ok else msg}
+
+
+def _rows_by_id(store, ids: list[int]) -> list[dict]:
+    """The stored rows for these ids, with their embeddings."""
+    want = set(ids)
+    return [r for r in store.all_embeddings(limit=20000) if r["id"] in want]
+
+
+def _written_verdict(visual, img) -> tuple[str | None, str | None, float | None]:
+    """What the WRITTEN rules say about this picture: ("refuse"|"allow", label, score).
+
+    Scored through the same softmax the live check uses, so the number is the one that would
+    appear in a moderation result rather than a raw similarity. Returns (None, None, None)
+    when nothing is confident enough to be worth contradicting - see the caller for why a
+    weak match must not raise a warning.
+    """
+    try:
+        import numpy as np
+        v = np.frombuffer(img["embedding"], dtype=np.float32)
+        if v.size == 0 or visual._prompt_embeds is None:
+            return None, None, None
+        v = v / max(float(np.linalg.norm(v)), 1e-12)
+        if v.shape[0] != visual._prompt_embeds.shape[1]:
+            return None, None, None
+        sims = visual._prompt_embeds @ v
+        labels = np.asarray(visual._labels)
+        names = sorted(set(visual._labels))
+        best = np.array([sims[labels == n].max() for n in names], dtype=np.float32)
+        z = best * getattr(visual, "_scale", 100.0) + getattr(visual, "_bias", 0.0)
+        p = np.exp(z - z.max()); p = p / p.sum()
+        top = names[int(p.argmax())]
+        score = float(p.max())
+        unsafe = top in visual._categories
+        bar = visual._thresholds.get(top, visual.config.reject_min)
+        if unsafe and score >= bar:
+            return "block", top, score
+        if not unsafe and score >= bar:
+            return "allow", top, score
+        return None, None, None
+    except Exception:
+        log.exception("could not read the written verdict for image %s", img.get("id"))
+        return None, None, None
 
 
 def _export_exemplars(model_dir: Path) -> dict:
@@ -402,11 +547,40 @@ def set_exemplars():
         return _err(400, "bad_mode", "mode must be 'block', 'allow' or 'clear'.")
 
     store = current_app.extensions["system_store"]
+    resolve = str(body.get("resolve", "")).strip().lower() or None
+
+    # THE OTHER DIRECTION OF THE SAME CLASH. A picture marked "refuse things like this" whose
+    # written rules already publish it - or the reverse - is the same contradiction as two
+    # rules disagreeing, arriving through the other door. It is quieter and worse: the
+    # exemplar is checked first, so it wins, and the admin sees their own allowing rule being
+    # ignored with nothing in the policy file to explain it.
+    #
+    # Only flagged when the written verdict is CONFIDENT. Every picture matches some label
+    # weakly, and warning on a 0.3 means warning on everything, which trains people to click
+    # past the one that mattered.
+    clashes = []
+    if mode in ("block", "allow") and resolve is None:
+        visual = current_app.extensions["moderation"].settings.visual
+        if visual.ready:
+            for img in _rows_by_id(store, ids):
+                verdict, label, score = _written_verdict(visual, img)
+                if verdict and verdict != mode and score is not None:
+                    clashes.append({"id": img["id"], "filename": img.get("filename"),
+                                    "written_rule": label, "written_verdict": verdict,
+                                    "score": round(float(score), 4), "you_chose": mode})
+    if clashes:
+        return _err(409, "exemplar_conflict",
+                    "The written rules already decide these pictures the other way. Marking "
+                    "them here overrides that silently, because exemplars are checked first. "
+                    "Choose which should stand.",
+                    conflicts=clashes)
+
     changed = store.set_exemplars(ids, is_exemplar=(mode != "clear"),
                                   action=None if mode == "clear" else mode)
     _, _, model_dir = _paths()
     state = _export_exemplars(model_dir)
-    return jsonify({"status": "ok", "mode": mode, "changed": changed, **state})
+    return jsonify({"status": "ok", "mode": mode, "changed": changed,
+                    "resolved": resolve, **state})
 
 
 @admin_policy_bp.post("/v1/admin/policy/preview")

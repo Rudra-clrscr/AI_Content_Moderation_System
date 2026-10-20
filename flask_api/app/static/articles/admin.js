@@ -99,7 +99,16 @@
     if (res.status === 401 && !url.includes("/auth/login") && !url.includes("/password/")) {
       throw new SessionExpired("Your session has ended. Please log in again.");
     }
-    throw new Error(data.message || (data.error && data.error.message) || `Something went wrong (${res.status}).`);
+    // The error carries the server's code and body, not just a sentence. Some failures are
+    // decisions for the admin rather than things that went wrong - a policy conflict needs
+    // the clashing rules so the caller can ask which one stands - and a bare message string
+    // throws that away, leaving the UI able only to print the text and give up.
+    const err = new Error(data.message || (data.error && data.error.message)
+                          || `Something went wrong (${res.status}).`);
+    err.code = data.error || (data.error && data.error.code) || `http_${res.status}`;
+    err.status = res.status;
+    err.detail = data;
+    throw err;
   }
 
   function mount(root) {
@@ -475,6 +484,50 @@
         }
       }
 
+      /** Ask which verdict stands when the same wording is in two rules that disagree.
+       *
+       *  Deliberately a question with no default and no "apply anyway". Refusing and allowing
+       *  the same thing are both coherent policies; the system cannot know which was meant,
+       *  and guessing is what produced the bug - an allowing rainbow rule and a refusing one,
+       *  with write order quietly deciding. Resolving one way REMOVES the wording from the
+       *  rules holding the other verdict, so the consequence is spelled out before the click.
+       */
+      function conflictModal(err, onResolve) {
+        const rows = (err.conflicts || []);
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        back.innerHTML = `
+          <div class="modal img-modal-wide" role="alertdialog" aria-modal="true" aria-labelledby="cf-title">
+            <div class="modal-head"><h2 id="cf-title">These rules contradict each other</h2>
+              <button class="btn-link" id="cf-x" aria-label="Close" type="button">✕</button></div>
+            <div class="modal-body">
+              <p class="hint" style="margin-top:0;">${esc(err.message || "")}</p>
+              <table class="pol-try-table"><tbody>
+                ${rows.map((c) => `<tr>
+                  <td>“${esc(c.phrasing || c.filename || "")}”</td>
+                  <td><span class="pol-tag ${c.other_verdict === "allow" ? "allow" : "block"}">
+                    ${esc(c.other_verdict || c.written_verdict || "")} in ${esc(c.other_label || c.written_rule || "")}</span></td>
+                  <td><span class="pol-tag ${(c.this_verdict || c.you_chose) === "allow" ? "allow" : "block"}">
+                    you chose ${esc(c.this_verdict || c.you_chose || "")}</span></td>
+                </tr>`).join("")}
+              </tbody></table>
+              <p class="hint">Whichever you keep, the wording is removed from the rules holding
+                the other verdict. A rule left with no wordings at all is deleted.</p>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-outline" id="cf-cancel" type="button">Leave both as they are</button>
+              <button class="btn btn-outline adm-danger" id="cf-refuse" type="button">Refuse these</button>
+              <button class="btn btn-primary" id="cf-allow" type="button" style="background:#15803d; border-color:#15803d;">Allow these</button>
+            </div>
+          </div>`;
+        document.body.appendChild(back);
+        const close = () => back.remove();
+        back.querySelector("#cf-x").addEventListener("click", close);
+        back.querySelector("#cf-cancel").addEventListener("click", close);
+        back.querySelector("#cf-refuse").addEventListener("click", () => { close(); onResolve("refuse"); });
+        back.querySelector("#cf-allow").addEventListener("click", () => { close(); onResolve("allow"); });
+      }
+
       function ruleModal(name) {
         const e = (name && labels[name]) || { unsafe: true, prompts: [], category: "" };
         const back = document.createElement("div");
@@ -594,11 +647,22 @@
           const entry = { unsafe: q("pol-unsafe").value === "1", prompts,
                           category: q("pol-cat").value.trim() || nm,
                           reject_min: q("pol-min").value.trim() };
-          try {
-            await call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(nm)}`, entry);
+          const apply = async (resolve) => {
+            await call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(nm)}`,
+                       resolve ? { ...entry, resolve } : entry);
             close();
             await load(`“${nm}” applied. The model is using it now.`, true);
+          };
+          try {
+            await apply();
           } catch (err) {
+            if (err.code === "policy_conflict" && err.detail) {
+              conflictModal(err.detail, async (verdict) => {
+                try { await apply(verdict); }
+                catch (e2) { await load(e2.message, false); }
+              });
+              return;
+            }
             foot.innerHTML = `<button class="btn btn-outline" id="pol-cancel2" type="button">Cancel</button>
               <button class="btn btn-primary" id="pol-save2" type="button">Apply rule</button>`;
             m.className = "adm-msg err"; m.textContent = err.message;
@@ -917,14 +981,28 @@
             const mode = el.dataset.teach;
             const row = el.closest(".img-card-teach");
             row.innerHTML = `<span class="teach-lbl"><span class="spinner dark"></span> Applying…</span>`;
-            try {
-              const res = await call("PUT", "/v1/admin/policy/exemplars", { ids: [id], mode });
+            const apply = async (resolve) => {
+              const res = await call("PUT", "/v1/admin/policy/exemplars",
+                                     resolve ? { ids: [id], mode, resolve } : { ids: [id], mode });
               say(mode === "clear"
                 ? `Stopped using that picture as a live example. ${res.exemplars} still in force.`
                 : `Done — pictures that look like that one will now be ${mode === "block" ? "refused" : "allowed"}. `
                   + `${res.refusing} refusing, ${res.allowing} allowing.`, true);
               loadImages();
+            };
+            try {
+              await apply();
             } catch (err) {
+              // The written rules already decide these pictures the other way. Exemplars are
+              // checked first, so going ahead would override the admin's own rule with
+              // nothing in the policy file to show for it - worth a question, not a warning.
+              if (err.code === "exemplar_conflict" && err.detail) {
+                conflictModal(err.detail, async (verdict) => {
+                  try { await apply(verdict); }
+                  catch (e2) { say(e2.message); loadImages(); }
+                });
+                return;
+              }
               say(err.message);
               loadImages();
             }
