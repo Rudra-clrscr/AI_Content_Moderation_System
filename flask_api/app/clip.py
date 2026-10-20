@@ -124,6 +124,12 @@ class VisualConfig:
     # 300 frames from a handful of videos is too little variety to generalise from - so the
     # two are kept together rather than one replacing the other.
     probe_reject_min: float = 0.70
+    # How close an upload must be to a picture an admin marked "refuse things like this".
+    # Set from this corpus: within a coherent category image-to-image similarity averages
+    # 0.58-0.66 and across categories 0.42-0.44, so 0.60 sits in the gap. It is NOT comparable
+    # to reject_min above - that one scores against text, this against pictures, and the two
+    # live on different scales (0.277 vs 0.663 for the same wedding photograph).
+    exemplar_reject_min: float = 0.60
     max_pixels: int = 40_000_000
     intra_op_threads: int = 4
     inter_op_threads: int = 1
@@ -152,6 +158,12 @@ class VisualResult:
     """
 
     checked: bool = False
+    # How close this picture came to one an admin marked "refuse/allow things like this".
+    # Scored against pictures, not phrasings, so not comparable to `score` - see
+    # VisualCheck.reload_exemplars for why the two cannot share a scale.
+    exemplar_block: float = 0.0
+    exemplar_allow: float = 0.0
+    exemplar_match: dict | None = None     # the refusing exemplar, for the audit trail
     label: str = ""                       # best-matching label, safe or unsafe
     category: str = ""                    # policy category for an unsafe label
     score: float = 0.0                    # probability of `label`
@@ -204,6 +216,7 @@ class VisualCheck:
         self._prompt_embeds = None            # (n_prompts, dim), L2-normalised
         self._image_output = "image_embeds"   # which vision output carries the embedding
         self._probe = None                    # (W, b, classes) from probe.npz, when present
+        self._exemplars = None                # (embeds, actions, categories, ids) when present
         self._loaded = False
         self._provider = ""                   # the execution provider actually in use
         self._unavailable = ""                # why it is off, for /ready
@@ -339,6 +352,76 @@ class VisualCheck:
                 self._thresholds.update({str(k): float(v) for k, v in threshold_overrides.items()})
                 log.info("VisualCheck updated thresholds: %s", threshold_overrides)
             return True
+
+    def reload_exemplars(self) -> bool:
+        """Load models/img_v1/exemplars.npz: pictures an admin pointed at directly.
+
+        WHY THIS IS A THIRD CHANNEL AND NOT MORE PROMPTS. CLIP puts images and text in one
+        space, so an exemplar's vector could in principle sit in prompts.npz beside the
+        phrasings. It must not. Measured on this corpus, a wedding photograph scores 0.277
+        against "a photo of a wedding ceremony" and 0.663 against another wedding photograph -
+        the modality gap - so a single exemplar dropped into that softmax would outscore every
+        phrasing in the file and decide almost everything on its own.
+
+        Scored separately, against its own bar, it composes instead of dominating. Same reason
+        the probe is separate.
+
+        WHAT IT IS FOR. An admin who uploads a picture and says "refuse things like this" is
+        not writing policy and should not have to. The exemplar takes effect on the next
+        upload - no retraining, no dataset - and changing their mind is deleting a row rather
+        than fitting a model again.
+        """
+        with self._lock:
+            import numpy as np
+            p = self.model_dir / "exemplars.npz"
+            if not p.exists():
+                self._exemplars = None
+                return True
+            try:
+                d = np.load(p, allow_pickle=False)
+                E = d["embeds"].astype(np.float32)
+                if E.size == 0:
+                    self._exemplars = None
+                    return True
+                E = E / np.maximum(np.linalg.norm(E, axis=1, keepdims=True), 1e-12)
+                self._exemplars = (E, [str(x) for x in d["actions"]],
+                                   [str(x) for x in d["categories"]],
+                                   [int(x) for x in d["ids"]])
+            except Exception:
+                log.exception("VisualCheck failed to load %s - exemplars left as they were", p)
+                return False
+            n_block = sum(1 for a in self._exemplars[1] if a == "block")
+            log.info("VisualCheck loaded %d exemplars (%d refuse, %d allow)",
+                     len(self._exemplars[1]), n_block, len(self._exemplars[1]) - n_block)
+            return True
+
+    def match_exemplars(self, embed) -> tuple[float, float, dict | None]:
+        """(best refuse similarity, best allow similarity, the refusing exemplar).
+
+        The allow side is a veto, not a score: an admin who marked a picture "allow things
+        like this" is overruling the refuse side for things that look like it, which is the
+        only way "I changed my mind about this one" can work without deleting the rule that
+        refuses the rest.
+        """
+        ex = getattr(self, "_exemplars", None)
+        if ex is None or embed is None:
+            return 0.0, 0.0, None
+        import numpy as np
+        E, actions, cats, ids = ex
+        v = np.asarray(embed, dtype=np.float32).reshape(-1)
+        v = v / max(float(np.linalg.norm(v)), 1e-12)
+        if v.shape[0] != E.shape[1]:
+            return 0.0, 0.0, None
+        sims = E @ v
+        best_block, best_allow, who = 0.0, 0.0, None
+        for i, a in enumerate(actions):
+            s = float(sims[i])
+            if a == "block":
+                if s > best_block:
+                    best_block, who = s, {"id": ids[i], "category": cats[i], "score": round(s, 4)}
+            elif s > best_allow:
+                best_allow = s
+        return best_block, best_allow, who
 
     def reload_prompts(self) -> bool:
         """Re-read prompts.npz after the policy has been rebuilt, without a restart.
@@ -500,9 +583,14 @@ class VisualCheck:
                                 key=lambda c: probe_scores[c], default="")
                 if probe_top in self._categories:
                     label, category = probe_top, self._categories[probe_top]
+            # The same embedding the prompts were scored against, reused: an exemplar match is
+            # a dot product over a handful of vectors, so this channel costs nothing measurable.
+            ex_block, ex_allow, ex_match = self.match_exemplars(embed[0])
             return VisualResult(checked=True, label=label, category=category,
                                 score=scores[top], unsafe_score=unsafe_total, scores=scores,
-                                probe_scores=probe_scores, probe_unsafe=probe_unsafe)
+                                probe_scores=probe_scores, probe_unsafe=probe_unsafe,
+                                exemplar_block=ex_block, exemplar_allow=ex_allow,
+                                exemplar_match=ex_match)
         except Exception:
             # Present but broken. Distinct from "off", because the caller should refuse the
             # upload rather than publish a picture nothing looked at.
@@ -518,6 +606,16 @@ class VisualCheck:
         """
         if not result.checked:
             return False
+        # EXEMPLARS FIRST, and the allow side wins ties. An admin who pointed at a picture and
+        # said "allow things like this" is overruling a rule deliberately and for a specific
+        # look, which is the whole mechanism for changing their mind about one kind of picture
+        # without deleting the rule that refuses the rest. Checked before everything else so
+        # that override actually overrides.
+        if result.exemplar_allow >= self.config.exemplar_reject_min and \
+                result.exemplar_allow >= result.exemplar_block:
+            return False
+        if result.exemplar_block >= self.config.exemplar_reject_min:
+            return True
         if result.probe_scores and result.probe_unsafe >= self.config.probe_reject_min:
             return True
         # Every unsafe label judged at its own bar, not just the winner: the scores are not

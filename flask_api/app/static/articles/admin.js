@@ -880,10 +880,56 @@
                   ${isAllow ? "Switch to BLOCK" : "Switch to ALLOW"}
                 </button>
               </div>
+              <!-- TEACH BY EXAMPLE. Switching the label above decides what the PROBE is
+                   trained on next time somebody retrains. This decides what happens to the
+                   next upload, now: the live check compares every picture against the ones
+                   marked here. The two are separate on purpose and the wording says which is
+                   which, because "block" meaning two different things one line apart is how
+                   an admin ends up deselecting wedding photos and wondering why weddings are
+                   still refused. -->
+              <div class="img-card-teach ${img.is_exemplar ? "on" : ""}">
+                <span class="teach-lbl">${img.is_exemplar
+                    ? `Live rule: <b>${isAllow ? "allowing" : "refusing"}</b> lookalikes`
+                    : "Use as a live example:"}</span>
+                <span class="teach-acts">
+                  ${img.is_exemplar
+                    ? `<button class="btn-teach clear" type="button" data-teach="clear" data-id="${img.id}">Stop</button>`
+                    : `<button class="btn-teach block" type="button" data-teach="block" data-id="${img.id}"
+                          title="Refuse pictures that look like this, from the next upload">Refuse like this</button>
+                       <button class="btn-teach allow" type="button" data-teach="allow" data-id="${img.id}"
+                          title="Allow pictures that look like this, overriding other rules">Allow like this</button>`}
+                </span>
+              </div>
             </div>`;
         });
         html += `</div>`;
         grid.innerHTML = html;
+
+        // Teaching by example applies IMMEDIATELY rather than joining pendingChanges, and the
+        // difference is deliberate. The other controls on a card describe what the next
+        // retrain should learn, so batching them is right. This one changes what the live
+        // check does to the very next upload, and an admin who clicks "Refuse like this" and
+        // then navigates away expecting it to be in force should be right.
+        grid.querySelectorAll(".btn-teach").forEach((btn) => {
+          btn.addEventListener("click", async (e) => {
+            const el = e.target.closest(".btn-teach");
+            const id = parseInt(el.dataset.id, 10);
+            const mode = el.dataset.teach;
+            const row = el.closest(".img-card-teach");
+            row.innerHTML = `<span class="teach-lbl"><span class="spinner dark"></span> Applying…</span>`;
+            try {
+              const res = await call("PUT", "/v1/admin/policy/exemplars", { ids: [id], mode });
+              say(mode === "clear"
+                ? `Stopped using that picture as a live example. ${res.exemplars} still in force.`
+                : `Done — pictures that look like that one will now be ${mode === "block" ? "refused" : "allowed"}. `
+                  + `${res.refusing} refusing, ${res.allowing} allowing.`, true);
+              loadImages();
+            } catch (err) {
+              say(err.message);
+              loadImages();
+            }
+          });
+        });
 
         // Wire card events
         grid.querySelectorAll(".img-check-input").forEach((chk) => {

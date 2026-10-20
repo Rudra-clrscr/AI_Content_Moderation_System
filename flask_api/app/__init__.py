@@ -102,6 +102,11 @@ def create_app(
     # Doing it here rather than on the first write is the difference between a default that
     # reflects what shipped and one that reflects whatever the first editor happened to save.
     snapshot_default_policy(settings)
+    # Exemplars live in a file beside prompts.npz, so the visual check picks them up without
+    # knowing the admin database exists. Loaded here because _load() is lazy and the first
+    # upload should not be the thing that discovers a missing file.
+    if hasattr(settings.visual, "reload_exemplars"):
+        settings.visual.reload_exemplars()
 
     active_mode = sys_store.get_setting("active_policy_mode", "standard")
     if active_mode == "child_products" and hasattr(settings.visual, "reload_probe"):

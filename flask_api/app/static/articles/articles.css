@@ -633,3 +633,24 @@ textarea.input { resize: vertical; min-height: 96px; }
 .pol-try-table td { padding: 5px 6px; border-bottom: 1px solid var(--line); }
 .pol-try-table td.rank { width: 26px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .pol-try-table tr:last-child td { border-bottom: 0; }
+
+/* ---------- Teach by example (image card footer) ---------- */
+/* Visually separated from the Allow/Block control above it because they act at different
+   times: that one queues what the PROBE learns on the next retrain, this one changes what the
+   live check does to the next upload. Same card, same words, different moment - so the row is
+   tinted and labelled rather than looking like one more toggle. */
+.img-card-teach { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  flex-wrap: wrap; padding: 7px 10px; border-top: 1px dashed var(--line);
+  background: #fbfcfe; font-size: 11px; }
+.img-card-teach.on { background: #fff7ed; border-top-color: #fdba74; }
+.teach-lbl { color: var(--muted); }
+.img-card-teach.on .teach-lbl { color: #9a3412; }
+.teach-acts { display: flex; gap: 5px; flex-wrap: wrap; }
+.btn-teach { border: 1px solid var(--line); background: #fff; border-radius: 6px;
+  padding: 3px 8px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.btn-teach.block { color: #b91c1c; border-color: #fecaca; }
+.btn-teach.block:hover { background: #fee2e2; }
+.btn-teach.allow { color: #15803d; border-color: #bbf7d0; }
+.btn-teach.allow:hover { background: #dcfce7; }
+.btn-teach.clear { color: #92400e; border-color: #fed7aa; }
+.btn-teach.clear:hover { background: #ffedd5; }

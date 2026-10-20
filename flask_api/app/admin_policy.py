@@ -275,6 +275,96 @@ def delete_label(name: str):
     return jsonify({"status": "deleted", "label": key})
 
 
+def _export_exemplars(model_dir: Path) -> dict:
+    """Write models/img_v1/exemplars.npz from the marked pictures, then reload it live.
+
+    A file rather than a database read inside app/clip.py, for the same reason prompts.npz is
+    a file: the serving layer owns the vision encoder and two npz files and knows nothing
+    about data/system.db, which belongs to the admin side. Keeping that line means the
+    moderation path has no dependency on the dashboard being installed, configured, or even
+    present.
+    """
+    store = current_app.extensions["system_store"]
+    rows = store.list_exemplars()
+    vecs, actions, cats, ids = [], [], [], []
+    for r in rows:
+        try:
+            v = np.frombuffer(r["embedding"], dtype=np.float32)
+        except Exception:
+            continue
+        if v.size == 0:
+            continue
+        vecs.append(v)
+        actions.append(str(r.get("action") or "block"))
+        cats.append(str(r.get("category") or ""))
+        ids.append(int(r["id"]))
+    out = model_dir / "exemplars.npz"
+    if vecs:
+        width = max(v.shape[0] for v in vecs)
+        keep = [i for i, v in enumerate(vecs) if v.shape[0] == width]
+        np.savez_compressed(
+            out, embeds=np.stack([vecs[i] for i in keep]).astype(np.float32),
+            actions=np.array([actions[i] for i in keep]),
+            categories=np.array([cats[i] for i in keep]),
+            ids=np.array([ids[i] for i in keep], dtype=np.int64))
+    else:
+        # No exemplars left is a legitimate state - the admin removed the last one - and it
+        # has to be written, not skipped, or the live check keeps matching against a file
+        # describing pictures nobody marked any more.
+        np.savez_compressed(out, embeds=np.zeros((0, 1), dtype=np.float32),
+                            actions=np.array([]), categories=np.array([]),
+                            ids=np.array([], dtype=np.int64))
+    ok = current_app.extensions["moderation"].settings.visual.reload_exemplars()
+    n_block = sum(1 for a in actions if a == "block")
+    return {"exemplars": len(ids), "refusing": n_block, "allowing": len(ids) - n_block,
+            "reloaded": bool(ok)}
+
+
+@admin_policy_bp.get("/v1/admin/policy/exemplars")
+def list_exemplars():
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    store = current_app.extensions["system_store"]
+    rows = [{k: v for k, v in r.items() if k != "embedding"} for r in store.list_exemplars()]
+    visual = current_app.extensions["moderation"].settings.visual
+    return jsonify({"exemplars": rows, "count": len(rows),
+                    "reject_min": visual.config.exemplar_reject_min})
+
+
+@admin_policy_bp.put("/v1/admin/policy/exemplars")
+def set_exemplars():
+    """Point at pictures: "refuse things like this", "allow things like this", or neither.
+
+    This is the half of policy an admin actually has. Writing phrasings is a skill; pointing
+    at a picture they just looked at is not, and it is how the request arrives - somebody
+    uploads an image and wants it refused, or changes their mind about one that is being
+    refused now. It takes effect on the next upload: no retraining, no dataset, and undoing it
+    is clearing the same flag.
+    """
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    body = request.get_json(silent=True) or {}
+    ids = body.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return _err(400, "missing_ids", "Give the image ids to mark.")
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return _err(400, "bad_ids", "Image ids must be numbers.")
+    mode = str(body.get("mode", "")).strip().lower()
+    if mode not in ("block", "allow", "clear"):
+        return _err(400, "bad_mode", "mode must be 'block', 'allow' or 'clear'.")
+
+    store = current_app.extensions["system_store"]
+    changed = store.set_exemplars(ids, is_exemplar=(mode != "clear"),
+                                  action=None if mode == "clear" else mode)
+    _, _, model_dir = _paths()
+    state = _export_exemplars(model_dir)
+    return jsonify({"status": "ok", "mode": mode, "changed": changed, **state})
+
+
 @admin_policy_bp.post("/v1/admin/policy/preview")
 def preview_label():
     """Score candidate phrasings against the stored images WITHOUT changing anything.
