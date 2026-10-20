@@ -476,10 +476,15 @@
         }
 
         const totalAll = categories.reduce((sum, c) => sum + (c.total_images || 0), 0);
-        $("cat-cnt-all").textContent = totalAll;
 
-        // Build HTML
-        let html = `<button class="cat-pill ${activeCat === "all" ? "active" : ""}" type="button" data-cat="all">All <span class="cnt">${totalAll}</span></button>`;
+        // Build HTML. The "All" count keeps its id here, and is NOT written separately before
+        // this line: the id exists only in the shell markup, and the innerHTML below replaces
+        // the shell's children. So the first render found #cat-cnt-all and every later one
+        // got null - and since this function re-renders itself from the pill click handler,
+        // `null.textContent = ...` threw before the re-render and before loadImages(). The
+        // handlers were attached and firing the whole time; the work just died on the first
+        // statement, which looks exactly like a button that does nothing.
+        let html = `<button class="cat-pill ${activeCat === "all" ? "active" : ""}" type="button" data-cat="all">All <span class="cnt" id="cat-cnt-all">${totalAll}</span></button>`;
         categories.forEach((cat) => {
           html += `<button class="cat-pill ${activeCat === cat.name ? "active" : ""}" type="button" data-cat="${esc(cat.name)}" title="${esc(cat.description || cat.display_name)}">
             ${esc(cat.display_name)} <span class="cnt">${cat.total_images || 0}</span></button>`;
