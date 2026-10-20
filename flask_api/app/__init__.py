@@ -93,9 +93,15 @@ def create_app(
 
     from app.system_store import SystemStore
     from app.admin_images import admin_images_bp
+    from app.admin_policy import admin_policy_bp, snapshot_default_policy
     sys_store = system_store or SystemStore()
     app.extensions["system_store"] = sys_store
     app.register_blueprint(admin_images_bp)
+    app.register_blueprint(admin_policy_bp)
+    # Take the pristine copy of the visual policy at startup, before any admin can edit it.
+    # Doing it here rather than on the first write is the difference between a default that
+    # reflects what shipped and one that reflects whatever the first editor happened to save.
+    snapshot_default_policy(settings)
 
     active_mode = sys_store.get_setting("active_policy_mode", "standard")
     if active_mode == "child_products" and hasattr(settings.visual, "reload_probe"):

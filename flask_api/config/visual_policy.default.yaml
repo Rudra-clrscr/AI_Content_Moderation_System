@@ -1,0 +1,484 @@
+# What the visual check looks for in an uploaded picture (app/clip.py).
+#
+# CLIP scores an image against written descriptions rather than against trained classes, so the
+# policy IS this file: add a label with a few phrasings and it is checked from the next restart,
+# with no retraining. The cost is that nothing here is learned from BONC's own pictures, so
+# every label is only as good as its wordings - measure a new one with
+# `python scripts/eval_clip_images.py` before trusting it.
+#
+# Each label carries several phrasings and takes the best-matching one, which is how zero-shot
+# CLIP is normally ensembled: one wording can miss a picture that another catches. Scores are a
+# softmax over every phrasing here, so the `safe` list is not decoration - it is what the unsafe
+# labels are judged against, and a thin one makes ordinary photographs look suspicious.
+
+version: 1
+
+# PER-LABEL THRESHOLDS. A label may set its own `reject_min`; without one it uses
+# media.visual.reject_min from settings.yaml. The scores are NOT comparable between labels -
+# measured medians on each label's own image set run from 0.57 (violence) to 0.97 (minors) -
+# so a single bar either lets the low scorers through untouched or refuses ordinary pictures
+# in order to catch them. Each bar below is set from where that label's own set actually sits.
+# Re-measure with scripts/eval_clip_images.py after changing any of them.
+
+# Phrasings are lower case and start "a photo of ..." where it reads naturally: that is the
+# shape of the captions CLIP was trained on, and it scores better than a bare noun.
+labels:
+  weapon:
+    unsafe: true
+    category: weapons
+    prompts:
+      - a photo of a handgun
+      - a photo of a pistol
+      - a person holding a gun
+      - a photo of a rifle
+      - a photo of a knife held in a hand
+      - a photo of a combat knife or dagger
+      - a photo of a firearm for sale
+
+  gore:
+    unsafe: true
+    category: graphic_violence
+    prompts:
+      - a photo of a bloody injury
+      - a photo of a wound with blood
+      - a graphic photo of blood on a person
+      - a photo of a surgical wound
+      - a photo of a badly injured person
+      - a close-up photo of a cut on skin
+
+  sexual:
+    unsafe: true
+    category: sexual_content
+    reject_min: 0.80   # nudity scores p25 0.81 / p50 0.93; 0.80 keeps the whole distribution
+    # Recall 95%, on 37 supplied artistic nudes - the first positive samples this label ever
+    # had. An earlier version of this comment said "RECALL UNMEASURED"; that stopped being
+    # true when those arrived, and the threshold on the line above is derived from them.
+    #
+    # 37 images is thin and they are one genre. images/body_parts measures the other side -
+    # this label does not fire on athletes, physiotherapy or anatomy, which is what would hurt
+    # an ordinary BONC member. docs/measuring_the_sexual_label.md sets out the route to a
+    # broader figure: a reference classifier run over BONC's own uploads, needing no collected
+    # dataset at all.
+    prompts:
+      - a photo of a nude person
+      - a pornographic photo
+      - a sexually explicit photo
+      - a photo of a person posing in underwear
+
+  unrest:
+    unsafe: true
+    category: violence_or_unrest
+    reject_min: 0.70   # unrest p25 0.62 / p50 0.89; 0.90 was cutting through the middle of its own set
+    # The motive is not "no politics" - a post about a tariff or a transport strike's effect on
+    # deliveries is ordinary B2B talk. It is that violence and anger should not be PROMOTED on
+    # a networking platform, so what this looks for is confrontation: riots, baton charges,
+    # burning effigies, angry crowds. A banner on its own is not enough, which is why the safe
+    # list below carries as many ordinary crowds as this carries angry ones.
+    prompts:
+      - a photo of a riot in the street
+      - a photo of police clashing with demonstrators
+      - a photo of an angry crowd shouting and raising fists
+      - a photo of protesters burning an effigy
+      - a photo of a burning vehicle during a protest
+      - a photo of people fighting in the street
+      - a photo of a violent confrontation between people
+      - a photo of a crowd throwing stones
+      - a photo of a police baton charge on a crowd
+      - a photo of a street barricade with protesters
+
+  revealing:
+    unsafe: true
+    category: revealing_clothing
+    reject_min: 0.80   # revealing p25 0.31 / p50 0.80; below 0.80 it starts taking swimwear and athletes
+    # NOT the same as `sexual`, which is nudity and explicit material. This is clothed but
+    # posed for display - glamour and modelling shots that have no place on a trade platform.
+    #
+    # It collides head-on with the safe prompts that fixed the body-part false positives:
+    # a swimmer, an athlete and someone in sportswear are all "wearing little". The line drawn
+    # here is the SCENE, not the amount of skin - a competition, a pool and a gym are activity;
+    # a model posing to camera is display. That is the same rule that has already cost recall
+    # three times in this file, applied before rather than after.
+    prompts:
+      - a glamour photo of a model posing in revealing clothes
+      - a photo of a woman posing in lingerie for the camera
+      - a studio photo of a model in a low cut outfit
+      - a posed photo of someone showing off their body
+      - a bikini model posing for a photoshoot
+      - a fashion model on a runway in a revealing outfit
+      - a seductive pose for a photoshoot
+
+  manhandling:
+    unsafe: true
+    category: violence_or_unrest
+    reject_min: 0.60   # RE-DERIVED. The old note here read "violence p50 0.57, threats p50
+                       # 0.69", from two sets that were audited picture by picture and found
+                       # to be mostly neither - see docs/image_sets.md. On what is left,
+                       # `unrest_real` (84 supplied press photographs) sits at 99% caught for
+                       # EVERY bar from 0.45 to 0.70, so this bar does not trade recall at all;
+                       # it trades false positives, and 0.60 is where `allow` drops from 7 to 5.
+                       #
+                       # Still the loosest label in the file. It catches 76 of the 293 refusals
+                       # on the weapons set, whose pictures it does not describe, so a figure
+                       # credited to `weapon` is partly this.
+    # Force used on a person, short of the open confrontation `unrest` describes. Same policy
+    # category on purpose: to the author it is the same message, and to the Data team the same
+    # bucket. Overlaps with `unrest` by design - a baton charge is both.
+    prompts:
+      #
+      # Narrowed after measuring: "a person being restrained or pinned down" matched
+      # physiotherapy and massage and doubled the body-part false positives, 5 to 10 in 105.
+      # Hands on a patient and hands holding someone down look alike; what separates them is
+      # the struggle, so each prompt now names it.
+      - a photo of a person being grabbed roughly by the arm
+      - a photo of someone being dragged away against their will
+      - a photo of security guards restraining a struggling person
+      - a photo of one person shoving another in anger
+      - a photo of a struggling person held back by several people
+      - a photo of police forcibly detaining someone
+      # Fighting and menace were being caught only incidentally, by prompts meant for crowds
+      # and for restraint - 41% and 44% of their own image sets. Neither describes two people
+      # throwing punches, or a weapon aimed at the camera, so neither scored them well.
+      - a photo of two people fighting with fists
+      - a photo of a street brawl between men
+      - a photo of someone punching another person in the face
+      - a photo of a person kicking someone on the ground
+      - a photo of a person aiming a gun at the camera
+      - a photo of someone threatening another with a knife
+      - a photo of a man raising a fist to threaten
+      - a photo of an angry man shouting into someone's face
+
+  romantic:
+    unsafe: true
+    category: romantic_content
+    reject_min: 0.75   # romance p25 0.58 / p50 0.89
+    prompts:
+      - a photo of a couple kissing
+      - a photo of a couple embracing romantically
+      - a romantic photo of two people in love
+      - a photo of a couple on a romantic date
+      - an intimate photo of a couple lying together
+
+  wedding:
+    unsafe: true
+    category: wedding_content
+    reject_min: 0.50   # the widest separation in this file by a distance: the supplied set's
+                       # p25 is 0.909 and the whole of crowds_safe tops out at 0.403. There is
+                       # nothing at all between 0.41 and 0.90 except one nikah photograph at
+                       # 0.55, so the bar is placed in that void rather than by a sweep. 0.45
+                       # to 0.51 give IDENTICAL numbers on every other set; 0.50 is the round
+                       # number in the middle of the empty stretch.
+    # Weddings are personal life, not trade. Same call `romantic` makes, and for the same
+    # reason - a networking platform is not where a member posts their wedding album.
+    #
+    # Unlike almost every other label here, this one is EASY: a mandap, a garland exchange, a
+    # sacred fire and a red lehenga are a visual vocabulary with no business equivalent, so the
+    # prompts separate it perfectly (155/155 supplied) without taking anything else.
+    #
+    # The one picture that ever sat near the line is a nikah under a glass marquee, and what
+    # held it down was `a photo of a decorated event tent or marquee` from the safe list below
+    # - the counterweight doing exactly its job on a picture that happens to be both. Lowering
+    # the bar into the void was the cheaper answer than arguing with it.
+    #
+    # THE REAL RISK IS THE EVENT TRADES, not the weddings. A caterer, a decorator, a florist, a
+    # banquet hall and a lighting hire firm are ordinary BONC members who sell INTO weddings,
+    # and nothing in the safe list described any of them. Six prompts there now do, and they
+    # are the reason this label costs nothing: BONC_Positive stays 0/63 and crowds_safe 8/206.
+    #
+    # "a photo of a wedding procession" was REMOVED from the safe list, where it had been added
+    # as an `unrest` counterweight - it said the opposite of this rule. Removing it cost
+    # nothing (crowds_safe unchanged at 8), because the trade fairs, queues, temple festivals
+    # and parades beside it carry that job on their own.
+    prompts:
+      - a photo of a bride and groom at their wedding
+      - a wedding ceremony with a bride in a red lehenga
+      - a photo of an indian wedding mandap decorated with flowers
+      - a photo of a hindu wedding ceremony around a sacred fire
+      - a photo of a couple exchanging garlands at a wedding
+      - a wedding photograph of a bride and groom posing together
+      - a photo of a bride in a white wedding dress
+      - a photo of a wedding reception stage decorated with flowers
+      - a photo of an indian wedding baraat procession in the street
+      # An Anand Karaj has none of the above: no mandap, no sacred fire, no garland exchange,
+      # no white dress. A supplied Sikh wedding scored 0.115 and the prompt beating it was
+      # `a photo of a religious procession or temple festival` from the safe list, which is
+      # fair - a gurdwara ceremony IS a religious gathering. These two name the scene instead
+      # of the venue. "a sikh wedding ceremony in a gurdwara" and "a photo of a punjabi
+      # wedding couple" were tried and dropped: both cost an ordinary crowd, because naming
+      # the building and the region catches the festivals held in them.
+      - a photo of a bride and groom sitting before the guru granth sahib
+      - a photo of a groom wearing a turban at his wedding
+
+  charity:
+    unsafe: true
+    category: charity_solicitation
+    reject_min: 0.50   # NGO p25 0.55 / p50 0.88. The bar barely matters here - 0.45 to 0.70
+                       # moves recall 83% to 71% while the safe sets stay within two pictures
+                       # of each other - because this label's errors are a conceptual overlap
+                       # rather than a threshold being in the wrong place. See below.
+    # BONC is a trade platform. An appeal for donations is not a trade posting, whoever is
+    # making it, so NGO fundraising and charity promotion are refused like any other
+    # non-business use of the feed.
+    #
+    # THE SET IS TWO DIFFERENT THINGS and both are refused: donation campaign creatives
+    # ("DONATE", "Your help can change lives", a fundraising target) and photographs of aid
+    # work in the field. The posters are easy. The field photography is where the cost is.
+    #
+    # WHERE IT COLLIDES, and it is not fixable by moving the bar. A photograph of volunteers
+    # handing out food in a poor neighbourhood and a photograph of a school event with parents
+    # are the same picture to this encoder: adults, children, a crowd, an everyday setting.
+    # `minors_incidental` - children present but NOT the subject, which the policy allows on
+    # purpose - goes from 48 refused of 167 to 53. Three more body-part pictures go too.
+    # Those five are the honest price of the label, and lowering the bar does not recover them
+    # because their scores sit in the same place as the aid photographs.
+    #
+    # Measured: 62 of 77 (81%), from 14 of 77 before. Real BONC listings are unchanged at
+    # 1 of 62, and `allow`, `gym_positive` and `minors` do not move at all.
+    #
+    # Six prompts were written and dropped. Four of them - "a charity poster asking people to
+    # donate money", "a fundraising appeal with a donate button", "an ngo campaign poster
+    # about helping children", "a poster for a non profit foundation" - changed NOTHING on any
+    # set, because the four below already cover what they describe. Two more cost incidental
+    # children and bought no recall at all: naming the child in the appeal ("a charity
+    # advertisement showing a child in poverty") describes an ordinary photograph of a child
+    # just as well as a fundraising one.
+    prompts:
+      - a photo of volunteers distributing food to poor people
+      - a photo of an aid worker handing out relief supplies
+      - a photo of a charity volunteer in a branded t shirt
+      - an appeal to sponsor a child's education
+
+  physique:
+    unsafe: true
+    category: physique_display
+    reject_min: 0.55   # gym_neg p25 0.78 / p50 0.90. No real BONC listing scores above 0.25
+                       # on this label, so the bar is set by the gym sets alone and sits well
+                       # clear of the traffic it has to leave alone. 0.55 and 0.60 give
+                       # IDENTICAL numbers on every set here, so the lower one is taken for the
+                       # margin: a reported real upload (a shirtless man on a lat pulldown)
+                       # lands at 0.614, which is 0.014 over 0.60 and not a gap to rely on.
+    # A member showing off their own body is not a business posting; a gym, an equipment
+    # supplier or a supplement seller promoting itself is. That is the whole distinction, and
+    # it is about who the picture is FOR rather than what is in it: `gym_neg` contains fully
+    # clothed mirror selfies and `gym_positive` contains a muscular model in a vest, so neither
+    # skin nor the room separates them.
+    #
+    # It is the same framing question `minor` asks (subject or incidental) and it is settled
+    # the same way - in the prompts, not the probe. A linear model over one global embedding
+    # cannot ask who a picture is addressed to; CLIP's text encoder can.
+    #
+    # PROMOTING A BUSINESS DOES NOT LAUNDER THE PICTURE. A gym flyer, a fitness poster and a
+    # supplement banner are all legitimate B2B postings, and they are still refused when they
+    # are built around a bare chest. The business is allowed to advertise; this is about how
+    # much body the advert puts on the page, and the answer does not change with who posted it.
+    # The last two prompts carry that, and they are the difference between 92% and 96%.
+    #
+    # Measured: 99% of gym_neg (71/72) with 5 of 49 gym_positive refused. Those five are worth
+    # reading one by one, because none is a plain mistake:
+    #   - 1 pre-existing `manhandling` false positive on a cable-machine banner, not this label
+    #   - 3 gym posters built around a SHIRTLESS man ("NEVER QUIT", "Shape Your Body" x2),
+    #     which the rule above says to refuse - they sit in the allowed folder, and by the
+    #     policy they are in the wrong one
+    #   - 1 borderline: a sleeveless top rather than a bare chest, physique-forward pose
+    #
+    # The single miss is a shirtless man in front of a gym mirror, which "a photo of people
+    # training together in a gym" wins because the reflection makes two of him.
+    prompts:
+      - a bodybuilder flexing his muscles
+      - a muscular man posing shirtless to show his body
+      - a gym mirror selfie of a man showing his muscles
+      - a fitness model posing to show off a toned body
+      - a woman flexing her muscles in a gym mirror
+      - a gym advertisement poster with a shirtless bodybuilder
+      - a fitness poster showing a bare chested muscular man
+
+  minor:
+    unsafe: true
+    category: minors
+    reject_min: 0.85   # minors p25 0.80 / p50 0.97; the one label where a miss costs more than a false positive
+    # Pictures of children are refused outright. BONC is a trade platform: a child has no
+    # business reason to appear in a listing, a profile or an article, so there is nothing to
+    # weigh up. Refusing the whole category removes a class of risk rather than trying to judge
+    # it case by case, which is the right trade when the downside is this asymmetric.
+    #
+    # This is the one label where a false NEGATIVE costs more than a false positive, so it is
+    # deliberately broad. A refused photograph of an adult who looks young is an inconvenience;
+    # the other error is not.
+    #
+    # THE CHILD HAS TO BE THE SUBJECT. A graduation ceremony, a school event with parents or a
+    # family firm's team photo may all contain children incidentally, and those are ordinary
+    # business life - refusing them would take out a chunk of the platform. So the prompts
+    # describe a picture that is OF a child: portraits, close-ups, a child posed for the
+    # camera. "a family photograph with children" and "a photo of a child with an adult" were
+    # tried and removed for catching exactly the incidental case this is meant to allow.
+    prompts:
+      - a portrait photograph of a child
+      - a close-up photo of a child's face
+      - a photo of a child posing for the camera
+      - a studio photograph of a baby
+      - a photo of a toddler as the main subject
+      - a photo of a young child alone
+
+  # Everything below is ordinary business imagery. These are the alternatives the unsafe labels
+  # compete against, so the list is deliberately broad: a picture that matches none of them has
+  # nothing to be "safe" as, and its unsafe score rises whatever is really in it.
+  safe:
+    unsafe: false
+    prompts:
+      - a product photo on a plain background
+      - a photo of an everyday object
+      - a photo of a smartphone or laptop
+      - a photo of a wallet, purse or bag
+      - a photo of money or banknotes
+      - a photo of a credit card or id card
+      - a photo of people working in an office
+      - a photo of a shop, factory or warehouse
+      - a screenshot of a document or invoice
+      - a photo of machinery or tools
+      - a photo of food or produce
+      - a photo of clothing, fabric or textiles
+      - a photo of furniture
+      - a photo of a car, truck or vehicle
+      - a logo, poster or graphic design
+      - a photo of a building or street
+      - a portrait photo of a person
+      - a landscape or nature photograph
+      - a chart, diagram or slide
+      - a photo of packaging or cardboard boxes
+      # Ordinary trades with nothing in this list to be. A picture matching no safe
+      # prompt has nothing to be safe AS, and its unsafe score rises whatever is really
+      # in it - so breadth here is worth more than precision.
+      - a photo of a construction site or building work
+      - a photo of a laboratory or testing equipment
+      - a photo of a farm, field or crops
+      - a photo of a hotel room or restaurant interior
+      - a photo of solar panels or electrical equipment
+      - a photo of a person giving a presentation to a room
+      # The event trades, which the `wedding` label runs straight at. A banquet hall, a buffet,
+      # a flower arrangement and a lighting rig are what a caterer, a decorator or a venue
+      # actually photographs, and none of them had anything in this list to be.
+      - a photo of an empty banquet hall set up with tables and chairs
+      - a photo of a flower arrangement or a florist's shop
+      - a photo of catering food laid out on a buffet table
+      - a photo of stage lighting and event equipment
+      - a photo of crockery, cutlery or glassware
+      - a photo of a decorated event tent or marquee
+      # A hand holding something, which is the pose the weapon prompts describe. Without these
+      # an outstretched arm holding a black wallet scores 0.985 weapon: the object is right, the
+      # pose is what CLIP matches on, and only a safe label in the same pose competes with it.
+      #
+      # Each one names the object. Generic wordings ("a hand holding an everyday object", "an
+      # outstretched arm holding an object") were tried and removed: they describe a hand
+      # holding a pistol just as well, and cost 4 to 8 points of weapon recall depending on the
+      # threshold (79% against 83% at the shipped 0.90) to buy exactly the false-positive rate
+      # these specific ones give on their own.
+      - a person holding a smartphone
+      - a person holding a wallet or purse
+      - a person holding a bag or box
+      - a person holding a credit card
+      - a person holding banknotes or cash
+      # Human bodies in legitimate contexts. Without these, 27% of ordinary body, skin and
+      # anatomy pictures scored unsafe at the shipped threshold - the gore label firing on
+      # skin and medical imagery, the sexual label on athletes and figure studies. There was
+      # nothing in the safe list for a body to BE, so the nearest match was an unsafe one.
+      # A physiotherapist, a dermatology clinic, a sportswear seller and a medical equipment
+      # supplier are all ordinary BONC members.
+      #
+      # Name the SCENE, not the pose. This is the third time the same mistake has cost
+      # recall, so it is worth stating as a rule: a prompt describing a body position
+      # ("a person exercising or training") also describes a person aiming a gun, and
+      # outscored 30 of the weapon images on its own. A prompt naming what is actually in
+      # the picture ("a person lifting weights in a gym") does not.
+      #
+      # Removed for that reason: "a photo of a person's hand, arm or leg" (describes a hand
+      # holding a pistol), "a medical photograph of skin or a limb" (fights the gore label by
+      # design, since that set counts surgical wounds as positives), and "a photo of a person
+      # exercising or training".
+      - a photo of an athlete competing in a sport
+      # The gym, as a business rather than as a backdrop for a physique. Without these the
+      # `physique` label refused 8 of 49 real gym adverts, product shots and class photos.
+      # They protect the advert, the class and the catalogue - NOT the bare chest in them,
+      # which the last two `physique` prompts take back on purpose.
+      #
+      # "a photo of a person lifting weights in a gym" stood here and has been made plural.
+      # It was added for the body-part false positives and still covers them (that 105-image
+      # set went from 20 refused to 19 on the swap, so very slightly better), but in the
+      # SINGULAR it was also the best match for a solo physique shot and
+      # held `physique` down to 83%. The plural costs nothing and the recall went to 92%,
+      # which is the point: the business pictures are facilities, classes and catalogues; a
+      # lone figure in a mirror is the other thing.
+      - a photo of people training together in a gym
+      - a photo of a person running on a track
+      - a photo of a treadmill or exercise bike
+      # NOT "a product photo of a gym machine with a person demonstrating it", which stood
+      # here and was the single best match - 0.284, above every `physique` prompt - for a
+      # SHIRTLESS man on a lat pulldown. It described the picture perfectly and knew nothing
+      # about what he was wearing, and a 0.017 cosine lead becomes 0.84 against 0.15 once the
+      # softmax has multiplied it by 100. These two say the same thing about the equipment and
+      # about the clothes, which is the distinction the policy actually draws.
+      - a photo of a gym machine in a showroom
+      - a photo of a person in a gym t-shirt on an exercise machine
+      - an advertisement poster for a gym or fitness centre
+      - a photo of a group fitness class in a studio
+      - a photo of a swimmer in a swimming pool
+      - a photo of a person doing yoga or stretching
+      - a photo of a person in sportswear or a swimsuit
+      - a photo of a physiotherapist treating a patient on a treatment table
+      - a photo of a person receiving a massage
+      - a photo of a doctor or nurse examining a patient
+      - an anatomical diagram of the human body
+      - a medical illustration of muscles or bones
+      - a pencil drawing or sketch of a human figure
+      - a photo of a tattoo on skin
+      - a photo of a prosthetic limb or medical brace
+      # Raised and outstretched arms. `manhandling` was refusing 7 of the 105 body-part
+      # pictures and the list of what it caught says why: a conference speaker with a hand up,
+      # a singer holding a microphone, silhouettes on a beach, an ink drawing of two figures,
+      # a karate class, a first-aid drill, and A DIAGRAM OF THE BONES OF AN ARM. Every
+      # `manhandling` prompt describes where someone's arms are - raising a fist, grabbing an
+      # arm, fighting with fists - so anything with an arm up is a candidate.
+      #
+      # That is the "name the scene, not the pose" rule biting the one label whose comment
+      # already warns about it. These five name the scenes, and take body_parts from 19 to 14
+      # and incidental children from 44 to 42, for one image each on `romance` and `unrest`.
+      - a photo of a martial arts class practising
+      - a photo of a singer performing with a microphone
+      - a diagram of the bones of the arm or leg
+      - a photo of first aid training on a volunteer
+      - a photo of a speaker at a podium with a raised hand
+      # Contact between people that is business, not romance. A handshake, a greeting and a
+      # team photo are two people close together; without these, `romantic` has nothing to
+      # compete with and every photograph of colleagues reads as a couple.
+      - a photo of two people shaking hands at a meeting
+      - a photo of colleagues greeting each other
+      - a photo of a team posing together for a group photo
+      - a photo of two businesspeople talking
+      - a photo of a salesperson helping a customer
+      # Children present but not the subject, and clothing shown as product rather than as
+      # display. These are the counterweights for `minor` and `revealing`: without them a
+      # graduation photo and a swimwear catalogue page have nothing safe to be.
+      - a photo of a graduation ceremony with families
+      - a photo of a school event with parents attending
+      - a family business team photograph
+      # "a photo of a crowd at a public event" was here and took unrest recall from 48% to
+      # 28% on its own: a protest IS a crowd at a public event. The fourth time this exact
+      # mistake has cost recall in this file. Name the scene, not the shape of it.
+      - a swimwear product photo on a plain background
+      - a clothing catalogue product shot
+      - a photo of sportswear or activewear for sale
+      # Crowds that are NOT angry. This is the counterweight to `unrest`, and it matters more
+      # than the unrest prompts do: a trade fair, a queue, a wedding procession and a temple
+      # festival are all dense crowds, several of them with banners, raised hands and chanting.
+      # Without something for an ordinary crowd to BE, every gathering reads as a protest.
+      - a photo of an audience at a business conference
+      - a photo of a trade fair or exhibition hall
+      - a photo of a product launch or award ceremony
+      - a photo of a busy market street
+      - a photo of a queue of customers outside a shop
+      - a photo of a crowded railway station platform
+      # "a photo of a wedding procession" stood here as an `unrest` counterweight and was
+      # removed when weddings became a refusal - it said the opposite of the `wedding` label.
+      # crowds_safe is unchanged at 8 of 206 without it.
+      - a photo of a religious procession or temple festival
+      - a photo of a sports crowd cheering in a stadium
+      - a photo of a parade with a marching band
+      - a photo of a concert audience

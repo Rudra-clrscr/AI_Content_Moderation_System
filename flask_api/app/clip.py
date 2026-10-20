@@ -340,6 +340,63 @@ class VisualCheck:
                 log.info("VisualCheck updated thresholds: %s", threshold_overrides)
             return True
 
+    def reload_prompts(self) -> bool:
+        """Re-read prompts.npz after the policy has been rebuilt, without a restart.
+
+        The policy is config/visual_policy.yaml and the thing actually scored against is
+        prompts.npz, which scripts/build_clip_prompts.py bakes from it offline - the text
+        encoder is 254 MB and deliberately never enters the serving process. So an admin who
+        edits the policy produces a new npz, and this swaps it in: the labels, their
+        categories, their per-label thresholds and the embedding matrix, all replaced together
+        under the lock.
+
+        Together, not piecemeal, because they are one consistent set. A half-applied reload -
+        new embeddings against old labels - would score every picture against the wrong name,
+        and `classify` would keep working and keep being wrong, which is worse than failing.
+        On any error the previous set is left exactly as it was and False is returned.
+        """
+        with self._lock:
+            if not self._loaded:
+                # Nothing is in memory to go stale: the check loads lazily and _load() will
+                # read whatever prompts.npz says when the first picture arrives. Reporting
+                # failure here would be wrong in the one way that matters - the caller treats
+                # it as "the new policy is not live" and rolls a perfectly good save back,
+                # which is exactly what the first cut of this did.
+                log.info("VisualCheck not loaded yet; the rebuilt policy will be read on "
+                         "first use")
+                return True
+            import numpy as np
+            p = self.model_dir / "prompts.npz"
+            if not p.exists():
+                log.warning("VisualCheck: no %s to reload", p)
+                return False
+            try:
+                data = np.load(p, allow_pickle=False)
+                embeds = data["embeds"].astype(np.float32)
+                labels = [str(x) for x in data["labels"]]
+                if embeds.shape[0] != len(labels):
+                    raise ValueError(f"{embeds.shape[0]} embeddings for {len(labels)} labels")
+                categories = dict(zip((str(x) for x in data["category_labels"]),
+                                      (str(x) for x in data["categories"])))
+                thresholds = {}
+                if "threshold_labels" in data.files:
+                    thresholds = {str(k): float(v) for k, v in
+                                  zip(data["threshold_labels"], data["threshold_values"])}
+            except Exception:
+                log.exception("VisualCheck failed to reload prompts from %s - keeping the "
+                              "previous policy in memory", p)
+                return False
+            # Re-normalised for the same reason _load does it, and with more cause here: an
+            # admin-authored policy is exactly the hand-edited file that comment is about.
+            norms = np.linalg.norm(embeds, axis=1, keepdims=True)
+            self._prompt_embeds = embeds / np.maximum(norms, 1e-12)
+            self._labels = labels
+            self._categories = categories
+            self._thresholds = thresholds
+            log.info("VisualCheck reloaded policy: %d prompts over %d labels (%s)",
+                     len(labels), len(set(labels)), ", ".join(sorted(set(labels))))
+            return True
+
     @property
     def status(self) -> dict:
         """For GET /ready, so an operator can see whether pictures are actually being looked at
