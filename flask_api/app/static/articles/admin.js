@@ -1382,7 +1382,31 @@
             // readable embedding still contributes its sentence - and "uploaded" alone would
             // not say which parts of the policy actually moved.
             const t = res.taught;
-            if (!t) {
+            if (t && t.conflict) {
+              // The image is stored; only the teaching is waiting on an answer. Resolving
+              // applies it against the id that just came back, so the file is not uploaded
+              // twice to answer one question.
+              const p = t.pending || {};
+              conflictModal({ message: res.message, conflicts: t.conflicts || [] },
+                async (verdict) => {
+                  try {
+                    await call("PUT", "/v1/admin/policy/exemplars",
+                               { ids: [p.image_id], mode: p.mode, resolve: verdict });
+                    const ph = await call("POST",
+                      `/v1/admin/policy/labels/${encodeURIComponent(p.label)}/phrasings`,
+                      { phrasing: p.phrasing, unsafe: p.unsafe, category: p.category,
+                        resolve: verdict });
+                    say(verdict === "refuse"
+                      ? `Kept as REFUSING. “${esc(p.phrasing)}” now belongs to the ${esc(ph.label || p.label)} rule only.`
+                      : `Kept as ALLOWED. The refusing copy of “${esc(p.phrasing)}” has been removed.`,
+                      true);
+                  } catch (e2) {
+                    say(e2.message);
+                  }
+                  loadCategories(); loadImages();
+                });
+              loadCategories(); loadImages();
+            } else if (!t) {
               say(res.message || "Image uploaded.", true);
             } else {
               const bits = [];

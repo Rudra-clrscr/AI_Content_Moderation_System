@@ -220,20 +220,45 @@ def upload_image():
     teach = str(request.form.get("teach", "")).strip().lower() in ("1", "true", "yes", "on")
     taught: dict = {}
     if teach and record:
+        from app.admin_policy import (_export_exemplars, _paths, _read, add_phrasing,
+                                      find_conflicts)
         rid = record.get("id")
+        phrasing = request.form.get("phrasing", "").strip() or description
+        label = request.form.get("policy_label", "").strip().lower() or category
+        resolve = str(request.form.get("resolve", "")).strip().lower() or None
+
+        # CHECK BEFORE APPLYING ANYTHING. The first cut set the exemplar first and only then
+        # asked add_phrasing, which detected the clash, declined, and was reported inside a
+        # 201. The picture was therefore refused by the exemplar while the admin's own
+        # allowing rule stood untouched and nothing asked them - the exact bug this was meant
+        # to prevent, arriving through the door the fix did not cover.
+        policy_path, _d, model_dir = _paths()
+        conflicts = []
+        if phrasing and resolve is None:
+            conflicts = find_conflicts(_read(policy_path), label, [phrasing],
+                                       unsafe=(action == "block"))
+        if conflicts:
+            # The file is kept and the record stands - the admin did upload it, and making
+            # them pick it again to answer a question would be its own small insult. Only the
+            # TEACHING waits, and the dialog resolves it against this image id.
+            return jsonify({
+                "success": True, "image": record,
+                "taught": {"conflict": True, "conflicts": conflicts,
+                           "pending": {"image_id": rid, "label": label, "phrasing": phrasing,
+                                       "unsafe": action == "block", "category": category,
+                                       "mode": action}},
+                "message": f"Uploaded '{file.filename}', but the description contradicts an "
+                           f"existing rule - nothing has been taught yet.",
+            }), 201
+
         if emb_bytes and rid:
             store.set_exemplars([rid], is_exemplar=True, action=action)
-            from app.admin_policy import _export_exemplars, _paths
-            _, _, model_dir = _paths()
             taught["exemplar"] = _export_exemplars(model_dir)
         else:
             taught["exemplar"] = {"skipped": "no embedding could be computed for this file"}
-        phrasing = request.form.get("phrasing", "").strip() or description
         if phrasing:
-            from app.admin_policy import add_phrasing
-            label = request.form.get("policy_label", "").strip().lower() or category
             taught["phrasing"] = add_phrasing(label, phrasing, unsafe=(action == "block"),
-                                              category=category)
+                                              category=category, resolve=resolve)
         else:
             taught["phrasing"] = {"added": False, "reason": "no description given"}
         taught["probe"] = {"selected_for_next_retrain": True}

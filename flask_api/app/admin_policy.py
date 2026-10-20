@@ -509,6 +509,38 @@ def _export_exemplars(model_dir: Path) -> dict:
             "reloaded": bool(ok)}
 
 
+@admin_policy_bp.post("/v1/admin/policy/labels/<name>/phrasings")
+def add_phrasing_endpoint(name: str):
+    """Add ONE phrasing to a rule, optionally resolving a conflict.
+
+    Separate from the full PUT because that replaces a rule's whole prompt list, and the two
+    callers that need this - the upload form and the conflict dialog it raises - are adding a
+    single sentence to whatever is already there. Going through PUT would mean the client
+    reconstructing the existing wordings and sending them back, which is a race with anyone
+    else editing and a way to lose phrasings by accident.
+    """
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    body = request.get_json(silent=True) or {}
+    phrasing = str(body.get("phrasing", "")).strip()
+    if not phrasing:
+        return _err(400, "missing_phrasing", "Give the phrasing to add.")
+    res = add_phrasing(str(name), phrasing,
+                       unsafe=bool(body.get("unsafe", True)),
+                       category=body.get("category"),
+                       resolve=str(body.get("resolve", "")).strip().lower() or None)
+    if res.get("reason") == "conflict":
+        return _err(409, "policy_conflict",
+                    "This wording is already used by a rule with the opposite verdict. "
+                    "Choose which one should stand.",
+                    conflicts=res.get("conflicts", []),
+                    this_verdict="refuse" if body.get("unsafe", True) else "allow")
+    if not res.get("added") and res.get("error"):
+        return _err(500, "policy_build_failed", res["error"])
+    return jsonify(res)
+
+
 @admin_policy_bp.get("/v1/admin/policy/exemplars")
 def list_exemplars():
     chk = check_admin()
