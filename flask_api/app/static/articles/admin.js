@@ -981,6 +981,32 @@
             const mode = el.dataset.teach;
             const row = el.closest(".img-card-teach");
             row.innerHTML = `<span class="teach-lbl"><span class="spinner dark"></span> Applying…</span>`;
+            // SHOW THE REACH FIRST. An exemplar generalises by appearance and appearance does
+            // not respect the categories a person has in mind: one rainbow marked "refuse
+            // like this" also reached a cloud at 0.828, and safe, romantic and minor pictures
+            // above 0.68. The admin saw a cloud refused with nothing in the policy naming
+            // clouds, and deselecting it and retraining the probe could not help, because the
+            // probe was not the one objecting. So the blast radius is measured and shown
+            // before the mark is applied, grouped by the categories it reaches - the surprise
+            // is never "it caught more", it is "it caught THOSE".
+            if (mode !== "clear") {
+              try {
+                const pv = await call("PUT", "/v1/admin/policy/exemplars",
+                                      { ids: [id], mode, preview: true });
+                const other = pv.other_categories || {};
+                const names = Object.keys(other);
+                if (names.length) {
+                  const list = names.sort((a, b) => other[b] - other[a])
+                    .map((c) => `${other[c]} ${esc(c)}`).join(", ");
+                  const ok = window.confirm(
+                    `This will ${mode === "block" ? "refuse" : "allow"} ${pv.would_match} other `
+                    + `stored pictures, including ${list}.\n\n`
+                    + `Pictures that merely look alike are caught too, not only ones in this `
+                    + `category. Continue?`);
+                  if (!ok) { loadImages(); return; }
+                }
+              } catch { /* preview is advisory: a failure here must not block the action */ }
+            }
             const apply = async (resolve) => {
               const res = await call("PUT", "/v1/admin/policy/exemplars",
                                      resolve ? { ids: [id], mode, resolve } : { ids: [id], mode });

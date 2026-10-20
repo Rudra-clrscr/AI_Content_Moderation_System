@@ -659,6 +659,59 @@ def set_exemplars():
     store = current_app.extensions["system_store"]
     resolve = str(body.get("resolve", "")).strip().lower() or None
 
+    # WHAT ELSE THIS WOULD CATCH. An exemplar generalises by appearance, and appearance does
+    # not respect the categories a person has in mind: a rainbow marked "refuse things like
+    # this" scored 0.828 against a cloud photograph, because both are soft-coloured sky, and
+    # the cloud was refused with nothing in the policy naming clouds. Deselecting it and
+    # retraining the probe could not help - the probe was not the one objecting.
+    #
+    # So the reach is measured and shown before the mark is applied. Grouped by the category
+    # the matched pictures are filed under, because the surprise is never "it caught more"
+    # but "it caught THOSE".
+    if body.get("preview"):
+        rows = _rows_by_id(store, ids)
+        if not rows:
+            return _err(404, "no_such_image", "None of those image ids are stored.")
+        visual = current_app.extensions["moderation"].settings.visual
+        bar = float(visual.config.exemplar_reject_min)
+        import numpy as np
+        seeds = []
+        for r in rows:
+            v = np.frombuffer(r["embedding"], dtype=np.float32)
+            if v.size:
+                seeds.append(v / max(float(np.linalg.norm(v)), 1e-12))
+        if not seeds:
+            return _err(409, "no_embeddings", "Those pictures have no embedding to compare.")
+        S = np.stack(seeds)
+        others, meta = [], []
+        for r in store.all_embeddings(limit=20000):
+            if r["id"] in set(ids):
+                continue
+            v = np.frombuffer(r["embedding"], dtype=np.float32)
+            if v.size == S.shape[1]:
+                others.append(v / max(float(np.linalg.norm(v)), 1e-12))
+                meta.append(r)
+        if not others:
+            return jsonify({"preview": True, "would_match": 0, "by_category": {}, "top": []})
+        sims = (np.stack(others) @ S.T).max(axis=1)
+        hit = np.where(sims >= bar)[0]
+        by_cat: dict[str, int] = {}
+        for i in hit:
+            c = meta[i].get("category") or "?"
+            by_cat[c] = by_cat.get(c, 0) + 1
+        order = hit[np.argsort(-sims[hit])][:12]
+        own = {r.get("category") for r in rows}
+        return jsonify({
+            "preview": True, "mode": mode, "threshold": bar,
+            "would_match": int(len(hit)),
+            "by_category": dict(sorted(by_cat.items(), key=lambda kv: -kv[1])),
+            # Categories other than the marked picture's own: this is the list that surprises.
+            "other_categories": {k: n for k, n in by_cat.items() if k not in own},
+            "top": [{"id": meta[i]["id"], "filename": meta[i].get("filename"),
+                     "category": meta[i].get("category"),
+                     "score": round(float(sims[i]), 4)} for i in order],
+        })
+
     # THE OTHER DIRECTION OF THE SAME CLASH. A picture marked "refuse things like this" whose
     # written rules already publish it - or the reverse - is the same contradiction as two
     # rules disagreeing, arriving through the other door. It is quieter and worse: the
