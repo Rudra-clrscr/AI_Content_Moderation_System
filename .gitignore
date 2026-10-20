@@ -36,9 +36,18 @@ flask_api/models/ocr/
 #   probe.npz       9 KB, and the one thing here nobody can regenerate: it was fitted on 968
 #                   of BONC's own labelled pictures. It carries a third of the `minors` recall.
 #   model_meta.json what the bundle is, which encoder it expects, and the policy digest.
+#   probe_backup_default.npz
+#                   the probe AS IT SHIPPED, and now the only copy of it. The note above says
+#                   probe.npz is the one file here nobody can regenerate - and the admin
+#                   dashboard retrains it in place, with one of those retrained copies already
+#                   committed. image_trainer.py takes this backup only if it is ABSENT, so a
+#                   fresh clone without it would adopt whatever probe.npz it found as its
+#                   "default" and "restore default" would restore a fine-tuned model, silently
+#                   and permanently. Tracking it is what makes the dashboard's default real.
 flask_api/models/img_v1/*
 !flask_api/models/img_v1/prompts.npz
 !flask_api/models/img_v1/probe.npz
+!flask_api/models/img_v1/probe_backup_default.npz
 !flask_api/models/img_v1/model_meta.json
 
 # Test output directories
