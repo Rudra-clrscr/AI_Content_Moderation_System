@@ -496,6 +496,22 @@ class SystemStore:
 
             items = [dict(r) for r in rows]
 
+            # What the CURRENT FILTER holds, which is not the same question as the global
+            # stats below and is the one an admin bulk-selecting is actually asking. A search
+            # for "gym" returns 64 pictures of which 49 are `allow` examples - gym adverts and
+            # class photos the policy protects on purpose - so "select all the gym images and
+            # retrain" teaches both directions at once and mostly teaches ALLOW. Shown next to
+            # the buttons because there is no way to infer it from a grid of thumbnails.
+            filtered = db.execute(
+                f"SELECT COUNT(*) as total, "
+                f"SUM(CASE WHEN action = 'allow' THEN 1 ELSE 0 END) as allowed, "
+                f"SUM(CASE WHEN action = 'block' THEN 1 ELSE 0 END) as blocked, "
+                f"SUM(CASE WHEN is_selected = 1 THEN 1 ELSE 0 END) as selected, "
+                f"SUM(CASE WHEN is_selected = 1 AND action = 'allow' THEN 1 ELSE 0 END) as teaching_allow, "
+                f"SUM(CASE WHEN is_selected = 1 AND action = 'block' THEN 1 ELSE 0 END) as teaching_block "
+                f"FROM image_policy {where_sql}", params
+            ).fetchone()
+
             # Global statistics
             stats = db.execute(
                 "SELECT COUNT(*) as total, "
@@ -510,6 +526,14 @@ class SystemStore:
         return {
             "items": items,
             "pagination": {"page": page, "limit": limit, "total": total, "total_pages": total_pages},
+            "filtered": {
+                "total": filtered["total"] or 0,
+                "allowed": filtered["allowed"] or 0,
+                "blocked": filtered["blocked"] or 0,
+                "selected": filtered["selected"] or 0,
+                "teaching_allow": filtered["teaching_allow"] or 0,
+                "teaching_block": filtered["teaching_block"] or 0,
+            },
             "stats": {
                 "total": stats["total"] or 0,
                 "allowed": stats["allowed"] or 0,
@@ -617,18 +641,38 @@ class SystemStore:
                 count += cur.rowcount
         return count
 
-    def set_selection_bulk(self, is_selected: bool, category: str | None = None) -> int:
-        """Select or deselect all images, optionally filtered by category."""
+    def set_selection_bulk(self, is_selected: bool, category: str | None = None,
+                           search: str | None = None, action: str | None = None) -> int:
+        """Select or deselect images under the SAME filter the grid is showing.
+
+        `search` and `action` are here because leaving them out made the button act on a
+        different set of pictures than the one on screen. An admin looking for the gym
+        pictures searches "gym" - there is no gym category, they live under `physique` and
+        `safe` - sees 64 of them, clicks Deselect All, and deselects the whole category
+        instead. Then they retrain, test, and reasonably conclude the retrain did nothing,
+        because the thing they thought they changed was never what changed.
+        """
         now = time.time()
         sel = 1 if is_selected else 0
+        clauses, params = [], []
+        if category and category.lower() != "all":
+            clauses.append("category = ?")
+            params.append(category.strip().lower())
+        if action and action.lower() != "all":
+            clauses.append("action = ?")
+            params.append(action.strip().lower())
+        # Matched exactly as list_images matches it, or the button still disagrees with the
+        # grid - a near-miss here is the same bug in a smaller size.
+        if search and search.strip():
+            clauses.append("(filename LIKE ? OR description LIKE ?)")
+            pat = f"%{search.strip()}%"
+            params.extend([pat, pat])
+        where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._tx() as db:
-            if category and category.lower() != "all":
-                cur = db.execute(
-                    "UPDATE image_policy SET is_selected = ?, updated_at = ? WHERE category = ?",
-                    (sel, now, category.strip().lower()),
-                )
-            else:
-                cur = db.execute("UPDATE image_policy SET is_selected = ?, updated_at = ?", (sel, now))
+            cur = db.execute(
+                f"UPDATE image_policy SET is_selected = ?, updated_at = ?{where_sql}",
+                [sel, now] + params,
+            )
             return cur.rowcount
 
     def get_selected_for_training(self) -> list[dict[str, Any]]:

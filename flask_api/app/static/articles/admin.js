@@ -756,13 +756,20 @@
                 <button class="btn btn-outline" id="btn-select-all" type="button" style="padding:6px 10px; font-size:12px;">Select All</button>
                 <button class="btn btn-outline" id="btn-deselect-all" type="button" style="padding:6px 10px; font-size:12px;">Deselect All</button>
               </div>
-
               <div class="img-actions-right">
                 <button class="btn btn-outline" id="btn-upload-modal" type="button" style="border-color:#0284c7; color:#0284c7;">+ Upload Image</button>
                 <button class="btn btn-primary" id="btn-submit-changes" type="button" style="background:#2563eb;">Submit Changes</button>
                 <button class="btn btn-primary" id="btn-train-model" type="button" style="background:#16a34a; border-color:#16a34a;">⚡ Train Model</button>
               </div>
             </div>
+
+            <!-- WHAT THE CURRENT FILTER IS TEACHING. A grid of thumbnails cannot show it and
+                 the stat boxes above are global, so an admin selecting "all the gym images"
+                 had no way to see that 49 of the 64 are ALLOW examples - gym adverts and class
+                 photos the policy protects on purpose - and that selecting them all teaches
+                 both directions at once, mostly allow. Sits between the toolbar and the grid
+                 because it describes what the buttons above will act on. -->
+            <div id="img-filter-teaching" class="img-filter-teaching" style="display:none;"></div>
 
             <!-- Image Grid Container -->
             <div id="img-grid-container"><p class="adm-loading"><span class="spinner dark"></span> Loading stored policy images…</p></div>
@@ -887,6 +894,7 @@
         try {
           imagesData = await call("GET", `/v1/admin/images?${q.toString()}`);
           updateStats(imagesData.stats);
+          updateFilterTeaching(imagesData.filtered);
           renderGrid(imagesData.items);
           renderPagination(imagesData.pagination);
         } catch (err) {
@@ -900,6 +908,34 @@
         $("stat-selected").textContent = st.selected || 0;
         $("stat-allowed").textContent = st.allowed || 0;
         $("stat-blocked").textContent = st.blocked || 0;
+      }
+
+      // The filter's own composition, which is the one the bulk buttons act on.
+      function updateFilterTeaching(f) {
+        const el = $("img-filter-teaching");
+        if (!el) return;
+        const filtering = activeCat !== "all" || activeAction !== "all" ||
+                          activeSelected !== "all" || !!searchQuery.trim();
+        if (!f || !filtering) { el.style.display = "none"; return; }
+        const a = f.teaching_allow || 0, b = f.teaching_block || 0;
+        const bits = [`<b>${f.total || 0}</b> match this filter`,
+                      `<b>${f.selected || 0}</b> selected to train`];
+        if (a || b) {
+          bits.push(`teaching <b style="color:#16a34a;">${a} ALLOW</b> / ` +
+                    `<b style="color:#dc2626;">${b} BLOCK</b>`);
+        }
+        // Only worth shouting about when it is genuinely ambiguous. Named explicitly because
+        // "select all of these and retrain" is the one action where teaching both ways at
+        // once silently cancels out, and the admin reads the result as the retrain failing.
+        const warn = a && b
+          ? `<div class="img-teach-warn">These pictures teach the model in <b>both</b>
+             directions. The ${a} marked ALLOW push toward publishing this kind of picture and
+             the ${b} marked BLOCK push toward refusing it, so retraining on the whole set may
+             not move the verdict the way you expect. Filter by <b>Allowed Only</b> or
+             <b>Blocked Only</b> to select just one side.</div>`
+          : "";
+        el.innerHTML = `<div class="img-teach-line">${bits.join(" &middot; ")}</div>${warn}`;
+        el.style.display = "";
       }
 
       function renderGrid(items) {
@@ -1115,9 +1151,16 @@
         const btn = $(selectOn ? "btn-select-all" : "btn-deselect-all");
         busy(btn, true, selectOn ? "Selecting…" : "Deselecting…");
         try {
+          // THE SAME FILTER THE GRID IS SHOWING. Sending only the category made this button
+          // act on pictures the admin could not see: there is no "gym" category - gym
+          // pictures live under `physique` and `safe` - so searching "gym" shows 64 of them
+          // and Deselect All used to deselect a whole category instead. The retrain after it
+          // then measured a change nobody had made, which reads exactly like a broken retrain.
           const res = await call("PUT", "/v1/admin/images/batch", {
             select_all: selectOn,
             category: activeCat,
+            action: activeAction,
+            search: searchQuery.trim(),
           });
           say(res.message, true);
           busy(btn, false, selectOn ? "Select All" : "Deselect All");
@@ -1462,6 +1505,54 @@
 
         const classesList = (data.classes || []).map((c) => `<span class="cat-pill" style="padding:2px 8px; font-size:11px;">${esc(c)}</span>`).join(" ");
 
+        // WHAT THE RETRAIN ACTUALLY DID, per category. `Accuracy` above is the probe's fit to
+        // the data it was just handed; it averages every category together and describes one
+        // of the three channels that decide. An admin who selected 72 gym pictures, retrained,
+        // read 85.4% and then watched a gym photograph publish was not misreading the screen -
+        // the screen was not answering their question. These rows are each category put back
+        // through the real decision path, worst first, because the only rows worth opening a
+        // modal for are the ones that disagree with what the admin marked.
+        const rep = data.category_report || {};
+        const rows = Object.keys(rep).sort((a, b) => (rep[a].refused_pct) - (rep[b].refused_pct));
+        let reportHtml = "";
+        if (rows.length) {
+          reportHtml = `
+            <div style="margin-top:14px;">
+              <span style="font-size:12px; font-weight:700; color:#334155; display:block; margin-bottom:6px;">
+                What the live check now does to these pictures
+              </span>
+              <table class="train-cat-table">
+                <thead><tr><th>Category</th><th>Pictures</th><th>Teaching</th><th>Refused now</th><th>Disagrees</th></tr></thead>
+                <tbody>` +
+            rows.map((c) => {
+              const r = rep[c];
+              // Red when the admin marked these BLOCK and the system mostly publishes them,
+              // or marked them ALLOW and it mostly refuses them. Either way the number the
+              // admin came to check is the refusal rate, so that is what gets coloured.
+              const mostlyBlock = r.teaching_block >= r.teaching_allow;
+              const good = mostlyBlock ? r.refused_pct >= 90 : r.refused_pct <= 10;
+              const col = good ? "#16a34a" : (r.refused_pct >= 60 || !mostlyBlock ? "#b45309" : "#dc2626");
+              const teach = [r.teaching_allow ? `${r.teaching_allow} allow` : "",
+                             r.teaching_block ? `${r.teaching_block} block` : ""]
+                            .filter(Boolean).join(" + ");
+              return `<tr>
+                  <td><b>${esc(c)}</b>${r.teaches_both_ways
+                      ? ` <span class="train-cat-flag" title="This category teaches the model in both directions at once">both ways</span>` : ""}</td>
+                  <td>${r.n}</td>
+                  <td>${esc(teach)}</td>
+                  <td style="color:${col}; font-weight:700;">${r.refused_pct}%</td>
+                  <td>${r.contradicting
+                      ? `<button class="btn-link train-cat-why" type="button" data-cat="${esc(c)}"
+                           style="color:#b45309; font-weight:700;">${r.contradicting} &rsaquo;</button>`
+                      : "—"}</td>
+                </tr>`;
+            }).join("") + `
+                </tbody>
+              </table>
+              <p class="adm-sub" style="margin-top:6px;">${esc(data.report_note || "")}</p>
+            </div>`;
+        }
+
         back.innerHTML = `
           <div class="modal img-modal-wide" role="dialog" aria-modal="true" aria-labelledby="tr-modal-title">
             <div class="modal-head"><h2 id="tr-modal-title" style="color:#16a34a;">⚡ Model Fine-Tuning Complete</h2>
@@ -1481,6 +1572,7 @@
                   <div style="display:flex; flex-wrap:wrap; gap:4px;">${classesList}</div>
                 </div>
               </div>
+              ${reportHtml}
               <p class="adm-sub" style="color:#16a34a; font-weight:600;">✓ Changes are active immediately on /v1/moderate/media without server restart.</p>
             </div>
             <div class="modal-foot">
@@ -1492,6 +1584,36 @@
         const close = () => back.remove();
         back.querySelector("#tr-x").addEventListener("click", close);
         back.querySelector("#tr-close").addEventListener("click", close);
+
+        // NAME THE PICTURES, not just the count. "2 disagree" tells an admin something is
+        // off; `images (13).jpg, marked BLOCK, published, best label safe 0.641` tells them
+        // which picture to go and look at and which channel to argue with. Chasing one of
+        // these by hand - scoring an image in a shell to find out why it published - is the
+        // work this replaces.
+        back.querySelectorAll(".train-cat-why").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const cat = btn.dataset.cat;
+            const ex = (rep[cat] || {}).examples || [];
+            const host = btn.closest("td");
+            if (!ex.length) { return; }
+            if (host.querySelector(".train-cat-ex")) {
+              host.querySelector(".train-cat-ex").remove();
+              return;
+            }
+            const box = document.createElement("div");
+            box.className = "train-cat-ex";
+            box.innerHTML = ex.map((e) => `
+                <div class="train-cat-ex-row">
+                  <b>${esc(e.filename || ("#" + e.id))}</b><br>
+                  marked <b>${esc((e.marked || "").toUpperCase())}</b> &rarr;
+                  <b style="color:${e.verdict === "refused" ? "#dc2626" : "#16a34a"};">${esc(e.verdict)}</b>
+                  ${e.refused_by ? ` by <b>${esc(e.refused_by)}</b>` : ""}<br>
+                  best label <b>${esc(e.top_label || "?")}</b> ${e.top_score}
+                  &middot; probe ${e.probe_unsafe}
+                </div>`).join("");
+            host.appendChild(box);
+          });
+        });
       }
 
       async function trainingHistoryModal() {

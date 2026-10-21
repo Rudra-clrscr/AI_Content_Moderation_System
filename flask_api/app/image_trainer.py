@@ -205,6 +205,14 @@ class ImageTrainer:
         if self.visual_check and hasattr(self.visual_check, "reload_probe"):
             self.visual_check.reload_probe(probe_path, threshold_overrides=threshold_overrides)
 
+        # AFTER the hot-reload, so the report describes the probe that is now live rather
+        # than the one it replaced.
+        try:
+            report = self.category_report(selected_images)
+        except Exception:
+            log.warning("could not build the per-category report", exc_info=True)
+            report = {}
+
         duration = round(time.time() - start_time, 2)
 
         # Record training history in system DB
@@ -215,6 +223,10 @@ class ImageTrainer:
             "class_distribution": class_distribution,
             "threshold_overrides": threshold_overrides,
             "preset": preset or ("child_products_allowed" if minor_allowed else "standard_blocked"),
+            # Kept with the run so the history can answer "what did that retrain do?" later.
+            # Without it the only record of a retrain is its accuracy, which is the number
+            # that was not answering the question in the first place.
+            "category_report": report,
         }
         rec_id = self.store.record_training(
             model_name=model_name,
@@ -247,8 +259,91 @@ class ImageTrainer:
             "class_distribution": class_distribution,
             "duration": duration,
             "minor_policy": "ALLOWED (Baby & Child Products Mode)" if minor_allowed else "BLOCKED (Default Policy)",
+            # Per-category, through the real decision path. `accuracy` above is the probe's
+            # fit to the data it was just given; this is what the Articles tab will now do.
+            "category_report": report,
+            "report_note": ("Refusal rates are measured on the pictures just trained on, "
+                            "through the same three channels the Articles tab uses. The "
+                            "probe's share is in-sample, so treat these as optimistic."),
             "message": f"Vision model fine-tuned successfully on {len(X)} samples with {round(accuracy * 100, 1)}% accuracy in {duration}s.",
         }
+
+    def category_report(self, images: list[dict[str, Any]]) -> dict[str, Any]:
+        """What the live system now does to the admin's own pictures, category by category.
+
+        WHY THIS EXISTS. A retrain reported one number - training accuracy, 85.4% over 3490
+        images - and an admin read it as "the model learned what I selected". It cannot mean
+        that. It is measured on the data just fitted, it averages over every category at once,
+        and it describes the probe alone while the Articles tab is decided by three channels
+        together. An admin who selected 72 gym pictures, retrained, saw 85.4% and then watched
+        a gym photograph publish had no way to find out that the category they cared about was
+        at 59% and that 49 of the gym pictures in their search were teaching ALLOW.
+
+        So the report answers the question actually being asked - "what will happen to these
+        pictures now?" - by putting each stored embedding through score_embedding and
+        decides_reject: the same code path, the same bars and the same three channels the
+        Articles tab uses. Nothing here re-implements the decision, because a number that
+        comes from somewhere other than the code that decides is how this went wrong.
+
+        `contradicting` is the figure to read first: pictures the admin marked one way that
+        the system treats the other way. Those are the ones that make a retrain look broken.
+
+        The probe's share of this IS in-sample - these are the pictures it was just fitted on
+        - so the refusal rates are optimistic and the caller says so. They are still the right
+        numbers to show, because the admin's question is about these pictures.
+        """
+        vc = self.visual_check
+        if vc is None or not getattr(vc, "ready", False):
+            return {}
+
+        cats: dict[str, dict[str, Any]] = {}
+        for img in images:
+            blob = img.get("embedding")
+            if not blob:
+                continue
+            try:
+                emb = np.frombuffer(blob, dtype=np.float32)
+            except Exception:
+                continue
+            if emb.shape != (512,):
+                continue
+            try:
+                res = vc.score_embedding(emb)
+                refused = bool(vc.decides_reject(res))
+                cause = res.refused_by(vc.config) if refused else None
+            except Exception:
+                log.warning("could not score a stored embedding for the report", exc_info=True)
+                continue
+
+            cat = str(img.get("category", "") or "").lower() or "uncategorised"
+            action = str(img.get("action", "") or "").lower()
+            c = cats.setdefault(cat, {"n": 0, "teaching_allow": 0, "teaching_block": 0,
+                                      "refused": 0, "by_cause": {}, "contradicting": 0,
+                                      "examples": []})
+            c["n"] += 1
+            c["teaching_allow" if action == "allow" else "teaching_block"] += 1
+            if refused:
+                c["refused"] += 1
+                c["by_cause"][cause or "policy"] = c["by_cause"].get(cause or "policy", 0) + 1
+            # Marked block and still publishes, or marked allow and is refused anyway.
+            if (action == "block" and not refused) or (action == "allow" and refused):
+                c["contradicting"] += 1
+                if len(c["examples"]) < 5:
+                    c["examples"].append({
+                        "id": img.get("id"), "filename": img.get("filename"),
+                        "marked": action, "verdict": "refused" if refused else "published",
+                        "refused_by": cause,
+                        "top_label": res.label, "top_score": round(res.score, 3),
+                        "probe_unsafe": round(res.probe_unsafe, 3),
+                    })
+
+        for cat, c in cats.items():
+            c["refused_pct"] = round(100.0 * c["refused"] / c["n"], 1) if c["n"] else 0.0
+            # A category that teaches in both directions is not a bug, but it is the thing an
+            # admin almost never means to do, so it is named rather than left to be inferred
+            # from two counts sitting side by side.
+            c["teaches_both_ways"] = bool(c["teaching_allow"] and c["teaching_block"])
+        return cats
 
     def apply_preset(self, preset_name: str) -> dict[str, Any]:
         """Apply a business policy preset and re-train model.
