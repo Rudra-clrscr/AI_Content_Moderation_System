@@ -164,6 +164,214 @@ def _validate(name: str, body: dict) -> tuple[str, dict] | tuple[None, object]:
     return name, entry
 
 
+# ---- editing the policy file without destroying it -------------------------------------
+# config/visual_policy.yaml is 484 lines of which 249 are comments, and they are the
+# reasoning: why `minor` sits at 0.85 when `violence` sits at 0.57, which image set each bar
+# was measured on, what the `safe` list is for. yaml.safe_dump round-trips the data and throws
+# every line of it away - the first version of this feature did exactly that and silently cut
+# the file from 484 lines to 176.
+#
+# So the file is edited as TEXT, in place, one operation at a time. Nothing is re-rendered:
+# adding a phrasing inserts a line, flipping a verdict replaces one, a new rule is appended
+# and a deleted one is cut. Every byte nobody asked to change is left alone, including the
+# comments belonging to rules an admin never touched.
+
+def _label_span(lines: list[str], label: str) -> tuple[int, int, str] | None:
+    """(first line, line after last, indent) of a label's block, or None.
+
+    A block runs from its `name:` line to the next key at the same indent. Comment lines
+    immediately ABOVE the key belong to it - that is where this file documents a rule - so
+    they are included, and a deletion takes them with it rather than leaving an explanation
+    for something that is gone.
+    """
+    start = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if stripped.split(":")[0].strip() == label and stripped.endswith(":") or \
+           stripped.startswith(label + ":"):
+            if start is None and indent >= 2:
+                start = i
+                own_indent = indent
+                break
+    if start is None:
+        return None
+    j = start
+    while j > 0 and lines[j - 1].strip().startswith("#"):
+        j -= 1
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if line.strip() and not line.strip().startswith("#"):
+            if len(line) - len(line.lstrip()) <= own_indent:
+                break
+        end += 1
+    # Trailing comments that introduce the NEXT rule stay with the next rule.
+    while end > start + 1 and lines[end - 1].strip().startswith("#"):
+        end -= 1
+    return j, end, " " * own_indent
+
+
+def _prompts_insert_at(lines: list[str], start: int, end: int) -> tuple[int, str] | None:
+    """Where to put a new phrasing inside a block, and the bullet indent to use."""
+    last, indent = None, None
+    for i in range(start, end):
+        stripped = lines[i].strip()
+        if stripped.startswith("- "):
+            last = i
+            indent = " " * (len(lines[i]) - len(lines[i].lstrip()))
+        elif stripped.startswith("prompts:") and indent is None:
+            indent = " " * (len(lines[i]) - len(lines[i].lstrip()) + 2)
+            last = i
+    if last is None:
+        return None
+    return last + 1, indent or "      "
+
+
+def edit_policy_text(text: str, label: str, *, add_prompt: str | None = None,
+                     remove_prompt: str | None = None, set_unsafe: bool | None = None,
+                     set_field: tuple[str, object] | None = None, delete: bool = False,
+                     new_entry: dict | None = None) -> str:
+    """One surgical change to the policy file, preserving every comment."""
+    lines = text.splitlines()
+    span = _label_span(lines, label)
+
+    if delete:
+        if not span:
+            return text
+        a, b, _ = span
+        return "\n".join(lines[:a] + lines[b:]) + "\n"
+
+    if span is None:
+        if new_entry is None:
+            return text
+        block = [f"  {label}:"]
+        block.append(f"    unsafe: {'true' if new_entry.get('unsafe', True) else 'false'}")
+        if new_entry.get("unsafe", True) and new_entry.get("category"):
+            block.append(f"    category: {new_entry['category']}")
+        if new_entry.get("reject_min") is not None:
+            block.append(f"    reject_min: {new_entry['reject_min']}")
+        block.append("    prompts:")
+        for p in new_entry.get("prompts") or []:
+            block.append(f"      - {_scalar(p)}")
+        tail = "" if text.endswith("\n") else "\n"
+        return text + tail + "\n".join(block) + "\n"
+
+    a, b, indent = span
+    if set_unsafe is not None:
+        for i in range(a, b):
+            if lines[i].strip().startswith("unsafe:"):
+                pad = " " * (len(lines[i]) - len(lines[i].lstrip()))
+                lines[i] = f"{pad}unsafe: {'true' if set_unsafe else 'false'}"
+                break
+    if remove_prompt is not None:
+        target = _norm_phrase(remove_prompt)
+        for i in range(a, b):
+            st = lines[i].strip()
+            if st.startswith("- ") and _norm_phrase(st[2:].strip().strip("'\"")) == target:
+                del lines[i]
+                b -= 1
+                break
+    if set_field is not None:
+        key, val = set_field
+        rendered = ("true" if val else "false") if isinstance(val, bool) else str(val)
+        done = False
+        for i in range(a, b):
+            if lines[i].strip().startswith(key + ":"):
+                pad = " " * (len(lines[i]) - len(lines[i].lstrip()))
+                # Keep any trailing comment on the line: on reject_min that comment IS the
+                # measurement the number came from, and dropping it leaves a bare threshold
+                # nobody can defend.
+                tail = ""
+                if "#" in lines[i]:
+                    tail = "   " + lines[i][lines[i].index("#"):]
+                lines[i] = f"{pad}{key}: {rendered}{tail}"
+                done = True
+                break
+        if not done and val is not None:
+            lines.insert(a + 1, f"{indent}  {key}: {rendered}")
+            b += 1
+    if add_prompt:
+        where = _prompts_insert_at(lines, a, b)
+        if where is None:
+            pad = indent + "  "
+            lines[b:b] = [f"{pad}prompts:", f"{pad}  - {_scalar(add_prompt)}"]
+        else:
+            at, bullet = where
+            lines[at:at] = [f"{bullet}- {_scalar(add_prompt)}"]
+    return "\n".join(lines) + "\n"
+
+
+def _scalar(s: str) -> str:
+    """Quote only when YAML would otherwise misread it, so the file keeps its plain look."""
+    s = str(s)
+    if s != s.strip() or not s:
+        return repr(s)
+    if s[0] in "-?:,[]{}#&*!|>'\"%@`" or ": " in s or s.endswith(":"):
+        return "'" + s.replace("'", "''") + "'"
+    return s
+
+
+def _render_preserving(old_text: str, old_doc: dict, new_doc: dict) -> str:
+    """Write `new_doc` by editing `old_text` only where the two differ.
+
+    The callers all build a whole document and hand it over, which is the clearest way to
+    express an intent, and yaml.safe_dump is the obvious way to write one back. It is also
+    how 249 comment lines were destroyed on the first save: dump round-trips the data and
+    nothing else. Rather than make every caller speak in edits, the difference is worked out
+    here and applied as edits, so a save touches the lines it means to and no others.
+
+    Anything this cannot express falls through to safe_dump with a warning, because a policy
+    that refuses to save is worse than one that saves plainly - but the fallback is loud, so
+    it is a bug report rather than a silent loss.
+    """
+    text = old_text
+    old_labels = (old_doc.get("labels") or {})
+    new_labels = (new_doc.get("labels") or {})
+
+    for name in list(old_labels):
+        if name not in new_labels:
+            text = edit_policy_text(text, name, delete=True)
+
+    for name, entry in new_labels.items():
+        if name not in old_labels:
+            text = edit_policy_text(text, name, new_entry=entry)
+            continue
+        before, after = old_labels[name] or {}, entry or {}
+        if bool(before.get("unsafe", True)) != bool(after.get("unsafe", True)):
+            text = edit_policy_text(text, name, set_unsafe=bool(after.get("unsafe", True)))
+        for key in ("category", "reject_min"):
+            if before.get(key) != after.get(key) and after.get(key) is not None:
+                text = edit_policy_text(text, name, set_field=(key, after[key]))
+        old_p = list(before.get("prompts") or [])
+        new_p = list(after.get("prompts") or [])
+        for p in old_p:
+            if not any(_norm_phrase(p) == _norm_phrase(q) for q in new_p):
+                text = edit_policy_text(text, name, remove_prompt=p)
+        for p in new_p:
+            if not any(_norm_phrase(p) == _norm_phrase(q) for q in old_p):
+                text = edit_policy_text(text, name, add_prompt=p)
+
+    try:
+        check = yaml.safe_load(text) or {}
+        if (check.get("labels") or {}).keys() != new_labels.keys():
+            raise ValueError("label set does not match after editing")
+        for k, v in new_labels.items():
+            got = (check["labels"].get(k) or {})
+            if [_norm_phrase(x) for x in (got.get("prompts") or [])] != \
+               [_norm_phrase(x) for x in (v.get("prompts") or [])]:
+                raise ValueError(f"prompts for {k!r} do not match after editing")
+            if bool(got.get("unsafe", True)) != bool(v.get("unsafe", True)):
+                raise ValueError(f"unsafe for {k!r} does not match after editing")
+    except Exception as exc:
+        log.warning("could not edit the policy in place (%s) - rewriting it, which loses the "
+                    "comments. This is a bug worth reporting.", exc)
+        return yaml.safe_dump(new_doc, sort_keys=False, allow_unicode=True)
+    return text
+
+
 def _apply(policy: Path, doc: dict, model_dir: Path) -> tuple[bool, str]:
     """Write, rebuild, reload - or put everything back. See the module docstring."""
     staged = policy.with_suffix(".yaml.staged")
@@ -172,8 +380,12 @@ def _apply(policy: Path, doc: dict, model_dir: Path) -> tuple[bool, str]:
     except Exception:
         return False, "could not stage the current policy; nothing was changed"
     try:
-        policy.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True),
-                          encoding="utf-8")
+        before_text = staged.read_text(encoding="utf-8")
+        # An explicit LF newline, because the default rewrites every line ending to the
+        # platform's on Windows - turning a one-line change into a 484-line diff and burying
+        # what the admin actually did.
+        with policy.open("w", encoding="utf-8", newline="\n") as fh:
+            fh.write(_render_preserving(before_text, yaml.safe_load(before_text) or {}, doc))
         script = Path(current_app.extensions["moderation"].settings.visual.root) / "scripts" / "build_clip_prompts.py"
         if not script.exists():
             raise RuntimeError(f"{script} is missing, so prompts.npz cannot be rebuilt")
