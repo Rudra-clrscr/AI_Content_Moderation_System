@@ -208,7 +208,18 @@ class ImageTrainer:
         # AFTER the hot-reload, so the report describes the probe that is now live rather
         # than the one it replaced.
         try:
-            report = self.category_report(selected_images)
+            # EVERY stored picture, not only the selected ones. A category drops out of the
+            # training set the moment an admin deselects it, and that is exactly the moment
+            # they are asking what now happens to it - a report built from the training set
+            # answers "nothing is known about your gym pictures" by omitting the row.
+            # Teaching counts still come from the selected ones, because that is what
+            # teaching means.
+            try:
+                scored = self.store.all_embeddings(limit=20000)
+            except Exception:
+                scored = selected_images
+            report = self.category_report(scored)
+            self._mark_masked_changes(report)
         except Exception:
             log.warning("could not build the per-category report", exc_info=True)
             report = {}
@@ -318,13 +329,27 @@ class ImageTrainer:
             cat = str(img.get("category", "") or "").lower() or "uncategorised"
             action = str(img.get("action", "") or "").lower()
             c = cats.setdefault(cat, {"n": 0, "teaching_allow": 0, "teaching_block": 0,
-                                      "refused": 0, "by_cause": {}, "contradicting": 0,
-                                      "examples": []})
+                                      "in_training": 0, "refused": 0, "by_cause": {},
+                                      "contradicting": 0, "examples": []})
             c["n"] += 1
-            c["teaching_allow" if action == "allow" else "teaching_block"] += 1
+            # A row that was not in this retrain's training set teaches nothing, however it
+            # is marked. Rows arriving without the column are from get_selected_for_training,
+            # where being in the list IS being selected.
+            if int(img.get("is_selected", 1) or 0):
+                c["in_training"] += 1
+                c["teaching_allow" if action == "allow" else "teaching_block"] += 1
             if refused:
                 c["refused"] += 1
                 c["by_cause"][cause or "policy"] = c["by_cause"].get(cause or "policy", 0) + 1
+                # WHICH written rule, not just "a written rule". When a retrain turns out to
+                # have been overruled, "the policy channel refuses them anyway" leaves the
+                # admin looking for it; "the physique rule refuses them anyway" is the row to
+                # open in the policy tab. Only the prompt channel has a rule to name - the
+                # probe's label is a class and the exemplar is a picture, both reported
+                # elsewhere.
+                if (cause or "policy") == "policy" and res.label:
+                    c.setdefault("by_label", {})
+                    c["by_label"][res.label] = c["by_label"].get(res.label, 0) + 1
             # Marked block and still publishes, or marked allow and is refused anyway.
             if (action == "block" and not refused) or (action == "allow" and refused):
                 c["contradicting"] += 1
@@ -344,6 +369,77 @@ class ImageTrainer:
             # from two counts sitting side by side.
             c["teaches_both_ways"] = bool(c["teaching_allow"] and c["teaching_block"])
         return cats
+
+    def _mark_masked_changes(self, report: dict[str, Any]) -> None:
+        """Say when a retrain moved the probe and the verdict did not move with it.
+
+        THE THING THIS EXPLAINS. An admin selects the gym pictures, retrains, and they are
+        refused. They deselect the gym pictures, retrain, and expect them to be published.
+        They are refused. They select them again, retrain, expecting the refusal back - and
+        conclude the control is one-way and the retrain is broken.
+
+        The retrain is not broken. Measured over that exact sequence, the probe is perfectly
+        reversible: it refuses 45 of the 72 with them selected, 15 with them deselected, and
+        45 again when they are put back. What does not move is the VERDICT, which stays at
+        71 of 72 throughout, because the written `physique` rule refuses at 0.55 everything
+        the probe lets go - the counts simply trade places, 26 by rule and 45 by probe
+        becoming 56 by rule and 15 by probe.
+
+        So the probe is one of three voters and is routinely outvoted, and nothing said so.
+        The admin was reading a training checkbox as an allow/block switch; it is neither -
+        it decides what the probe learns from, and the probe is overruled by a rule they
+        would have to go and edit in the policy tab.
+
+        This names that, per category, by comparing against the previous run's report. It
+        changes no verdict. It is here so that a change with no visible effect is reported as
+        a change with no visible effect, rather than as nothing having happened.
+        """
+        if not report:
+            return
+        try:
+            history = self.store.list_training_history(limit=1)
+        except Exception:
+            return
+        previous = {}
+        if history:
+            details = history[0].get("details") or {}
+            if isinstance(details, dict):
+                previous = details.get("category_report") or {}
+        if not isinstance(previous, dict) or not previous:
+            return
+
+        for name, now in report.items():
+            was = previous.get(name)
+            if not isinstance(was, dict):
+                continue
+            probe_now = int((now.get("by_cause") or {}).get("probe", 0))
+            probe_was = int((was.get("by_cause") or {}).get("probe", 0))
+            now["probe_refused"] = probe_now
+            now["probe_refused_before"] = probe_was
+            now["refused_before"] = int(was.get("refused", 0))
+
+            moved = probe_now - probe_was
+            verdict_moved = int(now.get("refused", 0)) - int(was.get("refused", 0))
+            if moved and not verdict_moved:
+                # Which channel took up the slack, so the admin has somewhere to go. The
+                # rule name is the one to open in the policy tab.
+                others = {k: v for k, v in (now.get("by_cause") or {}).items() if k != "probe"}
+                taker = max(others, key=others.get) if others else ""
+                now["masked_by"] = taker
+                # Name the rule where there is one to name.
+                labels = now.get("by_label") or {}
+                who = f"the {max(labels, key=labels.get)} rule" if (
+                    taker == "policy" and labels) else (
+                    "an admin exemplar" if taker == "exemplar" else
+                    f"the {taker or 'other'} channel")
+                now["masked_by_label"] = max(labels, key=labels.get) if (
+                    taker == "policy" and labels) else ""
+                now["masked_note"] = (
+                    f"The probe now refuses {abs(moved)} "
+                    f"{'more' if moved > 0 else 'fewer'} of these, but the verdict did not "
+                    f"change: {who} refuses them either way. Retraining cannot move this "
+                    f"category on its own - change that rule instead."
+                )
 
     def apply_preset(self, preset_name: str) -> dict[str, Any]:
         """Apply a business policy preset and re-train model.

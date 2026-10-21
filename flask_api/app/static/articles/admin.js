@@ -1519,6 +1519,28 @@
         // the screen was not answering their question. These rows are each category put back
         // through the real decision path, worst first, because the only rows worth opening a
         // modal for are the ones that disagree with what the admin marked.
+        // WHICH CHANNEL REFUSED, and whether the retrain actually moved the verdict. The
+        // probe is one of three voters and is routinely outvoted: deselecting the gym
+        // pictures and retraining takes the probe from 45 refusals to 15, and the written
+        // `physique` rule picks up all 30 of them, so the verdict stays at 71 of 72 and the
+        // admin sees a control that does nothing. Showing the split is what turns "the
+        // retrain is broken" into "the retrain worked and a rule is overruling it".
+        const causeCell = (r) => {
+          const by = r.by_cause || {};
+          const parts = Object.keys(by).sort((a, b) => by[b] - by[a])
+            .map((k) => `${by[k]} ${esc(k)}`);
+          let out = parts.length ? parts.join(", ") : "—";
+          if (typeof r.probe_refused_before === "number" &&
+              r.probe_refused !== r.probe_refused_before) {
+            const d = r.probe_refused - r.probe_refused_before;
+            out += `<div class="train-cat-delta">probe ${d > 0 ? "+" : ""}${d} vs last retrain</div>`;
+          }
+          if (r.masked_note) {
+            out += `<div class="train-cat-masked">${esc(r.masked_note)}</div>`;
+          }
+          return out;
+        };
+
         const rep = data.category_report || {};
         const rows = Object.keys(rep).sort((a, b) => (rep[a].refused_pct) - (rep[b].refused_pct));
         let reportHtml = "";
@@ -1529,25 +1551,32 @@
                 What the live check now does to these pictures
               </span>
               <table class="train-cat-table">
-                <thead><tr><th>Category</th><th>Pictures</th><th>Teaching</th><th>Refused now</th><th>Disagrees</th></tr></thead>
+                <thead><tr><th>Category</th><th>Pictures</th><th>Teaching</th><th>Refused now</th><th>Decided by</th><th>Disagrees</th></tr></thead>
                 <tbody>` +
             rows.map((c) => {
               const r = rep[c];
               // Red when the admin marked these BLOCK and the system mostly publishes them,
               // or marked them ALLOW and it mostly refuses them. Either way the number the
               // admin came to check is the refusal rate, so that is what gets coloured.
-              const mostlyBlock = r.teaching_block >= r.teaching_allow;
+              // With nothing selected there is no teaching intent to judge the rate against,
+              // so fall back to what the pictures are MARKED as.
+              const mostlyBlock = (r.teaching_allow || r.teaching_block)
+                ? r.teaching_block >= r.teaching_allow : true;
               const good = mostlyBlock ? r.refused_pct >= 90 : r.refused_pct <= 10;
               const col = good ? "#16a34a" : (r.refused_pct >= 60 || !mostlyBlock ? "#b45309" : "#dc2626");
-              const teach = [r.teaching_allow ? `${r.teaching_allow} allow` : "",
-                             r.teaching_block ? `${r.teaching_block} block` : ""]
-                            .filter(Boolean).join(" + ");
+              // "not in training" is a real state and the one the admin lands in after
+              // deselecting a category. Saying it beats an empty cell, which reads as a bug.
+              const teach = (r.teaching_allow || r.teaching_block)
+                ? [r.teaching_allow ? `${r.teaching_allow} allow` : "",
+                   r.teaching_block ? `${r.teaching_block} block` : ""].filter(Boolean).join(" + ")
+                : "not in training";
               return `<tr>
                   <td><b>${esc(c)}</b>${r.teaches_both_ways
                       ? ` <span class="train-cat-flag" title="This category teaches the model in both directions at once">both ways</span>` : ""}</td>
                   <td>${r.n}</td>
                   <td>${esc(teach)}</td>
                   <td style="color:${col}; font-weight:700;">${r.refused_pct}%</td>
+                  <td>${causeCell(r)}</td>
                   <td>${r.contradicting
                       ? `<button class="btn-link train-cat-why" type="button" data-cat="${esc(c)}"
                            style="color:#b45309; font-weight:700;">${r.contradicting} &rsaquo;</button>`

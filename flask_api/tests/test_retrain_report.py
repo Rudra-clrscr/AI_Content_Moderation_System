@@ -199,3 +199,72 @@ def test_the_report_is_not_required_for_a_retrain_to_work(store):
                     is_selected=1, embedding=np.zeros(512, dtype=np.float32).tobytes())
     assert ImageTrainer(store, visual_check=Broken()).category_report(
         store.get_selected_for_training()) == {}
+
+
+# ---- when a retrain moves the probe and the verdict does not move with it --------------
+
+def record_previous(store, report):
+    store.record_training(model_name="prev", action_type="fine_tune", status="completed",
+                          total_samples=1, allowed_count=0, blocked_count=1,
+                          classes=["safe", "weapon"], accuracy=0.9,
+                          details={"category_report": report})
+
+
+def test_a_change_the_verdict_absorbed_is_reported_as_such(store):
+    """The sequence that made the control look one-way. Deselecting the gym pictures takes
+    the probe from 45 refusals to 15 and the written rule picks up all 30, so the verdict
+    stays at 71 of 72 and the screen used to show nothing at all."""
+    record_previous(store, {"physique": {"n": 72, "refused": 71,
+                                         "by_cause": {"policy": 26, "probe": 45}}})
+    now = {"physique": {"n": 72, "refused": 71, "by_cause": {"policy": 56, "probe": 15},
+                        "by_label": {"physique": 54, "revealing": 2}}}
+    ImageTrainer(store, visual_check=None)._mark_masked_changes(now)
+
+    r = now["physique"]
+    assert r["probe_refused_before"] == 45 and r["probe_refused"] == 15
+    assert r["masked_by"] == "policy"
+    assert "did not change" in r["masked_note"]
+    assert "30" in r["masked_note"]
+    # And it names the rule, because "the policy channel" leaves the admin hunting for it
+    # while "the physique rule" is the row to open in the policy tab.
+    assert r["masked_by_label"] == "physique"
+    assert "physique rule" in r["masked_note"]
+
+
+def test_a_change_that_did_move_the_verdict_is_not_called_masked(store):
+    """The note must mean something. If it appeared whenever the probe moved it would be
+    noise on every retrain, and the one time it matters would read like all the others."""
+    record_previous(store, {"weapon": {"n": 500, "refused": 400,
+                                       "by_cause": {"probe": 300, "policy": 100}}})
+    now = {"weapon": {"n": 500, "refused": 454, "by_cause": {"probe": 354, "policy": 100}}}
+    ImageTrainer(store, visual_check=None)._mark_masked_changes(now)
+    assert "masked_note" not in now["weapon"]
+    assert now["weapon"]["probe_refused_before"] == 300
+
+
+def test_an_unchanged_probe_says_nothing(store):
+    """Retraining twice with no change in between must not invent a story about it."""
+    rep = {"gore": {"n": 300, "refused": 299, "by_cause": {"probe": 250, "policy": 49}}}
+    record_previous(store, rep)
+    now = {"gore": dict(rep["gore"])}
+    ImageTrainer(store, visual_check=None)._mark_masked_changes(now)
+    assert "masked_note" not in now["gore"]
+
+
+def test_the_first_ever_retrain_has_nothing_to_compare_against(store):
+    """No history, no deltas, no crash - and no invented baseline of zero, which would
+    report every category as having changed on the first run."""
+    now = {"physique": {"n": 72, "refused": 71, "by_cause": {"probe": 45}}}
+    ImageTrainer(store, visual_check=None)._mark_masked_changes(now)
+    assert "probe_refused_before" not in now["physique"]
+    assert "masked_note" not in now["physique"]
+
+
+def test_a_category_that_is_new_since_the_last_retrain_is_skipped(store):
+    """An admin adds a category between runs. It has no previous numbers, so it gets no
+    delta rather than a delta measured against nothing."""
+    record_previous(store, {"weapon": {"n": 5, "refused": 5, "by_cause": {"probe": 5}}})
+    now = {"weapon": {"n": 5, "refused": 5, "by_cause": {"probe": 5}},
+           "rainbow": {"n": 2, "refused": 2, "by_cause": {"exemplar": 2}}}
+    ImageTrainer(store, visual_check=None)._mark_masked_changes(now)
+    assert "probe_refused_before" not in now["rainbow"]

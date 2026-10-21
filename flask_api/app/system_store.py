@@ -693,8 +693,9 @@ class SystemStore:
         """
         with self._tx() as db:
             rows = db.execute(
-                "SELECT id, filename, file_path, category, action, embedding FROM image_policy "
-                "WHERE embedding IS NOT NULL ORDER BY id ASC LIMIT ?", (int(limit),)
+                "SELECT id, filename, file_path, category, action, is_selected, embedding "
+                "FROM image_policy WHERE embedding IS NOT NULL ORDER BY id ASC LIMIT ?",
+                (int(limit),)
             ).fetchall()
             return [dict(r) for r in rows]
 
