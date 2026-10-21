@@ -456,7 +456,21 @@ def upsert_label(name: str):
     # Refusing and allowing the same sentence are both coherent policies, and only the admin
     # knows which they meant - so this stops and asks instead of letting write order decide.
     resolve = str(body.get("resolve", "")).strip().lower() or None
-    conflicts = find_conflicts(doc, key, entry["prompts"], entry["unsafe"], model_dir)
+
+    # ONLY ASK ABOUT WHAT THIS EDIT INTRODUCES. Checking every wording on every save meant
+    # four of the fifteen shipped rules - minor, romantic, unrest and safe - could not be
+    # edited at all: they overlap the `safe` rule closely enough to trip the similarity bar,
+    # they have shipped that way from the start, and changing one rule's reject_min asked the
+    # admin to settle a contradiction they had not made and could only clear by deleting a
+    # wording they had not written.
+    #
+    # A contradiction already in the file is not news. What is news is an edit that creates
+    # one, which is either a wording being ADDED, or a verdict being FLIPPED - and a flip
+    # changes the meaning of every wording the rule already holds, so that case checks them
+    # all. A brand new rule is all-new by definition.
+    previous = (doc["labels"].get(key) or {}) if existed else None
+    check_prompts = prompts_this_edit_introduces(previous, entry)
+    conflicts = find_conflicts(doc, key, check_prompts, entry["unsafe"], model_dir)
     if conflicts and resolve not in ("refuse", "allow"):
         return _err(409, "policy_conflict",
                     "This wording is already used by a rule with the opposite verdict. "
@@ -585,6 +599,34 @@ def _semantic_clashes(doc: dict, label: str, prompts: list[str], unsafe: bool,
                         "other_label": other, "other_verdict": verdict_of.get(other, "refuse"),
                         "this_verdict": mine, "similarity": round(s, 4)})
     return out
+
+
+def prompts_this_edit_introduces(previous: dict | None, entry: dict) -> list[str]:
+    """The wordings this save is actually putting into a new position, and so the only ones
+    worth asking the admin about.
+
+    Checking every wording on every save meant four of the fifteen shipped rules - minor,
+    romantic, unrest and safe - could not be edited at all. They overlap the `safe` rule
+    closely enough to trip the similarity bar, they have shipped that way from the start, and
+    so changing one rule's reject_min asked the admin to settle a contradiction they had not
+    made and could only clear by deleting a wording they had not written. A contradiction
+    already sitting in the file is not news.
+
+    What IS news is an edit that creates one:
+
+      * a rule being created      - every wording in it is new
+      * a verdict being flipped   - every wording it already holds now means the opposite,
+                                    which is exactly the "Stop refusing" press
+      * a wording being added     - just that wording
+
+    `previous` is None for a rule that does not exist yet.
+    """
+    if previous is None:
+        return list(entry.get("prompts") or [])
+    if bool(previous.get("unsafe", True)) != bool(entry.get("unsafe", True)):
+        return list(entry.get("prompts") or [])
+    had = {_norm_phrase(p) for p in (previous.get("prompts") or [])}
+    return [p for p in (entry.get("prompts") or []) if _norm_phrase(p) not in had]
 
 
 def find_conflicts(doc: dict, label: str, prompts: list[str], unsafe: bool,

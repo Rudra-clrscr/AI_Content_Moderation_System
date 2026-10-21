@@ -696,6 +696,34 @@
       let categories = [];
       let imagesData = { items: [], pagination: {}, stats: {} };
       let pendingChanges = new Map(); // id -> { action, is_selected }
+      let blurSensitiveMode = true; // Initial blur for nudity and sexual images
+      let revealedImageIds = new Set(); // IDs of sensitive images revealed by admin
+      let blurredImageIds = new Set(); // IDs of non-sensitive images blurred by admin
+
+      function isSensitiveImage(img) {
+        if (!img) return false;
+        if (img.is_sensitive !== undefined && img.is_sensitive !== null) {
+          return Boolean(img.is_sensitive);
+        }
+        const cat = (img.category || "").toLowerCase();
+        const desc = (img.description || "").toLowerCase();
+        const fn = (img.filename || "").toLowerCase();
+        const p = (img.file_path || "").toLowerCase();
+        const kws = ["sexual", "nudity", "nude", "porn", "pornograph", "nsfw", "erotic"];
+        if (kws.some((k) => cat.includes(k) || desc.includes(k) || fn.includes(k))) return true;
+        return p.includes("/nudity/") || p.includes("/sexual/") || p.includes("/porn/") || p.includes("_quarantine_explicit");
+      }
+
+      function isImageBlurred(img) {
+        if (!img) return false;
+        const isSens = isSensitiveImage(img);
+        if (isSens) {
+          if (!blurSensitiveMode) return false;
+          return !revealedImageIds.has(img.id);
+        } else {
+          return blurredImageIds.has(img.id);
+        }
+      }
 
       function renderShell() {
         frame("Image Policy & Model Fine-Tuning", "Manage stored policy images, add categories, and fine-tune the image model for business requirements.", `
@@ -762,6 +790,7 @@
                 </select>
                 <button class="btn btn-outline" id="btn-select-all" type="button" style="padding:6px 10px; font-size:12px;">Select All</button>
                 <button class="btn btn-outline" id="btn-deselect-all" type="button" style="padding:6px 10px; font-size:12px;">Deselect All</button>
+                <button class="btn btn-outline" id="btn-toggle-blur-all" type="button" style="padding:6px 10px; font-size:12px;" title="Nudity & sexual images are blurred by default. Click to reveal all.">🛡️ NSFW Blur: ON</button>
               </div>
               <div class="img-actions-right">
                 <button class="btn btn-outline" id="btn-upload-modal" type="button" style="border-color:#0284c7; color:#0284c7;">+ Upload Image</button>
@@ -810,6 +839,24 @@
         });
         $("btn-select-all").addEventListener("click", () => bulkSelection(true));
         $("btn-deselect-all").addEventListener("click", () => bulkSelection(false));
+        $("btn-toggle-blur-all").addEventListener("click", () => {
+          blurSensitiveMode = !blurSensitiveMode;
+          if (!blurSensitiveMode) {
+            (imagesData.items || []).forEach((img) => {
+              if (isSensitiveImage(img)) revealedImageIds.add(img.id);
+            });
+          } else {
+            revealedImageIds.clear();
+          }
+          const b = $("btn-toggle-blur-all");
+          if (b) {
+            b.textContent = blurSensitiveMode ? "🛡️ NSFW Blur: ON" : "👁️ NSFW Blur: OFF";
+            b.title = blurSensitiveMode
+              ? "Nudity & sexual images are blurred by default. Click to reveal all."
+              : "Nudity & sexual images are revealed. Click to blur all.";
+          }
+          renderGrid(imagesData.items);
+        });
 
         $("cat-bulk-allow").addEventListener("click", () => bulkCategoryAction("allow"));
         $("cat-bulk-block").addEventListener("click", () => bulkCategoryAction("block"));
@@ -965,19 +1012,38 @@
           const isSelected = pending && pending.is_selected !== undefined ? pending.is_selected : img.is_selected;
           const action = pending && pending.action !== undefined ? pending.action : img.action;
           const isAllow = action === "allow";
+          const isSensitive = isSensitiveImage(img);
+          const isBlurred = isImageBlurred(img);
 
           html += `
             <div class="img-card ${isAllow ? "allow-state" : "block-state"} ${isSelected ? "" : "deselected"}" data-id="${img.id}">
-              <div class="img-thumb-wrap">
+              <div class="img-thumb-wrap ${isSensitive ? "is-sensitive" : ""} ${isBlurred ? "is-blurred" : "is-revealed"}" data-id="${img.id}">
                 <label class="img-check-label" title="Select or deselect this image for model training">
                   <input class="img-check-input" type="checkbox" data-id="${img.id}" ${isSelected ? "checked" : ""}>
                   <span>Train</span>
                 </label>
-                <img class="img-thumb" src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'100\\' height=\\'100\\'><rect width=\\'100\\' height=\\'100\\' fill=\\'%23eee\\'/><text x=\\'50%\\' y=\\'50%\\' fill=\\'%23aaa\\' dominant-baseline=\\'middle\\' text-anchor=\\'middle\\'>No preview</text></svg>'">
+                <img class="img-thumb" src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}" loading="lazy" title="${isBlurred ? 'Image blurred. Click View Image to reveal.' : 'Click to preview full size'}" onerror="this.src=\'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\'><rect width=\'100\' height=\'100\' fill=\'%23eee\'/><text x=\'50%\' y=\'50%\' fill=\'%23aaa\' dominant-baseline=\'middle\' text-anchor=\'middle\'>No preview</text></svg>\'">
+                <div class="img-sensitive-overlay">
+                  <div class="img-sensitive-badge ${isSensitive ? "" : "neutral"}">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    <span>${isSensitive ? "Nudity / Sexual" : "Hidden"}</span>
+                  </div>
+                  <button class="btn-reveal-img" type="button" data-id="${img.id}" title="Click to view image">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    View Image
+                  </button>
+                </div>
+                <button class="btn-hide-img" type="button" data-id="${img.id}" title="Blur and hide this image">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  Blur
+                </button>
               </div>
               <div class="img-card-body">
                 <div class="img-card-meta">
-                  <span class="img-cat-tag">${esc(img.category)}</span>
+                  <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                    <span class="img-cat-tag">${esc(img.category)}</span>
+                    ${isSensitive ? `<span class="img-sensitive-tag" title="Flagged as nudity or sexual content">18+ Sensitive</span>` : ""}
+                  </div>
                   <span class="img-badge ${isAllow ? "allow" : "block"}">${isAllow ? "ALLOWED" : "BLOCKED"}</span>
                 </div>
                 <div class="img-filename" title="${esc(img.filename)}">${esc(img.filename)}</div>
@@ -1111,6 +1177,60 @@
             card.querySelector(".img-badge").textContent = isAllow ? "ALLOWED" : "BLOCKED";
             btn.dataset.action = isAllow ? "block" : "allow";
             btn.textContent = isAllow ? "Switch to BLOCK" : "Switch to ALLOW";
+          });
+        });
+
+        // Wire reveal buttons for all images
+        grid.querySelectorAll(".btn-reveal-img").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const id = parseInt(btn.dataset.id, 10);
+            const imgObj = (items || []).find((it) => it.id === id);
+            if (!imgObj) return;
+            if (isSensitiveImage(imgObj)) {
+              revealedImageIds.add(id);
+            } else {
+              blurredImageIds.delete(id);
+            }
+            const wrap = btn.closest(".img-thumb-wrap");
+            if (wrap) {
+              wrap.classList.remove("is-blurred");
+              wrap.classList.add("is-revealed");
+            }
+          });
+        });
+
+        // Wire blur/hide buttons for all images
+        grid.querySelectorAll(".btn-hide-img").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const id = parseInt(btn.dataset.id, 10);
+            const imgObj = (items || []).find((it) => it.id === id);
+            if (!imgObj) return;
+            if (isSensitiveImage(imgObj)) {
+              revealedImageIds.delete(id);
+            } else {
+              blurredImageIds.add(id);
+            }
+            const wrap = btn.closest(".img-thumb-wrap");
+            if (wrap) {
+              wrap.classList.remove("is-revealed");
+              wrap.classList.add("is-blurred");
+            }
+          });
+        });
+
+        // Wire thumbnail preview click (opens preview modal when revealed)
+        grid.querySelectorAll(".img-thumb").forEach((thumb) => {
+          thumb.addEventListener("click", (e) => {
+            const wrap = thumb.closest(".img-thumb-wrap");
+            if (!wrap) return;
+            const id = parseInt(wrap.dataset.id, 10);
+            const imgObj = (items || []).find((it) => it.id === id);
+            if (!imgObj) return;
+            if (wrap.classList.contains("is-revealed")) {
+              imagePreviewModal(imgObj);
+            }
           });
         });
       }
@@ -1332,6 +1452,26 @@
                 <label for="up-file">Select Image File <span class="req">*</span></label>
                 <input class="input" id="up-file" type="file" accept="image/*">
               </div>
+              <div id="up-preview-wrap" style="display:none; margin: 10px 0;">
+                <span style="font-size:12px; font-weight:700; color:#334155; margin-bottom:4px; display:block;">Image Preview:</span>
+                <div class="img-thumb-wrap" id="up-thumb-box" style="height:170px; border-radius:8px; border:1px solid var(--line);">
+                  <img id="up-preview-img" class="img-thumb" src="" alt="Upload preview">
+                  <div class="img-sensitive-overlay" id="up-sensitive-overlay">
+                    <div class="img-sensitive-badge" id="up-badge">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                      <span id="up-badge-txt">Nudity / Sexual</span>
+                    </div>
+                    <button class="btn-reveal-img" id="up-reveal-btn" type="button">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      View Image
+                    </button>
+                  </div>
+                  <button class="btn-hide-img" id="up-hide-btn" type="button" title="Blur image">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    Blur
+                  </button>
+                </div>
+              </div>
               <div class="field">
                 <label for="up-cat">Category <span class="req">*</span></label>
                 <select class="select" id="up-cat">${catOpts}</select>
@@ -1391,6 +1531,67 @@
         const showRule = () => { q("up-rule-name").textContent = q("up-cat").value || "rule"; };
         q("up-cat").addEventListener("change", showRule);
         showRule();
+
+        let upFileSensitive = false;
+        let upFileBlurred = false;
+
+        function setUploadBoxState(blurred) {
+          upFileBlurred = blurred;
+          const box = q("up-thumb-box");
+          if (!box) return;
+          if (blurred) {
+            box.classList.add("is-blurred");
+            box.classList.remove("is-revealed");
+          } else {
+            box.classList.remove("is-blurred");
+            box.classList.add("is-revealed");
+          }
+        }
+
+        function updateUploadPreviewSensitivity(forceDefault = false) {
+          const file = q("up-file").files[0];
+          if (!file) return;
+          const cat = (q("up-cat").value || "").toLowerCase();
+          const desc = (q("up-desc").value || "").toLowerCase();
+          const fn = (file.name || "").toLowerCase();
+          const kws = ["sexual", "nudity", "nude", "porn", "pornograph", "nsfw", "erotic"];
+          const prevSens = upFileSensitive;
+          upFileSensitive = kws.some((k) => cat.includes(k) || desc.includes(k) || fn.includes(k));
+
+          const badge = q("up-badge");
+          const badgeTxt = q("up-badge-txt");
+
+          if (upFileSensitive) {
+            badge.className = "img-sensitive-badge";
+            badgeTxt.textContent = "Nudity / Sexual";
+            if (forceDefault || !prevSens) setUploadBoxState(true);
+          } else {
+            badge.className = "img-sensitive-badge neutral";
+            badgeTxt.textContent = "Hidden / Blurred";
+            if (forceDefault || prevSens) setUploadBoxState(false);
+          }
+        }
+
+        q("up-file").addEventListener("change", (e) => {
+          const file = e.target.files[0];
+          if (!file) {
+            q("up-preview-wrap").style.display = "none";
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = (re) => {
+            q("up-preview-img").src = re.target.result;
+            q("up-preview-wrap").style.display = "block";
+            updateUploadPreviewSensitivity(true);
+          };
+          reader.readAsDataURL(file);
+        });
+
+        q("up-cat").addEventListener("change", () => updateUploadPreviewSensitivity(false));
+        q("up-desc").addEventListener("input", () => updateUploadPreviewSensitivity(false));
+
+        q("up-reveal-btn").addEventListener("click", () => setUploadBoxState(false));
+        q("up-hide-btn").addEventListener("click", () => setUploadBoxState(true));
         q("up-teach").addEventListener("change", (e) => {
           e.target.closest(".adm-switch").querySelector(".adm-state").textContent =
             e.target.checked ? "ON" : "OFF";
@@ -1700,6 +1901,109 @@
         } catch (err) {
           back.querySelector("#hist-body").innerHTML = `<div class="adm-msg err">${esc(err.message)}</div>`;
         }
+      }
+
+      function imagePreviewModal(img) {
+        const isSens = isSensitiveImage(img);
+        const pending = pendingChanges.get(img.id);
+        const action = pending && pending.action !== undefined ? pending.action : img.action;
+        const isAllow = action === "allow";
+        let modalBlurred = isImageBlurred(img);
+
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        back.style.zIndex = "100";
+        back.innerHTML = `
+          <div class="modal img-preview-modal-dialog" role="dialog" aria-modal="true">
+            <div class="modal-head">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <h2 style="font-size:16px; margin:0; word-break:break-all;">${esc(img.filename)}</h2>
+                ${isSens ? `<span class="img-sensitive-tag">18+ Nudity / Sexual</span>` : ""}
+              </div>
+              <button class="btn-link" id="prev-close-x" type="button" aria-label="Close">✕</button>
+            </div>
+            <div class="img-preview-modal-body" id="prev-body">
+              <img class="img-preview-modal-img ${modalBlurred ? "blurred" : ""}" id="prev-img" src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}">
+              <div class="img-preview-modal-overlay" id="prev-overlay" style="${modalBlurred ? "" : "display:none;"}">
+                <div class="img-sensitive-badge ${isSens ? "" : "neutral"}" style="font-size:12px; padding:4px 10px;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                  ${isSens ? "Explicit / Sexual Content" : "Hidden / Blurred Image"}
+                </div>
+                <button class="btn-reveal-img" id="prev-reveal-btn" type="button" style="font-size:13px; padding:8px 16px;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  Reveal Image
+                </button>
+              </div>
+            </div>
+            <div class="modal-body" style="padding:12px 16px; font-size:13px; background:#f8fafc; border-top:1px solid var(--line);">
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px;">
+                <div><span style="color:var(--muted); font-size:11px; display:block;">Category</span><b>${esc(img.category)}</b></div>
+                <div><span style="color:var(--muted); font-size:11px; display:block;">Policy Action</span>
+                  <span class="img-badge ${isAllow ? "allow" : "block"}">${isAllow ? "ALLOWED" : "BLOCKED"}</span>
+                </div>
+                <div><span style="color:var(--muted); font-size:11px; display:block;">Source</span><b>${esc(img.source || "dataset")}</b></div>
+                <div><span style="color:var(--muted); font-size:11px; display:block;">Exemplar Status</span><b>${img.is_exemplar ? "Live Rule" : "No"}</b></div>
+              </div>
+              ${img.description ? `<div style="margin-top:8px; font-size:12px; color:#475569;"><span style="color:var(--muted);">Description: </span>${esc(img.description)}</div>` : ""}
+            </div>
+            <div class="modal-foot" style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <button class="btn btn-outline" id="prev-toggle-blur-btn" type="button" style="font-size:12px;">
+                  ${modalBlurred ? "Show Image" : "Blur Image"}
+                </button>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-outline" id="prev-close-btn" type="button">Close</button>
+              </div>
+            </div>
+          </div>`;
+
+        document.body.appendChild(back);
+        const close = () => back.remove();
+        back.querySelector("#prev-close-x").addEventListener("click", close);
+        back.querySelector("#prev-close-btn").addEventListener("click", close);
+        back.addEventListener("click", (e) => { if (e.target === back) close(); });
+
+        const prevImg = back.querySelector("#prev-img");
+        const prevOverlay = back.querySelector("#prev-overlay");
+        const toggleBtn = back.querySelector("#prev-toggle-blur-btn");
+
+        function setModalBlur(blurred) {
+          modalBlurred = blurred;
+          if (blurred) {
+            prevImg.classList.add("blurred");
+            prevOverlay.style.display = "flex";
+            if (toggleBtn) toggleBtn.textContent = "Show Image";
+            if (isSens) {
+              revealedImageIds.delete(img.id);
+            } else {
+              blurredImageIds.add(img.id);
+            }
+            const cardWrap = document.querySelector(`.img-thumb-wrap[data-id="${img.id}"]`);
+            if (cardWrap) {
+              cardWrap.classList.remove("is-revealed");
+              cardWrap.classList.add("is-blurred");
+            }
+          } else {
+            prevImg.classList.remove("blurred");
+            prevOverlay.style.display = "none";
+            if (toggleBtn) toggleBtn.textContent = "Blur Image";
+            if (isSens) {
+              revealedImageIds.add(img.id);
+            } else {
+              blurredImageIds.delete(img.id);
+            }
+            const cardWrap = document.querySelector(`.img-thumb-wrap[data-id="${img.id}"]`);
+            if (cardWrap) {
+              cardWrap.classList.remove("is-blurred");
+              cardWrap.classList.add("is-revealed");
+            }
+          }
+        }
+
+        const revealBtn = back.querySelector("#prev-reveal-btn");
+        if (revealBtn) revealBtn.addEventListener("click", () => setModalBlur(false));
+        if (toggleBtn) toggleBtn.addEventListener("click", () => setModalBlur(!modalBlurred));
       }
 
       // Initialize
