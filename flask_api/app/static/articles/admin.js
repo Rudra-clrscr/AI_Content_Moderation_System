@@ -451,10 +451,29 @@
       async function save(name, entry, what) {
         const msg = $("pol-msg");
         if (msg) { msg.className = "adm-msg"; msg.textContent = `Applying ${what}…`; }
+        const apply = async (resolve) =>
+          call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(name)}`,
+               resolve ? { ...entry, resolve } : entry);
         try {
-          await call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(name)}`, entry);
+          await apply();
           await load(`${what} applied. The model is using it now.`, true);
         } catch (err) {
+          // A CONFLICT IS A QUESTION, NOT A FAILURE. The server answers 409 with the clashing
+          // rules precisely so the admin can be asked which verdict stands, and this path -
+          // the Stop refusing / Start refusing buttons on the rule list - printed the
+          // sentence and stopped. The sentence ends "Choose which one should stand", so the
+          // admin was told to make a choice they were never offered, with no way forward and
+          // nothing changed. Same dialog the New/Edit rule path already opens.
+          if (err.code === "policy_conflict" && err.detail && (err.detail.conflicts || []).length) {
+            if (msg) { msg.className = "adm-msg"; msg.textContent = ""; }
+            conflictModal(err.detail, async (verdict) => {
+              try {
+                await apply(verdict);
+                await load(`${what} applied. The model is using it now.`, true);
+              } catch (e2) { await load(e2.message, false); }
+            });
+            return;
+          }
           await load(err.message, false);
         }
       }
