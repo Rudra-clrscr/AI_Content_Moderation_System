@@ -118,11 +118,18 @@
     let currentAdmin = "";
 
     const $ = (id) => root.querySelector("#" + id);
+    // `ok` is true (done), false (failed) or "busy" (still going). The third state is here
+    // because without it every in-progress line was painted in the failure colour: a retrain
+    // announced itself with "Extracting embeddings & fine-tuning linear probe…" in red and
+    // sat there for the length of the job, which reads as an error message that never
+    // resolves. Telling somebody their retrain has failed while it is running is a good way
+    // to have them stop it and conclude the feature is broken.
     const say = (text, ok = false) => {
       const el = $("adm-msg");
       if (!el) return;
       el.textContent = text || "";
-      el.className = "adm-msg " + (text ? (ok ? "ok" : "err") : "");
+      const tone = ok === "busy" ? "busy" : (ok ? "ok" : "err");
+      el.className = "adm-msg " + (text ? tone : "");
     };
     const busy = (btn, on, label) => {
       if (!btn) return;
@@ -1212,7 +1219,7 @@
       async function triggerTraining() {
         const btn = $("btn-train-model");
         busy(btn, true, "Training Vision Model…");
-        say("Extracting embeddings & fine-tuning linear probe across selected images…");
+        say("Extracting embeddings & fine-tuning linear probe across selected images…", "busy");
 
         try {
           // If there are pending changes, save them first

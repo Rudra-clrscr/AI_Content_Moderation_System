@@ -241,6 +241,9 @@ textarea.input { resize: vertical; min-height: 96px; }
 .adm-card { padding: 24px; max-width: 520px; }
 .adm-msg { min-height: 0; margin-bottom: 12px; font-size: 14px; }
 .adm-msg.ok { color: #1f8f4e; } .adm-msg.err { color: var(--danger); }
+/* Still running. Neutral on purpose: a job in progress is not a failure, and it was being
+   painted in the failure colour for as long as the job took. */
+.adm-msg.busy { color: #475569; }
 .adm-msg:empty { display: none; }
 .adm-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .adm-pw { display: flex; gap: 8px; } .adm-pw .input { flex: 1; } .adm-eye { min-width: 64px; }
