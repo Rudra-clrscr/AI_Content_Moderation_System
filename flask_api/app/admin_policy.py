@@ -37,13 +37,16 @@ flask_api/config/.
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import yaml
 from flask import Blueprint, current_app, jsonify, request
 
@@ -161,6 +164,214 @@ def _validate(name: str, body: dict) -> tuple[str, dict] | tuple[None, object]:
     return name, entry
 
 
+# ---- editing the policy file without destroying it -------------------------------------
+# config/visual_policy.yaml is 484 lines of which 249 are comments, and they are the
+# reasoning: why `minor` sits at 0.85 when `violence` sits at 0.57, which image set each bar
+# was measured on, what the `safe` list is for. yaml.safe_dump round-trips the data and throws
+# every line of it away - the first version of this feature did exactly that and silently cut
+# the file from 484 lines to 176.
+#
+# So the file is edited as TEXT, in place, one operation at a time. Nothing is re-rendered:
+# adding a phrasing inserts a line, flipping a verdict replaces one, a new rule is appended
+# and a deleted one is cut. Every byte nobody asked to change is left alone, including the
+# comments belonging to rules an admin never touched.
+
+def _label_span(lines: list[str], label: str) -> tuple[int, int, str] | None:
+    """(first line, line after last, indent) of a label's block, or None.
+
+    A block runs from its `name:` line to the next key at the same indent. Comment lines
+    immediately ABOVE the key belong to it - that is where this file documents a rule - so
+    they are included, and a deletion takes them with it rather than leaving an explanation
+    for something that is gone.
+    """
+    start = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if stripped.split(":")[0].strip() == label and stripped.endswith(":") or \
+           stripped.startswith(label + ":"):
+            if start is None and indent >= 2:
+                start = i
+                own_indent = indent
+                break
+    if start is None:
+        return None
+    j = start
+    while j > 0 and lines[j - 1].strip().startswith("#"):
+        j -= 1
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if line.strip() and not line.strip().startswith("#"):
+            if len(line) - len(line.lstrip()) <= own_indent:
+                break
+        end += 1
+    # Trailing comments that introduce the NEXT rule stay with the next rule.
+    while end > start + 1 and lines[end - 1].strip().startswith("#"):
+        end -= 1
+    return j, end, " " * own_indent
+
+
+def _prompts_insert_at(lines: list[str], start: int, end: int) -> tuple[int, str] | None:
+    """Where to put a new phrasing inside a block, and the bullet indent to use."""
+    last, indent = None, None
+    for i in range(start, end):
+        stripped = lines[i].strip()
+        if stripped.startswith("- "):
+            last = i
+            indent = " " * (len(lines[i]) - len(lines[i].lstrip()))
+        elif stripped.startswith("prompts:") and indent is None:
+            indent = " " * (len(lines[i]) - len(lines[i].lstrip()) + 2)
+            last = i
+    if last is None:
+        return None
+    return last + 1, indent or "      "
+
+
+def edit_policy_text(text: str, label: str, *, add_prompt: str | None = None,
+                     remove_prompt: str | None = None, set_unsafe: bool | None = None,
+                     set_field: tuple[str, object] | None = None, delete: bool = False,
+                     new_entry: dict | None = None) -> str:
+    """One surgical change to the policy file, preserving every comment."""
+    lines = text.splitlines()
+    span = _label_span(lines, label)
+
+    if delete:
+        if not span:
+            return text
+        a, b, _ = span
+        return "\n".join(lines[:a] + lines[b:]) + "\n"
+
+    if span is None:
+        if new_entry is None:
+            return text
+        block = [f"  {label}:"]
+        block.append(f"    unsafe: {'true' if new_entry.get('unsafe', True) else 'false'}")
+        if new_entry.get("unsafe", True) and new_entry.get("category"):
+            block.append(f"    category: {new_entry['category']}")
+        if new_entry.get("reject_min") is not None:
+            block.append(f"    reject_min: {new_entry['reject_min']}")
+        block.append("    prompts:")
+        for p in new_entry.get("prompts") or []:
+            block.append(f"      - {_scalar(p)}")
+        tail = "" if text.endswith("\n") else "\n"
+        return text + tail + "\n".join(block) + "\n"
+
+    a, b, indent = span
+    if set_unsafe is not None:
+        for i in range(a, b):
+            if lines[i].strip().startswith("unsafe:"):
+                pad = " " * (len(lines[i]) - len(lines[i].lstrip()))
+                lines[i] = f"{pad}unsafe: {'true' if set_unsafe else 'false'}"
+                break
+    if remove_prompt is not None:
+        target = _norm_phrase(remove_prompt)
+        for i in range(a, b):
+            st = lines[i].strip()
+            if st.startswith("- ") and _norm_phrase(st[2:].strip().strip("'\"")) == target:
+                del lines[i]
+                b -= 1
+                break
+    if set_field is not None:
+        key, val = set_field
+        rendered = ("true" if val else "false") if isinstance(val, bool) else str(val)
+        done = False
+        for i in range(a, b):
+            if lines[i].strip().startswith(key + ":"):
+                pad = " " * (len(lines[i]) - len(lines[i].lstrip()))
+                # Keep any trailing comment on the line: on reject_min that comment IS the
+                # measurement the number came from, and dropping it leaves a bare threshold
+                # nobody can defend.
+                tail = ""
+                if "#" in lines[i]:
+                    tail = "   " + lines[i][lines[i].index("#"):]
+                lines[i] = f"{pad}{key}: {rendered}{tail}"
+                done = True
+                break
+        if not done and val is not None:
+            lines.insert(a + 1, f"{indent}  {key}: {rendered}")
+            b += 1
+    if add_prompt:
+        where = _prompts_insert_at(lines, a, b)
+        if where is None:
+            pad = indent + "  "
+            lines[b:b] = [f"{pad}prompts:", f"{pad}  - {_scalar(add_prompt)}"]
+        else:
+            at, bullet = where
+            lines[at:at] = [f"{bullet}- {_scalar(add_prompt)}"]
+    return "\n".join(lines) + "\n"
+
+
+def _scalar(s: str) -> str:
+    """Quote only when YAML would otherwise misread it, so the file keeps its plain look."""
+    s = str(s)
+    if s != s.strip() or not s:
+        return repr(s)
+    if s[0] in "-?:,[]{}#&*!|>'\"%@`" or ": " in s or s.endswith(":"):
+        return "'" + s.replace("'", "''") + "'"
+    return s
+
+
+def _render_preserving(old_text: str, old_doc: dict, new_doc: dict) -> str:
+    """Write `new_doc` by editing `old_text` only where the two differ.
+
+    The callers all build a whole document and hand it over, which is the clearest way to
+    express an intent, and yaml.safe_dump is the obvious way to write one back. It is also
+    how 249 comment lines were destroyed on the first save: dump round-trips the data and
+    nothing else. Rather than make every caller speak in edits, the difference is worked out
+    here and applied as edits, so a save touches the lines it means to and no others.
+
+    Anything this cannot express falls through to safe_dump with a warning, because a policy
+    that refuses to save is worse than one that saves plainly - but the fallback is loud, so
+    it is a bug report rather than a silent loss.
+    """
+    text = old_text
+    old_labels = (old_doc.get("labels") or {})
+    new_labels = (new_doc.get("labels") or {})
+
+    for name in list(old_labels):
+        if name not in new_labels:
+            text = edit_policy_text(text, name, delete=True)
+
+    for name, entry in new_labels.items():
+        if name not in old_labels:
+            text = edit_policy_text(text, name, new_entry=entry)
+            continue
+        before, after = old_labels[name] or {}, entry or {}
+        if bool(before.get("unsafe", True)) != bool(after.get("unsafe", True)):
+            text = edit_policy_text(text, name, set_unsafe=bool(after.get("unsafe", True)))
+        for key in ("category", "reject_min"):
+            if before.get(key) != after.get(key) and after.get(key) is not None:
+                text = edit_policy_text(text, name, set_field=(key, after[key]))
+        old_p = list(before.get("prompts") or [])
+        new_p = list(after.get("prompts") or [])
+        for p in old_p:
+            if not any(_norm_phrase(p) == _norm_phrase(q) for q in new_p):
+                text = edit_policy_text(text, name, remove_prompt=p)
+        for p in new_p:
+            if not any(_norm_phrase(p) == _norm_phrase(q) for q in old_p):
+                text = edit_policy_text(text, name, add_prompt=p)
+
+    try:
+        check = yaml.safe_load(text) or {}
+        if (check.get("labels") or {}).keys() != new_labels.keys():
+            raise ValueError("label set does not match after editing")
+        for k, v in new_labels.items():
+            got = (check["labels"].get(k) or {})
+            if [_norm_phrase(x) for x in (got.get("prompts") or [])] != \
+               [_norm_phrase(x) for x in (v.get("prompts") or [])]:
+                raise ValueError(f"prompts for {k!r} do not match after editing")
+            if bool(got.get("unsafe", True)) != bool(v.get("unsafe", True)):
+                raise ValueError(f"unsafe for {k!r} does not match after editing")
+    except Exception as exc:
+        log.warning("could not edit the policy in place (%s) - rewriting it, which loses the "
+                    "comments. This is a bug worth reporting.", exc)
+        return yaml.safe_dump(new_doc, sort_keys=False, allow_unicode=True)
+    return text
+
+
 def _apply(policy: Path, doc: dict, model_dir: Path) -> tuple[bool, str]:
     """Write, rebuild, reload - or put everything back. See the module docstring."""
     staged = policy.with_suffix(".yaml.staged")
@@ -169,8 +380,12 @@ def _apply(policy: Path, doc: dict, model_dir: Path) -> tuple[bool, str]:
     except Exception:
         return False, "could not stage the current policy; nothing was changed"
     try:
-        policy.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True),
-                          encoding="utf-8")
+        before_text = staged.read_text(encoding="utf-8")
+        # An explicit LF newline, because the default rewrites every line ending to the
+        # platform's on Windows - turning a one-line change into a 484-line diff and burying
+        # what the admin actually did.
+        with policy.open("w", encoding="utf-8", newline="\n") as fh:
+            fh.write(_render_preserving(before_text, yaml.safe_load(before_text) or {}, doc))
         script = Path(current_app.extensions["moderation"].settings.visual.root) / "scripts" / "build_clip_prompts.py"
         if not script.exists():
             raise RuntimeError(f"{script} is missing, so prompts.npz cannot be rebuilt")
@@ -237,6 +452,31 @@ def upsert_label(name: str):
     doc = _read(policy)
     doc.setdefault("labels", {})
     existed = key in doc["labels"]
+
+    # Refusing and allowing the same sentence are both coherent policies, and only the admin
+    # knows which they meant - so this stops and asks instead of letting write order decide.
+    resolve = str(body.get("resolve", "")).strip().lower() or None
+    conflicts = find_conflicts(doc, key, entry["prompts"], entry["unsafe"], model_dir)
+    if conflicts and resolve not in ("refuse", "allow"):
+        return _err(409, "policy_conflict",
+                    "This wording is already used by a rule with the opposite verdict. "
+                    "Choose which one should stand.",
+                    conflicts=conflicts,
+                    this_verdict="refuse" if entry["unsafe"] else "allow")
+    if conflicts:
+        if resolve == ("refuse" if entry["unsafe"] else "allow"):
+            _resolve_conflicts(doc, conflicts, keep=resolve)
+        else:
+            # The existing rule wins, so the clashing phrasings are dropped from THIS one.
+            entry["prompts"] = [p for p in entry["prompts"]
+                                if not any(_norm_phrase(p) == _norm_phrase(c["phrasing"])
+                                           for c in conflicts)]
+            if not entry["prompts"]:
+                return _err(409, "policy_conflict",
+                            "Every wording in this rule is already used by a rule with the "
+                            "opposite verdict, so keeping those leaves this rule with nothing.",
+                            conflicts=conflicts)
+
     doc["labels"][key] = entry
     ok, msg = _apply(policy, doc, model_dir)
     if not ok:
@@ -271,6 +511,555 @@ def delete_label(name: str):
     if not ok:
         return _err(500, "policy_build_failed", msg)
     return jsonify({"status": "deleted", "label": key})
+
+
+def _norm_phrase(s: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", "", str(s).lower())).strip()
+
+
+# How alike two wordings must be to count as the same rule. Measured against
+# "a photo of rainbow": the ways a person rephrases it - "a photo of a rainbow", "a rainbow
+# photo", "rainbow", "a photo of a rainbow in the sky" - score 0.923 to 0.990, while unrelated
+# subjects (a handgun, a wedding, a baby, steel pipes) score 0.743 to 0.844. Nothing lands
+# between 0.845 and 0.922, so the bar goes in that gap rather than being picked by feel.
+PHRASE_SAME_MIN = 0.88
+
+
+def _semantic_clashes(doc: dict, label: str, prompts: list[str], unsafe: bool,
+                      model_dir: Path) -> list[dict]:
+    """Conflicts between wordings that MEAN the same thing without being the same string.
+
+    The first version compared normalised text, which caught "A photo of Rainbow." against
+    "a photo of rainbow" and nothing else. That is not how the clash arises: an admin writes
+    an allowing rule, uploads a picture weeks later and describes it afresh, and the two
+    sentences agree in meaning and differ in wording. Measured, one extra article was enough
+    to slip through - "a photo of a rainbow" against "a photo of rainbow" went undetected -
+    so the guard existed and never fired on the case it was built for.
+
+    Compared in CLIP's own text space, because that is the space the rules are scored in: two
+    wordings the encoder places together WILL match the same pictures, whatever a human thinks
+    of them. The existing wordings are already encoded in prompts.npz, so this costs one
+    subprocess for the new sentences rather than re-encoding the whole policy.
+    """
+    import numpy as np
+    npz = model_dir / "prompts.npz"
+    script = Path(current_app.extensions["moderation"].settings.visual.root) / "scripts" / "encode_prompts.py"
+    if not npz.exists() or not script.exists():
+        return []
+    try:
+        data = np.load(npz, allow_pickle=False)
+        baked = data["embeds"].astype(np.float32)
+        baked_prompts = [str(x) for x in data["prompts"]]
+        baked_labels = [str(x) for x in data["labels"]]
+        proc = subprocess.run([sys.executable, str(script), "--model-dir", str(model_dir)],
+                              input=json.dumps(list(prompts)), capture_output=True, text=True,
+                              timeout=BUILD_TIMEOUT_S, cwd=str(script.parent.parent))
+        if proc.returncode != 0:
+            log.warning("conflict check could not encode: %s", (proc.stderr or "")[-200:])
+            return []
+        new = np.asarray(json.loads(proc.stdout)["embeds"], dtype=np.float32)
+    except Exception:
+        log.exception("semantic conflict check failed - falling back to exact matching only")
+        return []
+    if new.shape[1] != baked.shape[1]:
+        return []
+
+    verdict_of = {k: ("refuse" if (e or {}).get("unsafe", True) else "allow")
+                  for k, e in (doc.get("labels") or {}).items()}
+    mine = "refuse" if unsafe else "allow"
+    out, seen = [], set()
+    sims = new @ baked.T
+    for i, phrase in enumerate(prompts):
+        for j in np.argsort(-sims[i]):
+            s = float(sims[i, j])
+            if s < PHRASE_SAME_MIN:
+                break
+            other = baked_labels[j]
+            if other == label or verdict_of.get(other, "refuse") == mine:
+                continue
+            key = (phrase, other, baked_prompts[j])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"phrasing": baked_prompts[j], "your_wording": phrase,
+                        "other_label": other, "other_verdict": verdict_of.get(other, "refuse"),
+                        "this_verdict": mine, "similarity": round(s, 4)})
+    return out
+
+
+def find_conflicts(doc: dict, label: str, prompts: list[str], unsafe: bool,
+                   model_dir: Path | None = None) -> list[dict]:
+    """Phrasings that would mean REFUSE in one rule and ALLOW in another.
+
+    This is reachable in normal use and silent when it happens. An admin writes an allowing
+    rule "a photo of rainbow", then uploads a rainbow photograph, describes it the same way
+    and marks it refuse - and the identical sentence now lives in a refusing rule and an
+    allowing rule at once. Both score the same picture, the softmax splits between them, and
+    which one wins depends on the other labels in the file rather than on anything anyone
+    decided. The admin sees a rainbow refused and no reason why.
+
+    The clash is not resolvable by the system: refusing and allowing the same thing are both
+    coherent policies and only the admin knows which they meant. So this reports it and the
+    caller asks, rather than picking by write order - which is what happened before, and
+    picked whichever rule was edited second.
+
+    Comparison is on alphanumerics and single spaces, so "A photo of a Rainbow." and
+    "a photo of a rainbow" count as the same sentence. Near-duplicates that differ in wording
+    are left alone: catching those needs a similarity threshold, and a false alarm here blocks
+    a legitimate edit.
+    """
+    want = {_norm_phrase(p) for p in prompts if _norm_phrase(p)}
+    if not want:
+        return []
+    out = []
+    # Meaning first, since that is the case this exists for; identical strings are a subset
+    # the encoder also catches, but the exact pass below costs nothing and still runs when the
+    # encoder is unavailable.
+    if model_dir is not None:
+        out.extend(_semantic_clashes(doc, label, [p for p in prompts if _norm_phrase(p)],
+                                     unsafe, model_dir))
+    already = {(c["other_label"], _norm_phrase(c["phrasing"])) for c in out}
+    for other, entry in (doc.get("labels") or {}).items():
+        if other == label or not isinstance(entry, dict):
+            continue
+        if bool(entry.get("unsafe", True)) == bool(unsafe):
+            continue
+        for p in (entry.get("prompts") or []):
+            if _norm_phrase(p) in want and (other, _norm_phrase(p)) not in already:
+                out.append({
+                    "phrasing": p, "other_label": other,
+                    "other_verdict": "refuse" if entry.get("unsafe", True) else "allow",
+                    "this_verdict": "refuse" if unsafe else "allow",
+                })
+    return out
+
+
+def _resolve_conflicts(doc: dict, conflicts: list[dict], keep: str) -> None:
+    """Apply the admin's choice by removing the losing copy of the phrasing.
+
+    `keep` is the verdict that survives. The phrasing is dropped from every rule holding the
+    other verdict - not the rule itself, which may carry other phrasings that are still wanted.
+    A rule left with no phrasings at all is removed, because a rule that matches nothing is a
+    row in the policy file pretending to be a decision.
+    """
+    for c in conflicts:
+        if c["other_verdict"] == keep:
+            continue
+        entry = (doc.get("labels") or {}).get(c["other_label"])
+        if not isinstance(entry, dict):
+            continue
+        entry["prompts"] = [p for p in (entry.get("prompts") or [])
+                            if _norm_phrase(p) != _norm_phrase(c["phrasing"])]
+        if not entry["prompts"]:
+            doc["labels"].pop(c["other_label"], None)
+            log.info("policy: rule %r removed, its only phrasing lost the conflict",
+                     c["other_label"])
+
+
+def add_phrasing(label: str, phrasing: str, unsafe: bool = True,
+                 category: str | None = None, resolve: str | None = None) -> dict:
+    """Add one phrasing to a policy rule, creating the rule if it does not exist yet.
+
+    Called when an admin uploads a picture and says what it is. That sentence is worth more
+    than a caption: it is a zero-shot rule, and it generalises where the picture itself cannot.
+    Measured on this corpus at matched false-positive rates, one wedding photograph as an
+    exemplar catches 82.7% of other wedding photographs and the sentence "a photo of a wedding
+    ceremony" catches 79.1% - but they miss DIFFERENT ones, and together they catch 93.3%. On
+    weapons, where a knife and a rifle look nothing alike, one picture catches 8.0% and the
+    sentence 13.6%, together 21.4%.
+
+    An existing rule only ever GAINS a phrasing here; its unsafe flag is left alone. Flipping
+    a live rule from "refusing" to "allowed" as a side effect of someone uploading a picture
+    would be a policy change nobody asked for, made by a form that looks like a file picker.
+    """
+    policy, default, model_dir = _paths()
+    _ensure_default(policy, default)
+    doc = _read(policy)
+    doc.setdefault("labels", {})
+    key = str(label).strip().lower()
+    existed = key in doc["labels"]
+    entry = doc["labels"].get(key) or {"unsafe": unsafe, "prompts": []}
+    prompts = list(entry.get("prompts") or [])
+    phrasing = str(phrasing).strip()
+    if not phrasing:
+        return {"added": False, "reason": "empty"}
+    if any(p.strip().lower() == phrasing.lower() for p in prompts):
+        return {"added": False, "reason": "already there", "label": key}
+    if len(prompts) >= MAX_PROMPTS:
+        return {"added": False, "reason": f"rule already has {MAX_PROMPTS} phrasings",
+                "label": key}
+    conflicts = find_conflicts(doc, key, [phrasing], unsafe, model_dir)
+    if conflicts and resolve not in ("refuse", "allow"):
+        return {"added": False, "reason": "conflict", "label": key, "conflicts": conflicts}
+    if conflicts:
+        if resolve == ("refuse" if unsafe else "allow"):
+            _resolve_conflicts(doc, conflicts, keep=resolve)
+        else:
+            # The admin chose the OTHER verdict, so this phrasing is simply not added and the
+            # existing rule stands. Reported as resolved rather than failed: the decision was
+            # made and acted on, it just went the other way.
+            return {"added": False, "reason": "resolved_in_favour_of_existing",
+                    "label": key, "kept": resolve, "conflicts": conflicts}
+    prompts.append(phrasing)
+    entry["prompts"] = prompts
+    if not existed:
+        entry["unsafe"] = bool(unsafe)
+        if unsafe:
+            entry["category"] = (category or key).strip().lower()
+    doc["labels"][key] = entry
+    ok, msg = _apply(policy, doc, model_dir)
+    return {"added": bool(ok), "label": key, "created_rule": not existed,
+            "phrasings": len(prompts), "error": None if ok else msg}
+
+
+def _rows_by_id(store, ids: list[int]) -> list[dict]:
+    """The stored rows for these ids, with their embeddings."""
+    want = set(ids)
+    return [r for r in store.all_embeddings(limit=20000) if r["id"] in want]
+
+
+def _written_verdict(visual, img) -> tuple[str | None, str | None, float | None]:
+    """What the WRITTEN rules say about this picture: ("refuse"|"allow", label, score).
+
+    Scored through the same softmax the live check uses, so the number is the one that would
+    appear in a moderation result rather than a raw similarity. Returns (None, None, None)
+    when nothing is confident enough to be worth contradicting - see the caller for why a
+    weak match must not raise a warning.
+    """
+    try:
+        import numpy as np
+        v = np.frombuffer(img["embedding"], dtype=np.float32)
+        if v.size == 0 or visual._prompt_embeds is None:
+            return None, None, None
+        v = v / max(float(np.linalg.norm(v)), 1e-12)
+        if v.shape[0] != visual._prompt_embeds.shape[1]:
+            return None, None, None
+        sims = visual._prompt_embeds @ v
+        labels = np.asarray(visual._labels)
+        names = sorted(set(visual._labels))
+        best = np.array([sims[labels == n].max() for n in names], dtype=np.float32)
+        z = best * getattr(visual, "_scale", 100.0) + getattr(visual, "_bias", 0.0)
+        p = np.exp(z - z.max()); p = p / p.sum()
+        top = names[int(p.argmax())]
+        score = float(p.max())
+        unsafe = top in visual._categories
+        bar = visual._thresholds.get(top, visual.config.reject_min)
+        if unsafe and score >= bar:
+            return "block", top, score
+        if not unsafe and score >= bar:
+            return "allow", top, score
+        return None, None, None
+    except Exception:
+        log.exception("could not read the written verdict for image %s", img.get("id"))
+        return None, None, None
+
+
+def _export_exemplars(model_dir: Path) -> dict:
+    """Write models/img_v1/exemplars.npz from the marked pictures, then reload it live.
+
+    A file rather than a database read inside app/clip.py, for the same reason prompts.npz is
+    a file: the serving layer owns the vision encoder and two npz files and knows nothing
+    about data/system.db, which belongs to the admin side. Keeping that line means the
+    moderation path has no dependency on the dashboard being installed, configured, or even
+    present.
+    """
+    store = current_app.extensions["system_store"]
+    rows = store.list_exemplars()
+    vecs, actions, cats, ids = [], [], [], []
+    for r in rows:
+        try:
+            v = np.frombuffer(r["embedding"], dtype=np.float32)
+        except Exception:
+            continue
+        if v.size == 0:
+            continue
+        vecs.append(v)
+        actions.append(str(r.get("action") or "block"))
+        cats.append(str(r.get("category") or ""))
+        ids.append(int(r["id"]))
+    out = model_dir / "exemplars.npz"
+    if vecs:
+        width = max(v.shape[0] for v in vecs)
+        keep = [i for i, v in enumerate(vecs) if v.shape[0] == width]
+        np.savez_compressed(
+            out, embeds=np.stack([vecs[i] for i in keep]).astype(np.float32),
+            actions=np.array([actions[i] for i in keep]),
+            categories=np.array([cats[i] for i in keep]),
+            ids=np.array([ids[i] for i in keep], dtype=np.int64))
+    else:
+        # No exemplars left is a legitimate state - the admin removed the last one - and it
+        # has to be written, not skipped, or the live check keeps matching against a file
+        # describing pictures nobody marked any more.
+        np.savez_compressed(out, embeds=np.zeros((0, 1), dtype=np.float32),
+                            actions=np.array([]), categories=np.array([]),
+                            ids=np.array([], dtype=np.int64))
+    ok = current_app.extensions["moderation"].settings.visual.reload_exemplars()
+    n_block = sum(1 for a in actions if a == "block")
+    return {"exemplars": len(ids), "refusing": n_block, "allowing": len(ids) - n_block,
+            "reloaded": bool(ok)}
+
+
+@admin_policy_bp.post("/v1/admin/policy/labels/<name>/phrasings")
+def add_phrasing_endpoint(name: str):
+    """Add ONE phrasing to a rule, optionally resolving a conflict.
+
+    Separate from the full PUT because that replaces a rule's whole prompt list, and the two
+    callers that need this - the upload form and the conflict dialog it raises - are adding a
+    single sentence to whatever is already there. Going through PUT would mean the client
+    reconstructing the existing wordings and sending them back, which is a race with anyone
+    else editing and a way to lose phrasings by accident.
+    """
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    body = request.get_json(silent=True) or {}
+    phrasing = str(body.get("phrasing", "")).strip()
+    if not phrasing:
+        return _err(400, "missing_phrasing", "Give the phrasing to add.")
+    res = add_phrasing(str(name), phrasing,
+                       unsafe=bool(body.get("unsafe", True)),
+                       category=body.get("category"),
+                       resolve=str(body.get("resolve", "")).strip().lower() or None)
+    if res.get("reason") == "conflict":
+        return _err(409, "policy_conflict",
+                    "This wording is already used by a rule with the opposite verdict. "
+                    "Choose which one should stand.",
+                    conflicts=res.get("conflicts", []),
+                    this_verdict="refuse" if body.get("unsafe", True) else "allow")
+    if not res.get("added") and res.get("error"):
+        return _err(500, "policy_build_failed", res["error"])
+    return jsonify(res)
+
+
+@admin_policy_bp.get("/v1/admin/policy/exemplars")
+def list_exemplars():
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    store = current_app.extensions["system_store"]
+    rows = [{k: v for k, v in r.items() if k != "embedding"} for r in store.list_exemplars()]
+    visual = current_app.extensions["moderation"].settings.visual
+    return jsonify({"exemplars": rows, "count": len(rows),
+                    "reject_min": visual.config.exemplar_reject_min})
+
+
+@admin_policy_bp.put("/v1/admin/policy/exemplars")
+def set_exemplars():
+    """Point at pictures: "refuse things like this", "allow things like this", or neither.
+
+    This is the half of policy an admin actually has. Writing phrasings is a skill; pointing
+    at a picture they just looked at is not, and it is how the request arrives - somebody
+    uploads an image and wants it refused, or changes their mind about one that is being
+    refused now. It takes effect on the next upload: no retraining, no dataset, and undoing it
+    is clearing the same flag.
+    """
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    body = request.get_json(silent=True) or {}
+    ids = body.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return _err(400, "missing_ids", "Give the image ids to mark.")
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return _err(400, "bad_ids", "Image ids must be numbers.")
+    mode = str(body.get("mode", "")).strip().lower()
+    if mode not in ("block", "allow", "clear"):
+        return _err(400, "bad_mode", "mode must be 'block', 'allow' or 'clear'.")
+
+    store = current_app.extensions["system_store"]
+    resolve = str(body.get("resolve", "")).strip().lower() or None
+
+    # WHAT ELSE THIS WOULD CATCH. An exemplar generalises by appearance, and appearance does
+    # not respect the categories a person has in mind: a rainbow marked "refuse things like
+    # this" scored 0.828 against a cloud photograph, because both are soft-coloured sky, and
+    # the cloud was refused with nothing in the policy naming clouds. Deselecting it and
+    # retraining the probe could not help - the probe was not the one objecting.
+    #
+    # So the reach is measured and shown before the mark is applied. Grouped by the category
+    # the matched pictures are filed under, because the surprise is never "it caught more"
+    # but "it caught THOSE".
+    if body.get("preview"):
+        rows = _rows_by_id(store, ids)
+        if not rows:
+            return _err(404, "no_such_image", "None of those image ids are stored.")
+        visual = current_app.extensions["moderation"].settings.visual
+        bar = float(visual.config.exemplar_reject_min)
+        import numpy as np
+        seeds = []
+        for r in rows:
+            v = np.frombuffer(r["embedding"], dtype=np.float32)
+            if v.size:
+                seeds.append(v / max(float(np.linalg.norm(v)), 1e-12))
+        if not seeds:
+            return _err(409, "no_embeddings", "Those pictures have no embedding to compare.")
+        S = np.stack(seeds)
+        others, meta = [], []
+        for r in store.all_embeddings(limit=20000):
+            if r["id"] in set(ids):
+                continue
+            v = np.frombuffer(r["embedding"], dtype=np.float32)
+            if v.size == S.shape[1]:
+                others.append(v / max(float(np.linalg.norm(v)), 1e-12))
+                meta.append(r)
+        if not others:
+            return jsonify({"preview": True, "would_match": 0, "by_category": {}, "top": []})
+        sims = (np.stack(others) @ S.T).max(axis=1)
+        hit = np.where(sims >= bar)[0]
+        by_cat: dict[str, int] = {}
+        for i in hit:
+            c = meta[i].get("category") or "?"
+            by_cat[c] = by_cat.get(c, 0) + 1
+        order = hit[np.argsort(-sims[hit])][:12]
+        own = {r.get("category") for r in rows}
+        return jsonify({
+            "preview": True, "mode": mode, "threshold": bar,
+            "would_match": int(len(hit)),
+            "by_category": dict(sorted(by_cat.items(), key=lambda kv: -kv[1])),
+            # Categories other than the marked picture's own: this is the list that surprises.
+            "other_categories": {k: n for k, n in by_cat.items() if k not in own},
+            "top": [{"id": meta[i]["id"], "filename": meta[i].get("filename"),
+                     "category": meta[i].get("category"),
+                     "score": round(float(sims[i]), 4)} for i in order],
+        })
+
+    # THE OTHER DIRECTION OF THE SAME CLASH. A picture marked "refuse things like this" whose
+    # written rules already publish it - or the reverse - is the same contradiction as two
+    # rules disagreeing, arriving through the other door. It is quieter and worse: the
+    # exemplar is checked first, so it wins, and the admin sees their own allowing rule being
+    # ignored with nothing in the policy file to explain it.
+    #
+    # Only flagged when the written verdict is CONFIDENT. Every picture matches some label
+    # weakly, and warning on a 0.3 means warning on everything, which trains people to click
+    # past the one that mattered.
+    clashes = []
+    if mode in ("block", "allow") and resolve is None:
+        visual = current_app.extensions["moderation"].settings.visual
+        if visual.ready:
+            for img in _rows_by_id(store, ids):
+                verdict, label, score = _written_verdict(visual, img)
+                if verdict and verdict != mode and score is not None:
+                    clashes.append({"id": img["id"], "filename": img.get("filename"),
+                                    "written_rule": label, "written_verdict": verdict,
+                                    "score": round(float(score), 4), "you_chose": mode})
+    if clashes:
+        return _err(409, "exemplar_conflict",
+                    "The written rules already decide these pictures the other way. Marking "
+                    "them here overrides that silently, because exemplars are checked first. "
+                    "Choose which should stand.",
+                    conflicts=clashes)
+
+    changed = store.set_exemplars(ids, is_exemplar=(mode != "clear"),
+                                  action=None if mode == "clear" else mode)
+    _, _, model_dir = _paths()
+    state = _export_exemplars(model_dir)
+    return jsonify({"status": "ok", "mode": mode, "changed": changed,
+                    "resolved": resolve, **state})
+
+
+@admin_policy_bp.post("/v1/admin/policy/preview")
+def preview_label():
+    """Score candidate phrasings against the stored images WITHOUT changing anything.
+
+    This is the part that makes writing policy in words usable rather than a guess. A rule is
+    only as good as its wordings, and until now the only way to find out whether "a photo of
+    fireworks exploding" catches what you meant was to apply it and watch the moderation queue.
+    Here the admin sees, before committing, which of BONC's own pictures the words match and
+    how strongly - and, for an existing rule, which pictures it is already matching that they
+    might not expect.
+
+    It scores against the embeddings already in system.db, so there is no inference over
+    images at all: one subprocess to encode a handful of phrasings, then a dot product.
+
+    THESE NUMBERS ARE NOT THE LIVE SCORES AND MUST NOT BE READ AS A THRESHOLD. They are raw
+    cosine similarities, which for CLIP sit in a narrow band - measured here, a wedding
+    photograph against "a photo of a wedding ceremony" is 0.32 while the same picture scores
+    0.96 through classify(). The live check softmaxes across every label, which concentrates
+    almost all the mass on the winner; a raw similarity does not. So `over_threshold` is
+    returned only when the caller asks for it, and the UI presents this as a RANKING - which
+    of your pictures these words pick out, and whether they cluster on the subject you meant -
+    rather than as a prediction of reject_min.
+
+    Ranking is the right question anyway. A wording is good when it separates: "a photo of a
+    wedding ceremony" puts five wedding photographs at the top, while "a photo of fireworks
+    exploding" returns gore, romance and a safe listing at nearly identical scores, which is
+    exactly how it looks when nothing in the set matches. That contrast is visible in the
+    order and invisible in any single number.
+    """
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    body = request.get_json(silent=True) or {}
+    prompts = [str(p).strip() for p in (body.get("prompts") or []) if str(p).strip()]
+    if not prompts:
+        return _err(400, "missing_prompts", "Give at least one phrasing to try.")
+    if len(prompts) > MAX_PROMPTS:
+        return _err(400, "too_many_prompts", f"At most {MAX_PROMPTS} phrasings.")
+    limit = max(1, min(int(body.get("limit", 12) or 12), 48))
+
+    _, _, model_dir = _paths()
+    root = Path(current_app.extensions["moderation"].settings.visual.root)
+    script = root / "scripts" / "encode_prompts.py"
+    if not script.exists():
+        return _err(500, "no_encoder", f"{script} is missing.")
+    try:
+        proc = subprocess.run([sys.executable, str(script), "--model-dir", str(model_dir)],
+                              input=json.dumps(prompts), capture_output=True, text=True,
+                              timeout=BUILD_TIMEOUT_S, cwd=str(root))
+        if proc.returncode != 0:
+            return _err(500, "encode_failed",
+                        (proc.stderr or proc.stdout or "").strip()[-300:] or "encoding failed")
+        embeds = np.asarray(json.loads(proc.stdout)["embeds"], dtype=np.float32)
+    except Exception as exc:
+        log.exception("policy preview failed")
+        return _err(500, "encode_failed", str(exc))
+
+    store = current_app.extensions["system_store"]
+    rows = store.list_images(page=1, limit=5000).get("items", [])
+    ids = [r["id"] for r in rows if r.get("has_embedding")]
+    if not ids:
+        return _err(409, "no_embeddings",
+                    "No stored image has an embedding yet. Run the image loader first so "
+                    "there is something to try these words against.")
+
+    # Pull the vectors for exactly those rows. list_images omits the blob by design (it is
+    # 2 KB a row), so they are fetched here rather than widening that query for every caller.
+    vecs, keep = [], []
+    for r in store.get_selected_for_training() if body.get("selected_only") else store.all_embeddings():
+        try:
+            v = np.frombuffer(r["embedding"], dtype=np.float32)
+        except Exception:
+            continue
+        if v.shape[0] == embeds.shape[1]:
+            vecs.append(v)
+            keep.append(r)
+    if not vecs:
+        return _err(409, "no_embeddings", "No stored embedding matches this model's dimension.")
+
+    M = np.stack(vecs)
+    M = M / np.maximum(np.linalg.norm(M, axis=1, keepdims=True), 1e-12)
+    # Best-matching phrasing per picture, which is how the live check ensembles them too.
+    sims = (M @ embeds.T).max(axis=1)
+    order = np.argsort(-sims)[:limit]
+    matches = [{
+        "id": keep[i]["id"], "filename": keep[i].get("filename"),
+        "category": keep[i].get("category"), "action": keep[i].get("action"),
+        "score": round(float(sims[i]), 4),
+    } for i in order]
+    thresh = body.get("reject_min")
+    over = None
+    if thresh not in (None, ""):
+        try:
+            over = int((sims >= float(thresh)).sum())
+        except (TypeError, ValueError):
+            over = None
+    return jsonify({
+        "scored": int(len(sims)), "prompts": prompts, "top": matches,
+        "over_threshold": over,
+        "note": ("Cosine similarity against stored images. The live check softmaxes over every "
+                 "rule, so a matching picture usually scores HIGHER in production than here."),
+    })
 
 
 @admin_policy_bp.post("/v1/admin/policy/reset")

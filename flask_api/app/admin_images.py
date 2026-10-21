@@ -206,7 +206,65 @@ def upload_image():
         embedding=emb_bytes,
     )
 
-    return jsonify({"success": True, "image": record, "message": f"Uploaded '{file.filename}' to '{category}'."}), 201
+    # ONE UPLOAD, THREE CHANNELS. They reach different pictures and they arrive at different
+    # speeds, so teaching all three from a single action is what makes an upload worth making:
+    #
+    #   exemplar   the picture itself. Catches lookalikes from the next upload onward.
+    #   phrasing   what the admin says it IS. Generalises far past this one picture, and is
+    #              the only channel that can, because it scores in CLIP's text space.
+    #   probe      is_selected above. Learns from the accumulated set on the next retrain,
+    #              which is where a visually diverse subject like `weapon` is eventually won.
+    #
+    # Measured at matched false-positive rates, exemplar and phrasing catch 82.7% and 79.1% of
+    # held-out wedding photographs on their own and 93.3% together - they miss different ones.
+    teach = str(request.form.get("teach", "")).strip().lower() in ("1", "true", "yes", "on")
+    taught: dict = {}
+    if teach and record:
+        from app.admin_policy import (_export_exemplars, _paths, _read, add_phrasing,
+                                      find_conflicts)
+        rid = record.get("id")
+        phrasing = request.form.get("phrasing", "").strip() or description
+        label = request.form.get("policy_label", "").strip().lower() or category
+        resolve = str(request.form.get("resolve", "")).strip().lower() or None
+
+        # CHECK BEFORE APPLYING ANYTHING. The first cut set the exemplar first and only then
+        # asked add_phrasing, which detected the clash, declined, and was reported inside a
+        # 201. The picture was therefore refused by the exemplar while the admin's own
+        # allowing rule stood untouched and nothing asked them - the exact bug this was meant
+        # to prevent, arriving through the door the fix did not cover.
+        policy_path, _d, model_dir = _paths()
+        conflicts = []
+        if phrasing and resolve is None:
+            conflicts = find_conflicts(_read(policy_path), label, [phrasing],
+                                       unsafe=(action == "block"), model_dir=model_dir)
+        if conflicts:
+            # The file is kept and the record stands - the admin did upload it, and making
+            # them pick it again to answer a question would be its own small insult. Only the
+            # TEACHING waits, and the dialog resolves it against this image id.
+            return jsonify({
+                "success": True, "image": record,
+                "taught": {"conflict": True, "conflicts": conflicts,
+                           "pending": {"image_id": rid, "label": label, "phrasing": phrasing,
+                                       "unsafe": action == "block", "category": category,
+                                       "mode": action}},
+                "message": f"Uploaded '{file.filename}', but the description contradicts an "
+                           f"existing rule - nothing has been taught yet.",
+            }), 201
+
+        if emb_bytes and rid:
+            store.set_exemplars([rid], is_exemplar=True, action=action)
+            taught["exemplar"] = _export_exemplars(model_dir)
+        else:
+            taught["exemplar"] = {"skipped": "no embedding could be computed for this file"}
+        if phrasing:
+            taught["phrasing"] = add_phrasing(label, phrasing, unsafe=(action == "block"),
+                                              category=category, resolve=resolve)
+        else:
+            taught["phrasing"] = {"added": False, "reason": "no description given"}
+        taught["probe"] = {"selected_for_next_retrain": True}
+
+    return jsonify({"success": True, "image": record, "taught": taught or None,
+                    "message": f"Uploaded '{file.filename}' to '{category}'."}), 201
 
 
 @admin_images_bp.put("/v1/admin/images/batch")

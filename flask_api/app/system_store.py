@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS image_policy (
     description TEXT DEFAULT '',
     mime_type TEXT DEFAULT 'image/jpeg',
     embedding BLOB, -- 512-dim float32 vector for instant retraining
+    -- 1 = this picture is an EXEMPLAR: the live check compares every upload against it
+    -- directly, so marking one takes effect at once and needs no retraining. Distinct from
+    -- is_selected, which decides what the probe is fitted on; a picture can be either, both
+    -- or neither, and the two answer different questions.
+    is_exemplar INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
     FOREIGN KEY (category) REFERENCES category (name) ON UPDATE CASCADE
@@ -200,9 +205,29 @@ class SystemStore:
         self._lock = threading.Lock()
         with self._tx() as db:
             db.executescript(SCHEMA)
+            self._migrate(db)
 
         self._init_categories()
         self._seed_images_if_empty()
+
+    @staticmethod
+    def _migrate(db) -> None:
+        """Add columns to a database that already exists.
+
+        SCHEMA is all CREATE TABLE IF NOT EXISTS, which does exactly nothing to a table that
+        is already there - so a column added to the schema above reaches a fresh install and
+        never reaches the running one. This machine's system.db already holds 3,485 images and
+        would have kept a table with no is_exemplar column while every query referencing it
+        failed.
+
+        Checked by reading the table's actual columns rather than tracking a version number:
+        a version counter has to be bumped by hand and is wrong the first time somebody
+        forgets, while PRAGMA table_info cannot disagree with the database it just read.
+        """
+        have = {r[1] for r in db.execute("PRAGMA table_info(image_policy)").fetchall()}
+        if have and "is_exemplar" not in have:
+            db.execute("ALTER TABLE image_policy ADD COLUMN is_exemplar INTEGER NOT NULL DEFAULT 0")
+            log.info("system.db: added image_policy.is_exemplar")
 
     @contextmanager
     def _tx(self):
@@ -464,7 +489,7 @@ class SystemStore:
             offset = max(0, (page - 1) * limit)
             rows = db.execute(
                 f"SELECT id, filename, file_path, category, action, is_selected, source, description, mime_type, "
-                f"(embedding IS NOT NULL) as has_embedding, created_at, updated_at "
+                f"(embedding IS NOT NULL) as has_embedding, is_exemplar, created_at, updated_at "
                 f"FROM image_policy {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?",
                 params + [limit, offset],
             ).fetchall()
@@ -498,7 +523,7 @@ class SystemStore:
         with self._tx() as db:
             row = db.execute(
                 "SELECT id, filename, file_path, category, action, is_selected, source, description, mime_type, "
-                "(embedding IS NOT NULL) as has_embedding, created_at, updated_at "
+                "(embedding IS NOT NULL) as has_embedding, is_exemplar, created_at, updated_at "
                 "FROM image_policy WHERE id = ?",
                 (image_id,),
             ).fetchone()
@@ -611,6 +636,55 @@ class SystemStore:
             rows = db.execute(
                 "SELECT id, filename, file_path, category, action, embedding FROM image_policy "
                 "WHERE is_selected = 1 ORDER BY category ASC, id ASC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def all_embeddings(self, limit: int = 5000) -> list[dict[str, Any]]:
+        """Every stored image that has an embedding, for the policy preview.
+
+        Separate from list_images because that one deliberately omits the blob - it is ~2 KB a
+        row and no caller rendering a grid wants it. The preview is the one caller that needs
+        the vectors themselves, so it asks for them directly rather than widening the query
+        every other caller pays for.
+        """
+        with self._tx() as db:
+            rows = db.execute(
+                "SELECT id, filename, file_path, category, action, embedding FROM image_policy "
+                "WHERE embedding IS NOT NULL ORDER BY id ASC LIMIT ?", (int(limit),)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def set_exemplars(self, image_ids: list[int], is_exemplar: bool,
+                      action: str | None = None) -> int:
+        """Mark pictures as exemplars - "refuse things like this" or "allow things like this".
+
+        `action` sets allow/block at the same time, because marking an exemplar and saying
+        which way it points are one decision for the admin and two columns here. Returns the
+        number of rows changed.
+        """
+        if not image_ids:
+            return 0
+        qs = ",".join("?" * len(image_ids))
+        now = time.time()
+        with self._tx() as db:
+            if action in ("allow", "block"):
+                cur = db.execute(
+                    f"UPDATE image_policy SET is_exemplar = ?, action = ?, updated_at = ? "
+                    f"WHERE id IN ({qs})",
+                    [int(is_exemplar), action, now, *image_ids])
+            else:
+                cur = db.execute(
+                    f"UPDATE image_policy SET is_exemplar = ?, updated_at = ? "
+                    f"WHERE id IN ({qs})",
+                    [int(is_exemplar), now, *image_ids])
+            return cur.rowcount
+
+    def list_exemplars(self) -> list[dict[str, Any]]:
+        """Every exemplar with an embedding, for export to the live check."""
+        with self._tx() as db:
+            rows = db.execute(
+                "SELECT id, filename, category, action, embedding FROM image_policy "
+                "WHERE is_exemplar = 1 AND embedding IS NOT NULL ORDER BY id ASC"
             ).fetchall()
             return [dict(r) for r in rows]
 
