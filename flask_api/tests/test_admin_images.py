@@ -165,3 +165,63 @@ def test_apply_presets_and_fine_tune(client):
     res_std = client.post("/v1/admin/images/preset", json={"preset": "standard"}, headers=HDR)
     assert res_std.status_code == 200
     assert "BLOCKED" in res_std.get_json()["minor_policy"]
+
+
+def test_sensitive_nudity_and_sexual_image_detection(client):
+    # 1. Test SystemStore static detection helper
+    assert SystemStore.is_sensitive_image(category="sexual") is True
+    assert SystemStore.is_sensitive_image(category="nudity") is True
+    assert SystemStore.is_sensitive_image(description="explicit pornographic photo") is True
+    assert SystemStore.is_sensitive_image(file_path="images/nudity/test.jpg") is True
+    assert SystemStore.is_sensitive_image(filename="nude_model.png") is True
+    assert SystemStore.is_sensitive_image(category="safe", description="Office chair") is False
+    assert SystemStore.is_sensitive_image(category="weapon", description="Hunting rifle") is False
+
+    # 2. Upload a sexual/nudity image
+    from PIL import Image
+    im = Image.new("RGB", (10, 10), color="red")
+    buf1 = io.BytesIO()
+    im.save(buf1, format="PNG")
+    buf1.seek(0)
+
+    res_sex = client.post("/v1/admin/images/upload", data={
+        "file": (buf1, "explicit_sample.png"),
+        "category": "sexual",
+        "action": "block",
+        "description": "Explicit adult nudity sample"
+    }, content_type="multipart/form-data", headers=HDR)
+    assert res_sex.status_code == 201
+    sex_img = res_sex.get_json()["image"]
+    assert sex_img["is_sensitive"] is True
+
+    # 3. Upload a safe image
+    buf2 = io.BytesIO()
+    im.save(buf2, format="PNG")
+    buf2.seek(0)
+
+    res_safe = client.post("/v1/admin/images/upload", data={
+        "file": (buf2, "safe_lamp.png"),
+        "category": "safe",
+        "action": "allow",
+        "description": "Living room desk lamp"
+    }, content_type="multipart/form-data", headers=HDR)
+    assert res_safe.status_code == 201
+    safe_img = res_safe.get_json()["image"]
+    assert safe_img["is_sensitive"] is False
+
+    # 4. Query image list and verify is_sensitive flag
+    list_res = client.get("/v1/admin/images?limit=50")
+    assert list_res.status_code == 200
+    items_by_id = {it["id"]: it for it in list_res.get_json()["items"]}
+    assert items_by_id[sex_img["id"]]["is_sensitive"] is True
+    assert items_by_id[safe_img["id"]]["is_sensitive"] is False
+
+    # 5. Query single image endpoint
+    get_sex = client.get(f"/v1/admin/images/{sex_img['id']}")
+    assert get_sex.status_code == 200
+    assert get_sex.get_json()["image"]["is_sensitive"] is True
+
+    get_safe = client.get(f"/v1/admin/images/{safe_img['id']}")
+    assert get_safe.status_code == 200
+    assert get_safe.get_json()["image"]["is_sensitive"] is False
+

@@ -456,6 +456,31 @@ class SystemStore:
 
     # ---- Image Querying & Updates -----------------------------------------------------
 
+    @staticmethod
+    def is_sensitive_image(
+        category: str = "",
+        file_path: str = "",
+        description: str = "",
+        filename: str = "",
+    ) -> bool:
+        """Identify nudity, sexual, and pornographic content across category, file path, and text."""
+        c = (category or "").lower().strip()
+        p = (file_path or "").lower().replace("\\", "/")
+        d = (description or "").lower()
+        f = (filename or "").lower()
+        keywords = ("sexual", "nudity", "nude", "porn", "pornograph", "nsfw", "erotic", "explicit_adult")
+        if any(k in c for k in keywords):
+            return True
+        if any(k in d for k in keywords):
+            return True
+        if any(k in f for k in keywords):
+            return True
+        path_kws = ("images/nudity/", "images/sexual/", "images/porn/", "/nudity", "/sexual", "/porn", "_quarantine_explicit")
+        if any(k in p for k in path_kws):
+            return True
+        return False
+
+
     def list_images(
         self,
         category: str | None = None,
@@ -494,7 +519,16 @@ class SystemStore:
                 params + [limit, offset],
             ).fetchall()
 
-            items = [dict(r) for r in rows]
+            items = []
+            for r in rows:
+                item = dict(r)
+                item["is_sensitive"] = self.is_sensitive_image(
+                    category=item.get("category", ""),
+                    file_path=item.get("file_path", ""),
+                    description=item.get("description", ""),
+                    filename=item.get("filename", ""),
+                )
+                items.append(item)
 
             # What the CURRENT FILTER holds, which is not the same question as the global
             # stats below and is the one an admin bulk-selecting is actually asking. A search
@@ -551,7 +585,16 @@ class SystemStore:
                 "FROM image_policy WHERE id = ?",
                 (image_id,),
             ).fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            item = dict(row)
+            item["is_sensitive"] = self.is_sensitive_image(
+                category=item.get("category", ""),
+                file_path=item.get("file_path", ""),
+                description=item.get("description", ""),
+                filename=item.get("filename", ""),
+            )
+            return item
 
     def add_image(
         self,

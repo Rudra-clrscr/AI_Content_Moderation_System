@@ -139,6 +139,18 @@ def list_images():
     return jsonify(data)
 
 
+@admin_images_bp.get("/v1/admin/images/<int:image_id>")
+def get_image(image_id: int):
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    store = _store()
+    img = store.get_image(image_id)
+    if not img:
+        return _err(404, "not_found", "Image not found.")
+    return jsonify({"image": img})
+
+
 @admin_images_bp.get("/v1/admin/images/<int:image_id>/file")
 def get_image_file(image_id: int):
     chk = check_admin()
