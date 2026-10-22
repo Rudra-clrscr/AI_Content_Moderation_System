@@ -152,7 +152,12 @@ def _validate(name: str, body: dict) -> tuple[str, dict] | tuple[None, object]:
     entry: dict = {"unsafe": bool(body.get("unsafe", True)), "prompts": cleaned}
     if entry["unsafe"]:
         entry["category"] = str(body.get("category") or name).strip().lower()
-    rmin = body.get("reject_min")
+    # Only an unsafe label has anything to refuse at, and build_clip_prompts.py reads
+    # reject_min only inside `if spec.get("unsafe")`. A bar left on a label that has just been
+    # set to allow is therefore dead config that reads as a live setting - which is what
+    # flipping `physique` to allow produced: `unsafe: false` with `reject_min: 0.55` under it,
+    # ignored by the build and confusing to everyone after.
+    rmin = body.get("reject_min") if entry["unsafe"] else None
     if rmin is not None and rmin != "":
         try:
             v = float(rmin)
@@ -232,7 +237,8 @@ def _prompts_insert_at(lines: list[str], start: int, end: int) -> tuple[int, str
 
 def edit_policy_text(text: str, label: str, *, add_prompt: str | None = None,
                      remove_prompt: str | None = None, set_unsafe: bool | None = None,
-                     set_field: tuple[str, object] | None = None, delete: bool = False,
+                     set_field: tuple[str, object] | None = None,
+                     remove_field: str | None = None, delete: bool = False,
                      new_entry: dict | None = None) -> str:
     """One surgical change to the policy file, preserving every comment."""
     lines = text.splitlines()
@@ -273,6 +279,32 @@ def edit_policy_text(text: str, label: str, *, add_prompt: str | None = None,
             if st.startswith("- ") and _norm_phrase(st[2:].strip().strip("'\"")) == target:
                 del lines[i]
                 b -= 1
+                break
+    if remove_field is not None:
+        # Cuts the whole line, trailing comment included, AND the comment lines that continue
+        # it. In this file a measured threshold carries its workings underneath, aligned past
+        # the value:
+        #
+        #     reject_min: 0.55   # gym_neg p25 0.78 / p50 0.90. No real BONC listing
+        #                        # scores above 0.25 on this label, so the bar is ...
+        #
+        # Removing only the first line leaves five lines explaining a setting that is gone.
+        # The continuation is told apart from the comment that introduces the NEXT field by
+        # indent: continuations are aligned past the key, introductions sit at the key's own
+        # indent.
+        for i in range(a, b):
+            if lines[i].strip().startswith(remove_field + ":"):
+                field_indent = len(lines[i]) - len(lines[i].lstrip())
+                end = i + 1
+                while end < b:
+                    nxt = lines[end]
+                    if not nxt.strip().startswith("#"):
+                        break
+                    if len(nxt) - len(nxt.lstrip()) <= field_indent:
+                        break
+                    end += 1
+                del lines[i:end]
+                b -= (end - i)
                 break
     if set_field is not None:
         key, val = set_field
@@ -343,7 +375,14 @@ def _render_preserving(old_text: str, old_doc: dict, new_doc: dict) -> str:
         if bool(before.get("unsafe", True)) != bool(after.get("unsafe", True)):
             text = edit_policy_text(text, name, set_unsafe=bool(after.get("unsafe", True)))
         for key in ("category", "reject_min"):
-            if before.get(key) != after.get(key) and after.get(key) is not None:
+            if before.get(key) == after.get(key):
+                continue
+            if after.get(key) is None:
+                # Gone, not merely unchanged. Without this the differ could only ever add or
+                # overwrite a field, so a label flipped to allow kept the bar and the category
+                # it no longer has any use for.
+                text = edit_policy_text(text, name, remove_field=key)
+            else:
                 text = edit_policy_text(text, name, set_field=(key, after[key]))
         old_p = list(before.get("prompts") or [])
         new_p = list(after.get("prompts") or [])
