@@ -145,3 +145,16 @@ def test_identical_view_is_not_scored_twice():
     rec = Recorder()
     _span_scores(text, text, [(0, 23)], rec)
     assert rec.seen == ["nothing obfuscated here."]
+
+
+def test_unpunctuated_sentence_is_evaluated_with_implied_terminator_by_model():
+    """An author omitting the terminal full stop must not bypass the model."""
+    import pytest
+    from app.config import load_settings
+    from app.model import OnnxScorer
+    settings = load_settings(ROOT / "config" / "settings.yaml")
+    scorer = OnnxScorer(settings.model_dir, **settings.model_kwargs())
+    raw = "a person like that man needs to be properly trained"
+    with_dot = "a person like that man needs to be properly trained."
+    assert scorer.score(raw).risk_score == pytest.approx(scorer.score(with_dot).risk_score, abs=0.001)
+    assert scorer.score(raw).risk_score > 0.80
