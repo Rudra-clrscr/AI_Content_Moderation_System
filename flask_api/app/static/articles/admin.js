@@ -78,21 +78,38 @@
   // treated as "no level" and silently reset to 5 on the next save.
   const NAMED_AT = { strict: 3, medium: 5, lenient: 8 };
 
-  // The surfaces a member can publish from, in dashboard order, named as the tabs name them.
-  // The three without a tab are real content types the pipeline judges - an advertisement and
-  // a product listing arrive through other routes - so they are listed too rather than left
-  // as settings nobody can see or reach.
-  const SURFACES = [
-    { ct: "business_profile",  tab: "Add Business" },
-    { ct: "video",             tab: "Videos" },
-    { ct: "article",           tab: "Articles" },
-    { ct: "request",           tab: "Requests" },
-    { ct: "proposal",          tab: "Proposals" },
-    { ct: "business_proposal", tab: "Business Proposals" },
-    { ct: "post",              tab: "Posts", noTab: true },
-    { ct: "advertisement",     tab: "Advertisements", noTab: true },
-    { ct: "product_listing",   tab: "Product Listings", noTab: true },
-  ];
+  // The surfaces a member can publish from, named by READING THE NAV rather than by keeping a
+  // second copy of its labels here. The nav carries data-surface on every tab, so the chips
+  // say exactly what the tabs say and keep saying it after a tab is renamed. A hard-coded
+  // list had already drifted: it offered "Posts", "Advertisements" and "Product Listings",
+  // which are content types the pipeline judges but are not tabs and are not called that
+  // anywhere in the product.
+  //
+  // The three with no tab still have to appear - they are real surfaces with real settings,
+  // and leaving them out would hide a page's moderation level rather than show it - so they
+  // are listed under the content type's own name and marked as having no tab, instead of
+  // being given an invented product name.
+  const SURFACE_ORDER = ["business_profile", "video", "article", "request", "proposal",
+                         "business_proposal", "post", "advertisement", "product_listing"];
+
+  function surfaceList() {
+    const named = {};
+    document.querySelectorAll("#tabs .tab[data-surface]").forEach((el) => {
+      const ct = el.dataset.surface;
+      if (ct) named[ct] = (el.textContent || "").trim();
+    });
+    const seen = new Set();
+    const out = [];
+    // Nav order first, so the chips read in the order the tabs do.
+    document.querySelectorAll("#tabs .tab[data-surface]").forEach((el) => {
+      const ct = el.dataset.surface;
+      if (ct && !seen.has(ct)) { seen.add(ct); out.push({ ct, tab: named[ct] }); }
+    });
+    for (const ct of SURFACE_ORDER) {
+      if (!seen.has(ct)) { seen.add(ct); out.push({ ct, tab: ct, noTab: true }); }
+    }
+    return out;
+  }
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -2067,6 +2084,9 @@
       // only the all-at-once endpoint, so the per-page settings existed and could be reached
       // by nothing but a hand-edited YAML file.
       let scope = "all";
+      // Taken once when the modal opens: the nav does not change while it is on screen, and
+      // re-reading the DOM on every repaint would be work for nothing.
+      const SURFACES = surfaceList();
       // Pending per-page changes, applied on Save. Keyed by content type; absent means the
       // page is left exactly as it is, which is not the same as setting it to the default.
       let overrides = {};
@@ -2120,14 +2140,21 @@
             <div class="scope-chips" id="mm-scopes">
               <button type="button" class="scope-chip ${scope === "all" ? "active" : ""}" data-scope="all">
                 <span class="scope-name">Every page</span>
-                <span class="scope-val">${esc(draft.enabled ? `L${heatNumber(draft.level)}` : "OFF")}</span>
+                <!-- saved.enabled is all() over the pages, so switching ONE page off made
+                     this read OFF - "everything is off" - while every other chip still
+                     showed its own level. When the pages disagree the honest summary is that
+                     they disagree, not whichever value the aggregate collapsed to. -->
+                <span class="scope-val">${esc(saved.mixed ? "mixed"
+                  : (draft.enabled ? `L${heatNumber(draft.level)}` : "OFF"))}</span>
               </button>
               ${SURFACES.map((sf) => {
                 const st = surfaceState(sf.ct);
                 const own = !st.inherited;
                 return `<button type="button" class="scope-chip ${scope === sf.ct ? "active" : ""} ${own ? "own" : ""} ${st.pending ? "pending" : ""}" data-scope="${esc(sf.ct)}"
-                          title="${esc(sf.noTab ? sf.tab + " (no tab of its own)" : sf.tab + " tab")}">
-                  <span class="scope-name">${esc(sf.tab)}</span>
+                          title="${esc(sf.noTab
+                            ? sf.ct + " — a content type with no tab of its own"
+                            : sf.tab + " tab")}">
+                  <span class="scope-name">${esc(sf.tab)}${sf.noTab ? `<span class="scope-notab">no tab</span>` : ""}</span>
                   <span class="scope-val">${esc(!st.enabled ? "OFF" : own ? `L${heatNumber(st.level)}` : "default")}</span>
                 </button>`;
               }).join("")}
