@@ -718,6 +718,21 @@ class SystemStore:
             )
             return cur.rowcount
 
+    def withdrawn_categories(self) -> list[str]:
+        """Categories that have pictures but none selected for the next retrain.
+
+        An admin who deselects every image of a category is saying the model should stop
+        having an opinion about it. That is different from a category nobody has added
+        pictures to yet, which was never trained on in the first place and has nothing to
+        withdraw - so having images is part of the test, not an afterthought.
+        """
+        with self._tx() as db:
+            rows = db.execute(
+                "SELECT category FROM image_policy GROUP BY category "
+                "HAVING COUNT(*) > 0 AND SUM(CASE WHEN is_selected = 1 THEN 1 ELSE 0 END) = 0"
+            ).fetchall()
+            return sorted(str(r["category"]).lower() for r in rows if r["category"])
+
     def get_selected_for_training(self) -> list[dict[str, Any]]:
         with self._tx() as db:
             rows = db.execute(

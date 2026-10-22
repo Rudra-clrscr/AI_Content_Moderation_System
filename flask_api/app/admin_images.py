@@ -136,6 +136,10 @@ def list_images():
         limit=limit,
     )
     data["active_policy_mode"] = store.get_setting("active_policy_mode", "standard")
+    # Which categories the model has been told to forget. The grid needs it because an
+    # exemplar in a withdrawn category still renders as a live rule - "refusing lookalikes" -
+    # while the live check is ignoring it, which is the card stating the opposite of the truth.
+    data["withdrawn_categories"] = store.withdrawn_categories()
     return jsonify(data)
 
 

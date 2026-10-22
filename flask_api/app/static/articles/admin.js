@@ -1027,6 +1027,12 @@
         $("stat-blocked").textContent = st.blocked || 0;
       }
 
+      /** Categories the admin has deselected entirely, so the model ignores them. An
+       *  exemplar in one of these is not being applied, and a card saying "Live rule" would
+       *  be stating the opposite of what the check does. */
+      const isWithdrawn = (cat) =>
+        (imagesData.withdrawn_categories || []).includes(String(cat || "").toLowerCase());
+
       // The filter's own composition, which is the one the bulk buttons act on.
       function updateFilterTeaching(f) {
         const el = $("img-filter-teaching");
@@ -1123,9 +1129,11 @@
                    which, because "block" meaning two different things one line apart is how
                    an admin ends up deselecting wedding photos and wondering why weddings are
                    still refused. -->
-              <div class="img-card-teach ${img.is_exemplar ? "on" : ""}">
+              <div class="img-card-teach ${img.is_exemplar ? "on" : ""} ${img.is_exemplar && isWithdrawn(img.category) ? "paused" : ""}">
                 <span class="teach-lbl">${img.is_exemplar
-                    ? `Live rule: <b>${isAllow ? "allowing" : "refusing"}</b> lookalikes`
+                    ? (isWithdrawn(img.category)
+                        ? `Paused: <b>${esc(img.category)}</b> is withdrawn from the model, so this mark is not being applied`
+                        : `Live rule: <b>${isAllow ? "allowing" : "refusing"}</b> lookalikes`)
                     : "Use as a live example:"}</span>
                 <span class="teach-acts">
                   ${img.is_exemplar
@@ -1814,6 +1822,17 @@
               <span style="font-size:12px; font-weight:700; color:#334155; display:block; margin-bottom:6px;">
                 What the live check now does to these pictures
               </span>
+              ${(data.withdrawn || []).length ? `
+                <div class="train-withdrawn">
+                  <b>Withdrawn from the model:</b>
+                  ${esc((data.withdrawn || []).join(", "))}.
+                  Every picture in ${(data.withdrawn || []).length > 1 ? "those categories" : "that category"}
+                  is deselected, so the image model has no opinion about
+                  ${(data.withdrawn || []).length > 1 ? "them" : "it"} any more - neither the
+                  trained probe nor any "refuse things like this" mark in
+                  ${(data.withdrawn || []).length > 1 ? "them" : "it"}. Your written policy
+                  rules still apply, and anything no rule refuses will publish.
+                </div>` : ""}
               <table class="train-cat-table">
                 <thead><tr><th>Category</th><th>Pictures</th><th>Teaching</th><th>Refused now</th><th>Decided by</th><th>Disagrees</th></tr></thead>
                 <tbody>` +
@@ -1835,7 +1854,8 @@
                    r.teaching_block ? `${r.teaching_block} block` : ""].filter(Boolean).join(" + ")
                 : "not in training";
               return `<tr>
-                  <td><b>${esc(c)}</b>${r.teaches_both_ways
+                  <td><b>${esc(c)}</b>${r.withdrawn
+                      ? ` <span class="train-cat-flag withdrawn" title="Every picture deselected - the model has no opinion about this category">withdrawn</span>` : ""}${r.teaches_both_ways
                       ? ` <span class="train-cat-flag" title="This category teaches the model in both directions at once">both ways</span>` : ""}</td>
                   <td>${r.n}</td>
                   <td>${esc(teach)}</td>
