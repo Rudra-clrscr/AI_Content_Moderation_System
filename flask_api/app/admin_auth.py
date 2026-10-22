@@ -147,13 +147,30 @@ def restore_levels(levels, store: AdminStore) -> None:
             log.error("saved moderation setting for %s is no longer valid; skipped", ctype)
 
 
+# A named level and a raw rating are two ways of saying the same thing, and set_feature
+# treats a raw one as replacing the name ("a number was given; it is no longer named").
+# The saved record has to say the same, or the two disagree after a restart.
+_SUPERSEDES = {"level": ("reject_min", "allow_max"),
+               "reject_min": ("level",), "allow_max": ("level",)}
+
+
 def remember(ctype: str, body: dict) -> None:
-    """Save the fields an admin just changed for one surface."""
+    """Save the fields an admin just changed for one surface.
+
+    Merging without clearing kept both ways of saying it. A surface set to 0.62 and then to
+    `strict` was stored carrying the level AND the old number; restore_levels replays them
+    together, set_feature applies the level first and the number second, and the restart came
+    up at 0.62 - the admin's last choice silently undone, with nothing on screen to say so.
+    """
     a: Admin = current_app.extensions["admin"]
     with a.settings_lock:
         data = a.store.load_settings()
         rec = data.setdefault("features", {}).setdefault(ctype, {})
-        rec.update({k: v for k, v in body.items() if v is not None})
+        incoming = {k: v for k, v in body.items() if v is not None}
+        for key in incoming:
+            for dead in _SUPERSEDES.get(key, ()):
+                rec.pop(dead, None)
+        rec.update(incoming)
         a.store.save_settings(data)
 
 

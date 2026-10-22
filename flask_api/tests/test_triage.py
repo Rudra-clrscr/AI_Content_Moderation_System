@@ -119,8 +119,10 @@ def test_cleared_spans_are_not_sent_to_the_model(make_settings):
     cleared = [x for x in body["sentence_scores"] if x.get("by") == "prefilter"]
     assert [TEXT[x["start"]:x["end"]] for x in cleared] == ["Handmade leather wallets", "Belts in all sizes"]
     assert [TEXT[x["start"]:x["end"]] for x in scanned] == ["Earn 50000 per week from home"]
-    # whole text + the one span the filter would not clear; the two clean sentences cost nothing
-    assert scorer.calls == [TEXT, "Earn 50000 per week from home"]
+    # whole text + the one span the filter would not clear; the two clean sentences cost
+    # nothing. The span arrives carrying its own full stop - the scan scores the sentence as
+    # written - while the offsets above stay where sentence_spans put them.
+    assert scorer.calls == [TEXT, "Earn 50000 per week from home."]
 
 
 def test_the_decision_is_the_same_with_and_without_the_filter(make_settings):
@@ -159,7 +161,11 @@ def test_leetspeak_span_is_not_cleared_on_the_plain_reading(make_settings):
     body = post(app_with(make_settings, make_triage(["earn"]), scorer), text)
     cleared = [text[x["start"]:x["end"]] for x in body["sentence_scores"] if x.get("by") == "prefilter"]
     assert cleared == ["Handmade leather wallets"]
-    assert "E4rn 50000 per week from home" in scorer.calls or "Earn 50000 per week from home" in scorer.calls
+    # The point is that the span reached the model rather than being cleared by the
+    # pre-filter. The text it arrives as carries the sentence's own full stop - the scan
+    # scores the sentence as written - so the terminator is stripped before comparing.
+    reached = {c.rstrip(".!?") for c in scorer.calls}
+    assert "E4rn 50000 per week from home" in reached or "Earn 50000 per week from home" in reached
 
 
 def test_shipped_bundle_loads_and_matches_this_code():
