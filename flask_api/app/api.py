@@ -448,6 +448,14 @@ def set_moderation_level(content_type: str):
     if unknown:
         return _error(400, "invalid_request", f"unknown fields {sorted(unknown)}; "
                                               f"expected any of {sorted(known)}")
+    # The surface has to be one the pipeline actually judges. Anything else was accepted,
+    # saved and answered 200, and then consulted by nothing - `for_type` is only ever called
+    # with a real ContentType - so "articles" instead of "article" produced a setting that
+    # looked saved on every subsequent read and moderated nothing at all.
+    if content_type not in _CONTENT_TYPES:
+        return _error(404, "unknown_content_type",
+                      f"no such surface {content_type!r}; "
+                      f"expected one of {sorted(_CONTENT_TYPES)}")
     try:
         policy = _svc().levels.set_feature(
             content_type, enabled=body.get("enabled"), level=body.get("level"),

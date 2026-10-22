@@ -77,6 +77,22 @@
   // valid server-side, so they land on their nearest numeric equivalent rather than being
   // treated as "no level" and silently reset to 5 on the next save.
   const NAMED_AT = { strict: 3, medium: 5, lenient: 8 };
+
+  // The surfaces a member can publish from, in dashboard order, named as the tabs name them.
+  // The three without a tab are real content types the pipeline judges - an advertisement and
+  // a product listing arrive through other routes - so they are listed too rather than left
+  // as settings nobody can see or reach.
+  const SURFACES = [
+    { ct: "business_profile",  tab: "Add Business" },
+    { ct: "video",             tab: "Videos" },
+    { ct: "article",           tab: "Articles" },
+    { ct: "request",           tab: "Requests" },
+    { ct: "proposal",          tab: "Proposals" },
+    { ct: "business_proposal", tab: "Business Proposals" },
+    { ct: "post",              tab: "Posts", noTab: true },
+    { ct: "advertisement",     tab: "Advertisements", noTab: true },
+    { ct: "product_listing",   tab: "Product Listings", noTab: true },
+  ];
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -2045,6 +2061,15 @@
       const close = () => back.remove();
       let saved = null;
       let draft = null;
+      // WHICH PAGE THE BAR IS AIMED AT. "all" is the setting every page follows; a content
+      // type is that one page on its own. The server has taken a level per content type from
+      // the start - `_settings_view` has always returned `surfaces` - and the dashboard drove
+      // only the all-at-once endpoint, so the per-page settings existed and could be reached
+      // by nothing but a hand-edited YAML file.
+      let scope = "all";
+      // Pending per-page changes, applied on Save. Keyed by content type; absent means the
+      // page is left exactly as it is, which is not the same as setting it to the default.
+      let overrides = {};
 
       const sessionEnded = (err) => { close(); loginView(err.message); };
       back.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
@@ -2052,16 +2077,74 @@
 
       const label = (s) => `${s.enabled ? "ON" : "OFF"} · ${s.level ? levelName(s.level) : (s.mixed ? "mixed" : "project default")}`;
 
+      /** What one page is set to right now: a pending change if there is one, else what the
+       *  server last reported, else the everything-setting it inherits. */
+      function surfaceState(ct) {
+        if (overrides[ct]) return { ...overrides[ct], pending: true };
+        const srv = (saved.surfaces || {})[ct];
+        if (srv && (srv.level || srv.enabled === false)) {
+          return { enabled: srv.enabled !== false, level: srv.level || null, pending: false };
+        }
+        return { enabled: srv ? srv.enabled !== false : true, level: null, pending: false,
+                 inherited: true };
+      }
+
+      /** The scope the bar is currently editing, as {enabled, level}. */
+      function scopeState() {
+        if (scope === "all") return { enabled: draft.enabled, level: draft.level };
+        const st = surfaceState(scope);
+        return { enabled: st.enabled, level: st.level || draft.level };
+      }
+
+      function setScopeState(patch) {
+        if (scope === "all") { Object.assign(draft, patch); return; }
+        const now = scopeState();
+        overrides[scope] = { enabled: now.enabled, level: now.level, ...patch };
+      }
+
+      const heatNumber = (lvl) => (HEAT_BY_NAME[lvl] || {}).level || NAMED_AT[lvl] || 5;
+
       function draw(msg = "", ok = false, confirming = false) {
         const lv = saved.levels;
         q("mm-body").innerHTML = `
           <div class="adm-msg ${msg ? (ok ? "ok" : "err") : ""}" role="status" aria-live="polite">${esc(msg)}</div>
           <p class="adm-current">Currently saved: <b>${esc(label(saved))}</b></p>
-          ${saved.mixed ? `<p class="adm-warn">Some pages have different settings right now. Saving will make them all match.</p>` : ""}
+          ${saved.mixed ? `<p class="adm-current">Pages differ right now - the chips below show which.
+            Changing <b>Every page</b> makes them all match again.</p>` : ""}
+          <!-- WHICH PAGE THIS CHANGES. Everything below - the toggle, the bar, the policy
+               card - applies to whatever is picked here. A page with its own setting says so
+               on its chip, so the ones that differ from the default are visible without
+               opening each in turn. -->
+          <div class="scope-picker" ${confirming ? 'style="opacity:.5;pointer-events:none"' : ""}>
+            <div class="scope-label">Applies to</div>
+            <div class="scope-chips" id="mm-scopes">
+              <button type="button" class="scope-chip ${scope === "all" ? "active" : ""}" data-scope="all">
+                <span class="scope-name">Every page</span>
+                <span class="scope-val">${esc(draft.enabled ? `L${heatNumber(draft.level)}` : "OFF")}</span>
+              </button>
+              ${SURFACES.map((sf) => {
+                const st = surfaceState(sf.ct);
+                const own = !st.inherited;
+                return `<button type="button" class="scope-chip ${scope === sf.ct ? "active" : ""} ${own ? "own" : ""} ${st.pending ? "pending" : ""}" data-scope="${esc(sf.ct)}"
+                          title="${esc(sf.noTab ? sf.tab + " (no tab of its own)" : sf.tab + " tab")}">
+                  <span class="scope-name">${esc(sf.tab)}</span>
+                  <span class="scope-val">${esc(!st.enabled ? "OFF" : own ? `L${heatNumber(st.level)}` : "default")}</span>
+                </button>`;
+              }).join("")}
+            </div>
+            ${scope === "all"
+              ? `<p class="scope-note">Changing this sets <b>every</b> page at once and clears
+                   any page-by-page settings below.</p>`
+              : `<p class="scope-note">Changing this affects <b>${esc((SURFACES.find((x) => x.ct === scope) || {}).tab || scope)}</b>
+                   only. <button type="button" class="btn-link" id="mm-follow">Match the default
+                   (L${heatNumber(draft.level)})</button></p>`}
+          </div>
           <div class="adm-switch-row">
-            <div><b>AI moderation</b><div class="adm-sub">${draft.enabled ? "ON: content is checked before it is published." : "OFF: content on every page is published without AI checks."}</div></div>
-            <label class="adm-switch"><input type="checkbox" role="switch" id="mm-enabled" ${draft.enabled ? "checked" : ""} ${confirming ? "disabled" : ""}>
-              <span class="adm-slider"></span><span class="adm-state">${draft.enabled ? "ON" : "OFF"}</span></label>
+            <div><b>AI moderation</b><div class="adm-sub">${scopeState().enabled
+                ? `ON: ${scope === "all" ? "content is checked before it is published." : "this page is checked before publishing."}`
+                : `OFF: ${scope === "all" ? "content on every page is published without AI checks." : "this page publishes with no AI check."}`}</div></div>
+            <label class="adm-switch"><input type="checkbox" role="switch" id="mm-enabled" ${scopeState().enabled ? "checked" : ""} ${confirming ? "disabled" : ""}>
+              <span class="adm-slider"></span><span class="adm-state">${scopeState().enabled ? "ON" : "OFF"}</span></label>
           </div>
           ${heatAvailable(lv) ? `
           <div class="heat-control-panel" ${confirming ? 'style="opacity:.5;pointer-events:none"' : ""}>
@@ -2109,8 +2192,10 @@
             ${lv.map((n) => `<label class="adm-level"><input type="radio" name="mm-level" value="${esc(n)}" ${draft.level === n ? "checked" : ""}>
               <span><b>${esc(levelName(n))}</b><span class="adm-sub">${esc(LEVEL_TEXT[n] || "")}</span></span></label>`).join("")}
           </fieldset>`}
-          ${draft.enabled ? "" : `<p class="adm-sub">The level is remembered for when moderation is turned back ON.</p>`}
-          <p class="adm-sub">Applies to every content type: Articles, Add Business, Videos, Requests, Proposals, Business Proposals and the rest.</p>
+          ${scopeState().enabled ? "" : `<p class="adm-sub">The level is remembered for when moderation is turned back ON.</p>`}
+          ${Object.keys(overrides).length ? `<p class="adm-warn">Unsaved page settings:
+            ${esc(Object.keys(overrides).map((ct) => (SURFACES.find((x) => x.ct === ct) || {}).tab || ct).join(", "))}.
+            They are applied when you press Save.</p>` : ""}
           ${confirming ? `<div class="adm-confirm" role="alertdialog"><b>Turn moderation OFF?</b>
             <p>Everything people submit, on every page, will be published with no AI check. Login and file-safety checks stay on.</p>
             <div class="adm-row"><button class="btn btn-outline" id="mm-keep" type="button">Keep it ON</button>
@@ -2132,7 +2217,7 @@
       function applyHeat(lvl) {
         const n = Math.max(1, Math.min(10, parseInt(lvl, 10) || 5));
         const cfg = HEAT_LEVELS[n - 1];
-        draft.level = cfg.name;
+        setScopeState({ level: cfg.name });
         q("heat-slider").value = n;
         q("heat-badge-lvl").textContent = `Level ${cfg.level} / 10`;
         q("heat-badge-val").textContent = cfg.val.toFixed(2);
@@ -2164,8 +2249,7 @@
         // Open where the saved setting actually is. A named level (strict/medium/lenient) is
         // still valid server-side, so it maps to its nearest step instead of being read as
         // "nothing set" and quietly reset to Balanced the first time anyone saves.
-        const cur = HEAT_BY_NAME[draft.level];
-        applyHeat(cur ? cur.level : (NAMED_AT[draft.level] || 5));
+        applyHeat(heatNumber(scopeState().level));
       }
 
       function bind(confirming) {
@@ -2174,7 +2258,29 @@
           q("mm-yes").addEventListener("click", () => doSave());
           return;
         }
-        q("mm-enabled").addEventListener("change", (ev) => { draft.enabled = ev.target.checked; draw(); });
+        q("mm-enabled").addEventListener("change", (ev) => {
+          setScopeState({ enabled: ev.target.checked }); draw();
+        });
+        if (q("mm-scopes")) {
+          q("mm-scopes").addEventListener("click", (ev) => {
+            const btn = ev.target.closest(".scope-chip");
+            if (!btn) return;
+            scope = btn.dataset.scope;
+            draw();
+          });
+        }
+        if (q("mm-follow")) {
+          // COPIES the default rather than going back to inheriting it. set_feature() takes
+          // level=None to mean "leave it alone", so there is no way through this API to clear
+          // a page's own bar once it has one - and a button labelled "follow the default"
+          // that actually pins today's default would be a lie the first time the default
+          // moved. So it says what it does. Clearing needs a server change in levels.py,
+          // which belongs to the moderation-levels work.
+          q("mm-follow").addEventListener("click", () => {
+            setScopeState({ enabled: draft.enabled, level: draft.level });
+            draw();
+          });
+        }
         if (q("heat-slider")) {
           wireHeat();
         } else {
@@ -2188,6 +2294,8 @@
         });
         q("mm-save").addEventListener("click", () => {
           if (!draft.level) return draw("Choose a moderation level.");
+          // The confirmation is for switching the whole site off. Turning one page off is a
+          // smaller act with a smaller blast radius and does not need the alarm.
           if (!draft.enabled && saved.enabled) return draw("", false, true);
           doSave();
         });
@@ -2196,15 +2304,41 @@
       async function doSave() {
         const foot = q("mm-foot");
         foot.innerHTML = `<button class="btn btn-primary" disabled><span class="spinner"></span> Saving…</button>`;
+        // THE EVERYTHING-SETTING GOES FIRST, because it writes to every page and would
+        // otherwise overwrite the per-page settings sent before it. Sending them the other
+        // way round silently discarded whichever page the admin had just set.
+        const globalChanged = draft.enabled !== saved.enabled || draft.level !== saved.level;
+        const pages = Object.entries(overrides);
         try {
-          const next = await call("PUT", "/v1/admin/moderation-settings", { enabled: draft.enabled, level: draft.level });
-          saved = next;
-          draft = { enabled: next.enabled, level: next.level };
-          draw(`Saved. Moderation is now ${label(next)} on every page.`, true);
+          let next = saved;
+          if (globalChanged || !pages.length) {
+            next = await call("PUT", "/v1/admin/moderation-settings",
+                              { enabled: draft.enabled, level: draft.level });
+          }
+          for (const [ct, st] of pages) {
+            const body = { enabled: st.enabled };
+            if (st.level) body.level = st.level;
+            await call("PUT", `/v1/admin/moderation-levels/${encodeURIComponent(ct)}`, body);
+          }
+          // Re-read rather than patching what we think we sent: the server decides what a
+          // page ends up at, and the chips have to show that and not our guess at it.
+          saved = await call("GET", "/v1/admin/moderation-settings");
+          draft = { enabled: saved.enabled, level: saved.level || draft.level };
+          const named = pages.map(([ct]) =>
+            (SURFACES.find((x) => x.ct === ct) || {}).tab || ct);
+          overrides = {};
+          draw(pages.length
+            ? `Saved. ${esc(named.join(", "))} ${pages.length > 1 ? "have" : "has"} its own setting; every other page is ${label(saved)}.`
+            : `Saved. Moderation is now ${label(saved)} on every page.`, true);
         } catch (err) {
           if (err instanceof SessionExpired) return sessionEnded(err);
-          draft = { enabled: saved.enabled, level: saved.level };
-          draw(`${err.message} Nothing was changed. Check your connection and try again.`);
+          // Part of a multi-page save may already have landed, so the saved state is re-read
+          // instead of assumed. Saying "nothing was changed" when something was is worse
+          // than saying nothing.
+          try { saved = await call("GET", "/v1/admin/moderation-settings"); } catch (_e) { /* keep what we had */ }
+          draft = { enabled: saved.enabled, level: saved.level || draft.level };
+          overrides = {};
+          draw(`${err.message} The settings shown are what the server has now.`);
         }
       }
 
