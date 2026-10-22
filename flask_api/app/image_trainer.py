@@ -176,6 +176,25 @@ class ImageTrainer:
             W = clf.coef_.astype(np.float32)
             b = clf.intercept_.astype(np.float32)
 
+        # WHAT THE ADMIN HAS WITHDRAWN. A category with pictures but none selected is one
+        # they have taken away from the model: "stop having an opinion about this". Retraining
+        # alone cannot express that - dropping 72 gym photographs from the training set leaves
+        # a probe that still calls them `revealing`, and leaves any exemplar marked earlier
+        # refusing them outright, because deselecting an image for training does not clear the
+        # separate mark that says "refuse things like this". Measured on this corpus that is
+        # exactly what happened: 71 of 72 gym photographs stayed refused after every one of
+        # them had been deselected, by three exemplars nobody had thought to take back.
+        #
+        # So the withdrawal is recorded here, travelling with the probe, and clip.py honours
+        # it in both channels.
+        try:
+            withdrawn = self.store.withdrawn_categories()
+        except Exception:
+            log.warning("could not read withdrawn categories", exc_info=True)
+            withdrawn = []
+        if withdrawn:
+            log.info("categories withdrawn from the image model: %s", ", ".join(withdrawn))
+
         # Save to probe.npz
         probe_path = self.model_dir / "probe.npz"
         np.savez(
@@ -185,6 +204,7 @@ class ImageTrainer:
             classes=np.array(classes),
             dim=np.array(512),
             encoder=np.array("clip-vit-b32-bonc-img-v1"),
+            withdrawn=np.array([str(c) for c in withdrawn]),
         )
         log.info("Saved fine-tuned probe.npz with %d classes (accuracy: %.4f)", len(classes), accuracy)
 
@@ -220,6 +240,12 @@ class ImageTrainer:
                 scored = selected_images
             report = self.category_report(scored)
             self._mark_masked_changes(report)
+            # Mark the withdrawn ones in the report too. "not in training" and "the model has
+            # no opinion about this any more" are different claims, and only the second one
+            # explains why a picture of that category now publishes.
+            for cat in withdrawn:
+                if cat in report:
+                    report[cat]["withdrawn"] = True
         except Exception:
             log.warning("could not build the per-category report", exc_info=True)
             report = {}
@@ -276,6 +302,9 @@ class ImageTrainer:
             "report_note": ("Refusal rates are measured on the pictures just trained on, "
                             "through the same three channels the Articles tab uses. The "
                             "probe's share is in-sample, so treat these as optimistic."),
+            # Named in the result so a withdrawal is never silent: it changes what the live
+            # check does, and the admin should be told in the same breath as the accuracy.
+            "withdrawn": withdrawn,
             "message": f"Vision model fine-tuned successfully on {len(X)} samples with {round(accuracy * 100, 1)}% accuracy in {duration}s.",
         }
 

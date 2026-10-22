@@ -172,6 +172,10 @@ class VisualResult:
     # The trained probe's view, when the bundle carries one. Empty otherwise.
     probe_scores: dict[str, float] = field(default_factory=dict)
     probe_unsafe: float = 0.0
+    # Set when this picture belongs to a category the admin has withdrawn from the image
+    # model. The probe's reading is still reported - it is useful to see - but it does not
+    # get a vote, and neither do that category's exemplars.
+    withdrawn_category: str = ""
     failed: bool = False                  # the model is present but threw
 
     @property
@@ -188,6 +192,10 @@ class VisualResult:
                 d["visual"]["probe"] = {"unsafe": round(self.probe_unsafe, 4),
                                         "scores": {k: round(v, 4)
                                                    for k, v in self.probe_scores.items()}}
+                # A reading of 0.83 next to a published picture looks like a bug unless the
+                # record says the probe was stood down and why.
+                if self.withdrawn_category:
+                    d["visual"]["probe"]["withheld"] = self.withdrawn_category
             if self.category:
                 d["visual"]["category"] = self.category
             # WHICH CHANNEL OBJECTED, and to what. Without this the record of an
@@ -220,7 +228,8 @@ class VisualResult:
             return None
         if self.exemplar_block >= config.exemplar_reject_min:
             return "exemplar"
-        if self.probe_scores and self.probe_unsafe >= config.probe_reject_min:
+        if (self.probe_scores and not self.withdrawn_category
+                and self.probe_unsafe >= config.probe_reject_min):
             return "probe"
         return "policy" if self.unsafe else None
 
@@ -249,6 +258,7 @@ class VisualCheck:
         self._image_output = "image_embeds"   # which vision output carries the embedding
         self._probe = None                    # (W, b, classes) from probe.npz, when present
         self._exemplars = None                # (embeds, actions, categories, ids) when present
+        self._withdrawn: set[str] = set()     # categories the admin took away from the model
         self._loaded = False
         self._provider = ""                   # the execution provider actually in use
         self._unavailable = ""                # why it is off, for /ready
@@ -333,6 +343,7 @@ class VisualCheck:
                     else:
                         self._probe = (pr["W"].astype(np.float32), pr["b"].astype(np.float32),
                                        [str(x) for x in pr["classes"]])
+                    self._withdrawn = self._read_withdrawn(pr)
 
                 opts = ort.SessionOptions()
                 opts.intra_op_num_threads = self.config.intra_op_threads
@@ -365,6 +376,19 @@ class VisualCheck:
     def ready(self) -> bool:
         return self._load()
 
+    @staticmethod
+    def _read_withdrawn(pr) -> set[str]:
+        """The categories an admin has taken away from the model, as recorded by the trainer.
+
+        Absent on any bundle written before withdrawal existed, and absent is not the same as
+        empty only in that it must not crash - either way nothing is withdrawn, which is the
+        behaviour those bundles already had.
+        """
+        try:
+            return {str(x).strip().lower() for x in pr["withdrawn"] if str(x).strip()}
+        except Exception:
+            return set()
+
     def reload_probe(self, probe_path=None, threshold_overrides=None):
         """Dynamically reload probe weights and/or threshold overrides into memory without restart."""
         self._load()
@@ -376,7 +400,10 @@ class VisualCheck:
                     pr = np.load(p, allow_pickle=False)
                     self._probe = (pr["W"].astype(np.float32), pr["b"].astype(np.float32),
                                    [str(x) for x in pr["classes"]])
-                    log.info("VisualCheck reloaded probe from %s with classes: %s", p.name, self._probe[2])
+                    self._withdrawn = self._read_withdrawn(pr)
+                    log.info("VisualCheck reloaded probe from %s with classes: %s%s", p.name,
+                             self._probe[2],
+                             f", withdrawn: {sorted(self._withdrawn)}" if self._withdrawn else "")
                 except Exception:
                     log.exception("VisualCheck failed to reload probe from %s", p)
                     return False
@@ -447,6 +474,14 @@ class VisualCheck:
         sims = E @ v
         best_block, best_allow, who = 0.0, 0.0, None
         for i, a in enumerate(actions):
+            # AN EXEMPLAR OF A WITHDRAWN CATEGORY DOES NOT SPEAK. Deselecting an image for
+            # training does not clear the separate mark that says "refuse things like this",
+            # so an admin who deselected all 72 gym photographs and retrained still had three
+            # of them refusing the other 71 - the model had been told to forget the category
+            # and three leftover marks kept enforcing it. Withdrawing a category withdraws
+            # its exemplars with it; marks in categories still being trained are untouched.
+            if str(cats[i]).strip().lower() in self._withdrawn:
+                continue
             s = float(sims[i])
             if a == "block":
                 if s > best_block:
@@ -634,6 +669,14 @@ class VisualCheck:
                 p = e / e.sum()
                 probe_scores = {c: float(v) for c, v in zip(classes, p)}
                 probe_unsafe = float(1.0 - probe_scores.get("safe", 1.0))
+            # THE PROBE GETS NO VOTE ON A WITHDRAWN CATEGORY. The probe cannot name one - it
+            # scores its own classes, and an admin's category dissolves into them - so the
+            # prompts are what says which category a picture belongs to, and the best-matching
+            # label is that answer. A gym photograph with `physique` withdrawn still reads as
+            # `revealing` to the probe; letting that refuse it would mean the withdrawal had
+            # changed nothing, which is the whole complaint.
+            withdrawn_category = top if top in self._withdrawn else ""
+
             # What the author is told is still the best-matching label; the probe decides
             # alongside, and names the class when it is the one objecting.
             label, category = top, self._categories.get(top, "")
@@ -648,6 +691,7 @@ class VisualCheck:
             return VisualResult(checked=True, label=label, category=category,
                                 score=scores[top], unsafe_score=unsafe_total, scores=scores,
                                 probe_scores=probe_scores, probe_unsafe=probe_unsafe,
+                                withdrawn_category=withdrawn_category,
                                 exemplar_block=ex_block, exemplar_allow=ex_allow,
                                 exemplar_match=ex_match)
         except Exception:
@@ -675,7 +719,11 @@ class VisualCheck:
             return False
         if result.exemplar_block >= self.config.exemplar_reject_min:
             return True
-        if result.probe_scores and result.probe_unsafe >= self.config.probe_reject_min:
+        # A WITHDRAWN CATEGORY GETS NO VOTE FROM THE PROBE. What is left is the written
+        # policy below, and a category with no refusing rule publishes - which is what an
+        # admin means by taking a category away from the model.
+        if (result.probe_scores and not result.withdrawn_category
+                and result.probe_unsafe >= self.config.probe_reject_min):
             return True
         # Every unsafe label judged at its own bar, not just the winner: the scores are not
         # comparable across labels (a median `minor` is 0.97, a median `violence` 0.57), so one
