@@ -80,6 +80,25 @@ class ModelMeta:
         return meta
 
 
+_TERMINATORS = ".!?।॥"
+
+
+def _with_terminator(text: str) -> str:
+    """`text` with an implied full stop appended if it has no terminal punctuation.
+
+    Transformer language models (like DeBERTa) are calibrated on punctuated sentences. When
+    an author omits punctuation (e.g. typing a single sentence with no full stop, or at the
+    end of an unpunctuated article), the model's self-attention can treat the statement as an
+    open/incomplete clause rather than a declarative claim. Evaluating an implied-terminator
+    variant alongside the raw text ensures an author cannot bypass moderation by simply
+    omitting the final period.
+    """
+    s = text.rstrip()
+    if s and s[-1] not in _TERMINATORS:
+        return s + "."
+    return text
+
+
 class OnnxScorer:
     """Wraps one loaded model bundle. Construct once; `score` is thread-safe."""
 
@@ -138,7 +157,7 @@ class OnnxScorer:
         warm = self.score("warm up")
         log.info("model %s loaded from %s (warm-up %.1f ms)", self.version, model_dir, warm.inference_ms)
 
-    def score(self, text: str) -> ScoreResult:
+    def _score_raw(self, text: str) -> ScoreResult:
         np = self._np
         start = time.perf_counter()
         enc = self.tokenizer.encode(text)
@@ -151,12 +170,16 @@ class OnnxScorer:
         logits = self.session.run([self.output_name], feeds)[0][0].astype(np.float64)
         return self._result(logits, (time.perf_counter() - start) * 1000)
 
-    def score_batch(self, texts: list[str], max_batch: int = 32) -> list[ScoreResult]:
-        """Score many texts with padded batches (one ONNX call per `max_batch`).
+    def score(self, text: str) -> ScoreResult:
+        res = self._score_raw(text)
+        term = _with_terminator(text)
+        if term != text:
+            res_term = self._score_raw(term)
+            if res_term.risk_score > res.risk_score:
+                res = res_term
+        return res
 
-        Only valid when `batch_invariant` is true. Texts are grouped by length so short
-        sentences aren't padded to the longest one in the post.
-        """
+    def _score_batch_raw(self, texts: list[str], max_batch: int = 32) -> list[ScoreResult]:
         if not self.batch_invariant:
             return [self.score(t) for t in texts]
         np = self._np
@@ -180,6 +203,18 @@ class OnnxScorer:
             for row, i in enumerate(idx):
                 results[i] = self._result(logits[row], per_text)
         return results  # type: ignore[return-value]
+
+    def score_batch(self, texts: list[str], max_batch: int = 32) -> list[ScoreResult]:
+        alt = [(i, _with_terminator(t)) for i, t in enumerate(texts) if _with_terminator(t) != t]
+        if not alt:
+            return self._score_batch_raw(texts, max_batch=max_batch)
+        all_texts = list(texts) + [t for _, t in alt]
+        all_results = self._score_batch_raw(all_texts, max_batch=max_batch)
+        results = all_results[:len(texts)]
+        for (i, _), r in zip(alt, all_results[len(texts):]):
+            if r.risk_score > results[i].risk_score:
+                results[i] = r
+        return results
 
     def _result(self, logits, elapsed_ms: float) -> ScoreResult:
         np = self._np
