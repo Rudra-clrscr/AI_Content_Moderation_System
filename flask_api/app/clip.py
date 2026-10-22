@@ -566,6 +566,33 @@ class VisualCheck:
             # hand 196 patch vectors to a cosine against one prompt vector.
             embed = self._session.run([self._image_output], {"pixel_values": pixels})[0]
             embed = embed / np.maximum(np.linalg.norm(embed, axis=1, keepdims=True), 1e-12)
+            return self.score_embedding(embed)
+        except Exception:
+            # Present but broken. Distinct from "off", because the caller should refuse the
+            # upload rather than publish a picture nothing looked at.
+            log.exception("visual check failed while encoding one image")
+            return VisualResult(checked=False, failed=True)
+
+    def score_embedding(self, embed) -> VisualResult:
+        """Everything classify() does AFTER the encoder, given an embedding already in hand.
+
+        Split out so a stored embedding can be put through the same decision the Articles tab
+        makes, rather than through an imitation of it. The admin dashboard holds thousands of
+        embeddings in system.db, and re-encoding those pictures to answer "what would this
+        retrain actually refuse?" would cost minutes per retrain while changing none of the
+        arithmetic below. An imitation is the thing to avoid here: the reason a retrain could
+        report 85% while refusing 59% of the admin's own category is that the number shown
+        came from somewhere other than the code that decides.
+        """
+        if not self._load():
+            return VisualResult(checked=False)
+        try:
+            import numpy as np
+
+            embed = np.asarray(embed, dtype=np.float32)
+            if embed.ndim == 1:
+                embed = embed[None, :]
+            embed = embed / np.maximum(np.linalg.norm(embed, axis=1, keepdims=True), 1e-12)
             sims = (embed @ self._prompt_embeds.T)[0]
 
             # Best phrasing per label, then a softmax across the labels. Taking the best rather

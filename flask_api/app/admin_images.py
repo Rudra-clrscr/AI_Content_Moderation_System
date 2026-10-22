@@ -139,6 +139,18 @@ def list_images():
     return jsonify(data)
 
 
+@admin_images_bp.get("/v1/admin/images/<int:image_id>")
+def get_image(image_id: int):
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    store = _store()
+    img = store.get_image(image_id)
+    if not img:
+        return _err(404, "not_found", "Image not found.")
+    return jsonify({"image": img})
+
+
 @admin_images_bp.get("/v1/admin/images/<int:image_id>/file")
 def get_image_file(image_id: int):
     chk = check_admin()
@@ -275,12 +287,28 @@ def batch_update_images():
     body = request.get_json(silent=True) or {}
     store = _store()
 
-    # Bulk select / deselect
+    # Bulk select / deselect, under the same filter the grid is showing. Taking only the
+    # category made the button act on pictures the admin could not see: searching "gym" shows
+    # 64 images across two categories, and Deselect All deselected a whole category instead.
+    # The retrain that followed was then measuring a change nobody had made.
     if "select_all" in body:
         sel = bool(body["select_all"])
         cat = body.get("category")
-        count = store.set_selection_bulk(sel, category=cat)
-        return jsonify({"success": True, "updated": count, "message": f"{'Selected' if sel else 'Deselected'} {count} images."})
+        count = store.set_selection_bulk(sel, category=cat, search=body.get("search"),
+                                         action=body.get("action"))
+        where = []
+        if cat and str(cat).lower() != "all":
+            where.append(f"category '{cat}'")
+        if body.get("action") and str(body["action"]).lower() != "all":
+            where.append(f"{str(body['action']).lower()} images")
+        if str(body.get("search") or "").strip():
+            where.append(f'matching "{str(body["search"]).strip()}"')
+        # Say WHAT was touched, not just how many. "Deselected 72 images" and "Deselected 72
+        # images in category physique" read the same until the two sets differ, which is
+        # exactly when the admin needs to be told.
+        scope = (" in " + ", ".join(where)) if where else " (everything)"
+        return jsonify({"success": True, "updated": count,
+                        "message": f"{'Selected' if sel else 'Deselected'} {count} images{scope}."})
 
     # Bulk action change
     if "bulk_action" in body and "category" in body:

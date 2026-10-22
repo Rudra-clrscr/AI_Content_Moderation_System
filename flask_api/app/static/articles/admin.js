@@ -77,6 +77,50 @@
   // valid server-side, so they land on their nearest numeric equivalent rather than being
   // treated as "no level" and silently reset to 5 on the next save.
   const NAMED_AT = { strict: 3, medium: 5, lenient: 8 };
+
+  // The surfaces a member can publish from, named by READING THE NAV rather than by keeping a
+  // second copy of its labels here. The nav carries data-surface on every tab, so the chips
+  // say exactly what the tabs say and keep saying it after a tab is renamed. A hard-coded
+  // list had already drifted: it offered "Posts", "Advertisements" and "Product Listings",
+  // which are content types the pipeline judges but are not tabs and are not called that
+  // anywhere in the product.
+  //
+  // The three with no tab still have to appear - they are real surfaces with real settings,
+  // and leaving them out would hide a page's moderation level rather than show it. They are
+  // shown in a group of their own with a line saying what they are, because a badge reading
+  // "NO TAB" next to `product_listing` makes an admin explain the dashboard's internals
+  // before they can explain the setting. contracts/moderation_result.md calls them "existing
+  // surfaces": BONC publishes listings, ads and feed posts elsewhere, and this reference
+  // dashboard only implements six of the tabs.
+  //
+  // Their names are BONC's own, from the `nouns` block in config/feedback_messages.yaml -
+  // the words authors are already shown ("Your listing needs a few changes"). That file is
+  // the source of truth; these three are copied because they have no nav entry to read.
+  const SURFACE_ORDER = ["business_profile", "video", "article", "request", "proposal",
+                         "business_proposal", "post", "advertisement", "product_listing"];
+  const OFF_TAB_NAMES = { post: "Post", advertisement: "Ad", product_listing: "Listing" };
+
+  function surfaceList() {
+    const named = {};
+    document.querySelectorAll("#tabs .tab[data-surface]").forEach((el) => {
+      const ct = el.dataset.surface;
+      if (ct) named[ct] = (el.textContent || "").trim();
+    });
+    const seen = new Set();
+    const out = [];
+    // Nav order first, so the chips read in the order the tabs do.
+    document.querySelectorAll("#tabs .tab[data-surface]").forEach((el) => {
+      const ct = el.dataset.surface;
+      if (ct && !seen.has(ct)) { seen.add(ct); out.push({ ct, tab: named[ct] }); }
+    });
+    for (const ct of SURFACE_ORDER) {
+      if (!seen.has(ct)) {
+        seen.add(ct);
+        out.push({ ct, tab: OFF_TAB_NAMES[ct] || ct, noTab: true });
+      }
+    }
+    return out;
+  }
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -118,11 +162,18 @@
     let currentAdmin = "";
 
     const $ = (id) => root.querySelector("#" + id);
+    // `ok` is true (done), false (failed) or "busy" (still going). The third state is here
+    // because without it every in-progress line was painted in the failure colour: a retrain
+    // announced itself with "Extracting embeddings & fine-tuning linear probe…" in red and
+    // sat there for the length of the job, which reads as an error message that never
+    // resolves. Telling somebody their retrain has failed while it is running is a good way
+    // to have them stop it and conclude the feature is broken.
     const say = (text, ok = false) => {
       const el = $("adm-msg");
       if (!el) return;
       el.textContent = text || "";
-      el.className = "adm-msg " + (text ? (ok ? "ok" : "err") : "");
+      const tone = ok === "busy" ? "busy" : (ok ? "ok" : "err");
+      el.className = "adm-msg " + (text ? tone : "");
     };
     const busy = (btn, on, label) => {
       if (!btn) return;
@@ -444,10 +495,29 @@
       async function save(name, entry, what) {
         const msg = $("pol-msg");
         if (msg) { msg.className = "adm-msg"; msg.textContent = `Applying ${what}…`; }
+        const apply = async (resolve) =>
+          call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(name)}`,
+               resolve ? { ...entry, resolve } : entry);
         try {
-          await call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(name)}`, entry);
+          await apply();
           await load(`${what} applied. The model is using it now.`, true);
         } catch (err) {
+          // A CONFLICT IS A QUESTION, NOT A FAILURE. The server answers 409 with the clashing
+          // rules precisely so the admin can be asked which verdict stands, and this path -
+          // the Stop refusing / Start refusing buttons on the rule list - printed the
+          // sentence and stopped. The sentence ends "Choose which one should stand", so the
+          // admin was told to make a choice they were never offered, with no way forward and
+          // nothing changed. Same dialog the New/Edit rule path already opens.
+          if (err.code === "policy_conflict" && err.detail && (err.detail.conflicts || []).length) {
+            if (msg) { msg.className = "adm-msg"; msg.textContent = ""; }
+            conflictModal(err.detail, async (verdict) => {
+              try {
+                await apply(verdict);
+                await load(`${what} applied. The model is using it now.`, true);
+              } catch (e2) { await load(e2.message, false); }
+            });
+            return;
+          }
           await load(err.message, false);
         }
       }
@@ -689,6 +759,34 @@
       let categories = [];
       let imagesData = { items: [], pagination: {}, stats: {} };
       let pendingChanges = new Map(); // id -> { action, is_selected }
+      let blurSensitiveMode = true; // Initial blur for nudity and sexual images
+      let revealedImageIds = new Set(); // IDs of sensitive images revealed by admin
+      let blurredImageIds = new Set(); // IDs of non-sensitive images blurred by admin
+
+      function isSensitiveImage(img) {
+        if (!img) return false;
+        if (img.is_sensitive !== undefined && img.is_sensitive !== null) {
+          return Boolean(img.is_sensitive);
+        }
+        const cat = (img.category || "").toLowerCase();
+        const desc = (img.description || "").toLowerCase();
+        const fn = (img.filename || "").toLowerCase();
+        const p = (img.file_path || "").toLowerCase();
+        const kws = ["sexual", "nudity", "nude", "porn", "pornograph", "nsfw", "erotic"];
+        if (kws.some((k) => cat.includes(k) || desc.includes(k) || fn.includes(k))) return true;
+        return p.includes("/nudity/") || p.includes("/sexual/") || p.includes("/porn/") || p.includes("_quarantine_explicit");
+      }
+
+      function isImageBlurred(img) {
+        if (!img) return false;
+        const isSens = isSensitiveImage(img);
+        if (isSens) {
+          if (!blurSensitiveMode) return false;
+          return !revealedImageIds.has(img.id);
+        } else {
+          return blurredImageIds.has(img.id);
+        }
+      }
 
       function renderShell() {
         frame("Image Policy & Model Fine-Tuning", "Manage stored policy images, add categories, and fine-tune the image model for business requirements.", `
@@ -755,14 +853,22 @@
                 </select>
                 <button class="btn btn-outline" id="btn-select-all" type="button" style="padding:6px 10px; font-size:12px;">Select All</button>
                 <button class="btn btn-outline" id="btn-deselect-all" type="button" style="padding:6px 10px; font-size:12px;">Deselect All</button>
+                <button class="btn btn-outline" id="btn-toggle-blur-all" type="button" style="padding:6px 10px; font-size:12px;" title="Nudity & sexual images are blurred by default. Click to reveal all.">🛡️ NSFW Blur: ON</button>
               </div>
-
               <div class="img-actions-right">
                 <button class="btn btn-outline" id="btn-upload-modal" type="button" style="border-color:#0284c7; color:#0284c7;">+ Upload Image</button>
                 <button class="btn btn-primary" id="btn-submit-changes" type="button" style="background:#2563eb;">Submit Changes</button>
                 <button class="btn btn-primary" id="btn-train-model" type="button" style="background:#16a34a; border-color:#16a34a;">⚡ Train Model</button>
               </div>
             </div>
+
+            <!-- WHAT THE CURRENT FILTER IS TEACHING. A grid of thumbnails cannot show it and
+                 the stat boxes above are global, so an admin selecting "all the gym images"
+                 had no way to see that 49 of the 64 are ALLOW examples - gym adverts and class
+                 photos the policy protects on purpose - and that selecting them all teaches
+                 both directions at once, mostly allow. Sits between the toolbar and the grid
+                 because it describes what the buttons above will act on. -->
+            <div id="img-filter-teaching" class="img-filter-teaching" style="display:none;"></div>
 
             <!-- Image Grid Container -->
             <div id="img-grid-container"><p class="adm-loading"><span class="spinner dark"></span> Loading stored policy images…</p></div>
@@ -796,6 +902,24 @@
         });
         $("btn-select-all").addEventListener("click", () => bulkSelection(true));
         $("btn-deselect-all").addEventListener("click", () => bulkSelection(false));
+        $("btn-toggle-blur-all").addEventListener("click", () => {
+          blurSensitiveMode = !blurSensitiveMode;
+          if (!blurSensitiveMode) {
+            (imagesData.items || []).forEach((img) => {
+              if (isSensitiveImage(img)) revealedImageIds.add(img.id);
+            });
+          } else {
+            revealedImageIds.clear();
+          }
+          const b = $("btn-toggle-blur-all");
+          if (b) {
+            b.textContent = blurSensitiveMode ? "🛡️ NSFW Blur: ON" : "👁️ NSFW Blur: OFF";
+            b.title = blurSensitiveMode
+              ? "Nudity & sexual images are blurred by default. Click to reveal all."
+              : "Nudity & sexual images are revealed. Click to blur all.";
+          }
+          renderGrid(imagesData.items);
+        });
 
         $("cat-bulk-allow").addEventListener("click", () => bulkCategoryAction("allow"));
         $("cat-bulk-block").addEventListener("click", () => bulkCategoryAction("block"));
@@ -887,6 +1011,7 @@
         try {
           imagesData = await call("GET", `/v1/admin/images?${q.toString()}`);
           updateStats(imagesData.stats);
+          updateFilterTeaching(imagesData.filtered);
           renderGrid(imagesData.items);
           renderPagination(imagesData.pagination);
         } catch (err) {
@@ -900,6 +1025,34 @@
         $("stat-selected").textContent = st.selected || 0;
         $("stat-allowed").textContent = st.allowed || 0;
         $("stat-blocked").textContent = st.blocked || 0;
+      }
+
+      // The filter's own composition, which is the one the bulk buttons act on.
+      function updateFilterTeaching(f) {
+        const el = $("img-filter-teaching");
+        if (!el) return;
+        const filtering = activeCat !== "all" || activeAction !== "all" ||
+                          activeSelected !== "all" || !!searchQuery.trim();
+        if (!f || !filtering) { el.style.display = "none"; return; }
+        const a = f.teaching_allow || 0, b = f.teaching_block || 0;
+        const bits = [`<b>${f.total || 0}</b> match this filter`,
+                      `<b>${f.selected || 0}</b> selected to train`];
+        if (a || b) {
+          bits.push(`teaching <b style="color:#16a34a;">${a} ALLOW</b> / ` +
+                    `<b style="color:#dc2626;">${b} BLOCK</b>`);
+        }
+        // Only worth shouting about when it is genuinely ambiguous. Named explicitly because
+        // "select all of these and retrain" is the one action where teaching both ways at
+        // once silently cancels out, and the admin reads the result as the retrain failing.
+        const warn = a && b
+          ? `<div class="img-teach-warn">These pictures teach the model in <b>both</b>
+             directions. The ${a} marked ALLOW push toward publishing this kind of picture and
+             the ${b} marked BLOCK push toward refusing it, so retraining on the whole set may
+             not move the verdict the way you expect. Filter by <b>Allowed Only</b> or
+             <b>Blocked Only</b> to select just one side.</div>`
+          : "";
+        el.innerHTML = `<div class="img-teach-line">${bits.join(" &middot; ")}</div>${warn}`;
+        el.style.display = "";
       }
 
       function renderGrid(items) {
@@ -922,19 +1075,38 @@
           const isSelected = pending && pending.is_selected !== undefined ? pending.is_selected : img.is_selected;
           const action = pending && pending.action !== undefined ? pending.action : img.action;
           const isAllow = action === "allow";
+          const isSensitive = isSensitiveImage(img);
+          const isBlurred = isImageBlurred(img);
 
           html += `
             <div class="img-card ${isAllow ? "allow-state" : "block-state"} ${isSelected ? "" : "deselected"}" data-id="${img.id}">
-              <div class="img-thumb-wrap">
+              <div class="img-thumb-wrap ${isSensitive ? "is-sensitive" : ""} ${isBlurred ? "is-blurred" : "is-revealed"}" data-id="${img.id}">
                 <label class="img-check-label" title="Select or deselect this image for model training">
                   <input class="img-check-input" type="checkbox" data-id="${img.id}" ${isSelected ? "checked" : ""}>
                   <span>Train</span>
                 </label>
-                <img class="img-thumb" src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'100\\' height=\\'100\\'><rect width=\\'100\\' height=\\'100\\' fill=\\'%23eee\\'/><text x=\\'50%\\' y=\\'50%\\' fill=\\'%23aaa\\' dominant-baseline=\\'middle\\' text-anchor=\\'middle\\'>No preview</text></svg>'">
+                <img class="img-thumb" src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}" loading="lazy" title="${isBlurred ? 'Image blurred. Click View Image to reveal.' : 'Click to preview full size'}" onerror="this.src=\'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\'><rect width=\'100\' height=\'100\' fill=\'%23eee\'/><text x=\'50%\' y=\'50%\' fill=\'%23aaa\' dominant-baseline=\'middle\' text-anchor=\'middle\'>No preview</text></svg>\'">
+                <div class="img-sensitive-overlay">
+                  <div class="img-sensitive-badge ${isSensitive ? "" : "neutral"}">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    <span>${isSensitive ? "Nudity / Sexual" : "Hidden"}</span>
+                  </div>
+                  <button class="btn-reveal-img" type="button" data-id="${img.id}" title="Click to view image">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    View Image
+                  </button>
+                </div>
+                <button class="btn-hide-img" type="button" data-id="${img.id}" title="Blur and hide this image">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  Blur
+                </button>
               </div>
               <div class="img-card-body">
                 <div class="img-card-meta">
-                  <span class="img-cat-tag">${esc(img.category)}</span>
+                  <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                    <span class="img-cat-tag">${esc(img.category)}</span>
+                    ${isSensitive ? `<span class="img-sensitive-tag" title="Flagged as nudity or sexual content">18+ Sensitive</span>` : ""}
+                  </div>
                   <span class="img-badge ${isAllow ? "allow" : "block"}">${isAllow ? "ALLOWED" : "BLOCKED"}</span>
                 </div>
                 <div class="img-filename" title="${esc(img.filename)}">${esc(img.filename)}</div>
@@ -1070,6 +1242,60 @@
             btn.textContent = isAllow ? "Switch to BLOCK" : "Switch to ALLOW";
           });
         });
+
+        // Wire reveal buttons for all images
+        grid.querySelectorAll(".btn-reveal-img").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const id = parseInt(btn.dataset.id, 10);
+            const imgObj = (items || []).find((it) => it.id === id);
+            if (!imgObj) return;
+            if (isSensitiveImage(imgObj)) {
+              revealedImageIds.add(id);
+            } else {
+              blurredImageIds.delete(id);
+            }
+            const wrap = btn.closest(".img-thumb-wrap");
+            if (wrap) {
+              wrap.classList.remove("is-blurred");
+              wrap.classList.add("is-revealed");
+            }
+          });
+        });
+
+        // Wire blur/hide buttons for all images
+        grid.querySelectorAll(".btn-hide-img").forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const id = parseInt(btn.dataset.id, 10);
+            const imgObj = (items || []).find((it) => it.id === id);
+            if (!imgObj) return;
+            if (isSensitiveImage(imgObj)) {
+              revealedImageIds.delete(id);
+            } else {
+              blurredImageIds.add(id);
+            }
+            const wrap = btn.closest(".img-thumb-wrap");
+            if (wrap) {
+              wrap.classList.remove("is-revealed");
+              wrap.classList.add("is-blurred");
+            }
+          });
+        });
+
+        // Wire thumbnail preview click (opens preview modal when revealed)
+        grid.querySelectorAll(".img-thumb").forEach((thumb) => {
+          thumb.addEventListener("click", (e) => {
+            const wrap = thumb.closest(".img-thumb-wrap");
+            if (!wrap) return;
+            const id = parseInt(wrap.dataset.id, 10);
+            const imgObj = (items || []).find((it) => it.id === id);
+            if (!imgObj) return;
+            if (wrap.classList.contains("is-revealed")) {
+              imagePreviewModal(imgObj);
+            }
+          });
+        });
       }
 
       function renderPagination(pg) {
@@ -1115,9 +1341,16 @@
         const btn = $(selectOn ? "btn-select-all" : "btn-deselect-all");
         busy(btn, true, selectOn ? "Selecting…" : "Deselecting…");
         try {
+          // THE SAME FILTER THE GRID IS SHOWING. Sending only the category made this button
+          // act on pictures the admin could not see: there is no "gym" category - gym
+          // pictures live under `physique` and `safe` - so searching "gym" shows 64 of them
+          // and Deselect All used to deselect a whole category instead. The retrain after it
+          // then measured a change nobody had made, which reads exactly like a broken retrain.
           const res = await call("PUT", "/v1/admin/images/batch", {
             select_all: selectOn,
             category: activeCat,
+            action: activeAction,
+            search: searchQuery.trim(),
           });
           say(res.message, true);
           busy(btn, false, selectOn ? "Select All" : "Deselect All");
@@ -1169,7 +1402,7 @@
       async function triggerTraining() {
         const btn = $("btn-train-model");
         busy(btn, true, "Training Vision Model…");
-        say("Extracting embeddings & fine-tuning linear probe across selected images…");
+        say("Extracting embeddings & fine-tuning linear probe across selected images…", "busy");
 
         try {
           // If there are pending changes, save them first
@@ -1282,6 +1515,26 @@
                 <label for="up-file">Select Image File <span class="req">*</span></label>
                 <input class="input" id="up-file" type="file" accept="image/*">
               </div>
+              <div id="up-preview-wrap" style="display:none; margin: 10px 0;">
+                <span style="font-size:12px; font-weight:700; color:#334155; margin-bottom:4px; display:block;">Image Preview:</span>
+                <div class="img-thumb-wrap" id="up-thumb-box" style="height:170px; border-radius:8px; border:1px solid var(--line);">
+                  <img id="up-preview-img" class="img-thumb" src="" alt="Upload preview">
+                  <div class="img-sensitive-overlay" id="up-sensitive-overlay">
+                    <div class="img-sensitive-badge" id="up-badge">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                      <span id="up-badge-txt">Nudity / Sexual</span>
+                    </div>
+                    <button class="btn-reveal-img" id="up-reveal-btn" type="button">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      View Image
+                    </button>
+                  </div>
+                  <button class="btn-hide-img" id="up-hide-btn" type="button" title="Blur image">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    Blur
+                  </button>
+                </div>
+              </div>
               <div class="field">
                 <label for="up-cat">Category <span class="req">*</span></label>
                 <select class="select" id="up-cat">${catOpts}</select>
@@ -1341,6 +1594,67 @@
         const showRule = () => { q("up-rule-name").textContent = q("up-cat").value || "rule"; };
         q("up-cat").addEventListener("change", showRule);
         showRule();
+
+        let upFileSensitive = false;
+        let upFileBlurred = false;
+
+        function setUploadBoxState(blurred) {
+          upFileBlurred = blurred;
+          const box = q("up-thumb-box");
+          if (!box) return;
+          if (blurred) {
+            box.classList.add("is-blurred");
+            box.classList.remove("is-revealed");
+          } else {
+            box.classList.remove("is-blurred");
+            box.classList.add("is-revealed");
+          }
+        }
+
+        function updateUploadPreviewSensitivity(forceDefault = false) {
+          const file = q("up-file").files[0];
+          if (!file) return;
+          const cat = (q("up-cat").value || "").toLowerCase();
+          const desc = (q("up-desc").value || "").toLowerCase();
+          const fn = (file.name || "").toLowerCase();
+          const kws = ["sexual", "nudity", "nude", "porn", "pornograph", "nsfw", "erotic"];
+          const prevSens = upFileSensitive;
+          upFileSensitive = kws.some((k) => cat.includes(k) || desc.includes(k) || fn.includes(k));
+
+          const badge = q("up-badge");
+          const badgeTxt = q("up-badge-txt");
+
+          if (upFileSensitive) {
+            badge.className = "img-sensitive-badge";
+            badgeTxt.textContent = "Nudity / Sexual";
+            if (forceDefault || !prevSens) setUploadBoxState(true);
+          } else {
+            badge.className = "img-sensitive-badge neutral";
+            badgeTxt.textContent = "Hidden / Blurred";
+            if (forceDefault || prevSens) setUploadBoxState(false);
+          }
+        }
+
+        q("up-file").addEventListener("change", (e) => {
+          const file = e.target.files[0];
+          if (!file) {
+            q("up-preview-wrap").style.display = "none";
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = (re) => {
+            q("up-preview-img").src = re.target.result;
+            q("up-preview-wrap").style.display = "block";
+            updateUploadPreviewSensitivity(true);
+          };
+          reader.readAsDataURL(file);
+        });
+
+        q("up-cat").addEventListener("change", () => updateUploadPreviewSensitivity(false));
+        q("up-desc").addEventListener("input", () => updateUploadPreviewSensitivity(false));
+
+        q("up-reveal-btn").addEventListener("click", () => setUploadBoxState(false));
+        q("up-hide-btn").addEventListener("click", () => setUploadBoxState(true));
         q("up-teach").addEventListener("change", (e) => {
           e.target.closest(".adm-switch").querySelector(".adm-state").textContent =
             e.target.checked ? "ON" : "OFF";
@@ -1462,6 +1776,83 @@
 
         const classesList = (data.classes || []).map((c) => `<span class="cat-pill" style="padding:2px 8px; font-size:11px;">${esc(c)}</span>`).join(" ");
 
+        // WHAT THE RETRAIN ACTUALLY DID, per category. `Accuracy` above is the probe's fit to
+        // the data it was just handed; it averages every category together and describes one
+        // of the three channels that decide. An admin who selected 72 gym pictures, retrained,
+        // read 85.4% and then watched a gym photograph publish was not misreading the screen -
+        // the screen was not answering their question. These rows are each category put back
+        // through the real decision path, worst first, because the only rows worth opening a
+        // modal for are the ones that disagree with what the admin marked.
+        // WHICH CHANNEL REFUSED, and whether the retrain actually moved the verdict. The
+        // probe is one of three voters and is routinely outvoted: deselecting the gym
+        // pictures and retraining takes the probe from 45 refusals to 15, and the written
+        // `physique` rule picks up all 30 of them, so the verdict stays at 71 of 72 and the
+        // admin sees a control that does nothing. Showing the split is what turns "the
+        // retrain is broken" into "the retrain worked and a rule is overruling it".
+        const causeCell = (r) => {
+          const by = r.by_cause || {};
+          const parts = Object.keys(by).sort((a, b) => by[b] - by[a])
+            .map((k) => `${by[k]} ${esc(k)}`);
+          let out = parts.length ? parts.join(", ") : "—";
+          if (typeof r.probe_refused_before === "number" &&
+              r.probe_refused !== r.probe_refused_before) {
+            const d = r.probe_refused - r.probe_refused_before;
+            out += `<div class="train-cat-delta">probe ${d > 0 ? "+" : ""}${d} vs last retrain</div>`;
+          }
+          if (r.masked_note) {
+            out += `<div class="train-cat-masked">${esc(r.masked_note)}</div>`;
+          }
+          return out;
+        };
+
+        const rep = data.category_report || {};
+        const rows = Object.keys(rep).sort((a, b) => (rep[a].refused_pct) - (rep[b].refused_pct));
+        let reportHtml = "";
+        if (rows.length) {
+          reportHtml = `
+            <div style="margin-top:14px;">
+              <span style="font-size:12px; font-weight:700; color:#334155; display:block; margin-bottom:6px;">
+                What the live check now does to these pictures
+              </span>
+              <table class="train-cat-table">
+                <thead><tr><th>Category</th><th>Pictures</th><th>Teaching</th><th>Refused now</th><th>Decided by</th><th>Disagrees</th></tr></thead>
+                <tbody>` +
+            rows.map((c) => {
+              const r = rep[c];
+              // Red when the admin marked these BLOCK and the system mostly publishes them,
+              // or marked them ALLOW and it mostly refuses them. Either way the number the
+              // admin came to check is the refusal rate, so that is what gets coloured.
+              // With nothing selected there is no teaching intent to judge the rate against,
+              // so fall back to what the pictures are MARKED as.
+              const mostlyBlock = (r.teaching_allow || r.teaching_block)
+                ? r.teaching_block >= r.teaching_allow : true;
+              const good = mostlyBlock ? r.refused_pct >= 90 : r.refused_pct <= 10;
+              const col = good ? "#16a34a" : (r.refused_pct >= 60 || !mostlyBlock ? "#b45309" : "#dc2626");
+              // "not in training" is a real state and the one the admin lands in after
+              // deselecting a category. Saying it beats an empty cell, which reads as a bug.
+              const teach = (r.teaching_allow || r.teaching_block)
+                ? [r.teaching_allow ? `${r.teaching_allow} allow` : "",
+                   r.teaching_block ? `${r.teaching_block} block` : ""].filter(Boolean).join(" + ")
+                : "not in training";
+              return `<tr>
+                  <td><b>${esc(c)}</b>${r.teaches_both_ways
+                      ? ` <span class="train-cat-flag" title="This category teaches the model in both directions at once">both ways</span>` : ""}</td>
+                  <td>${r.n}</td>
+                  <td>${esc(teach)}</td>
+                  <td style="color:${col}; font-weight:700;">${r.refused_pct}%</td>
+                  <td>${causeCell(r)}</td>
+                  <td>${r.contradicting
+                      ? `<button class="btn-link train-cat-why" type="button" data-cat="${esc(c)}"
+                           style="color:#b45309; font-weight:700;">${r.contradicting} &rsaquo;</button>`
+                      : "—"}</td>
+                </tr>`;
+            }).join("") + `
+                </tbody>
+              </table>
+              <p class="adm-sub" style="margin-top:6px;">${esc(data.report_note || "")}</p>
+            </div>`;
+        }
+
         back.innerHTML = `
           <div class="modal img-modal-wide" role="dialog" aria-modal="true" aria-labelledby="tr-modal-title">
             <div class="modal-head"><h2 id="tr-modal-title" style="color:#16a34a;">⚡ Model Fine-Tuning Complete</h2>
@@ -1481,6 +1872,7 @@
                   <div style="display:flex; flex-wrap:wrap; gap:4px;">${classesList}</div>
                 </div>
               </div>
+              ${reportHtml}
               <p class="adm-sub" style="color:#16a34a; font-weight:600;">✓ Changes are active immediately on /v1/moderate/media without server restart.</p>
             </div>
             <div class="modal-foot">
@@ -1492,6 +1884,36 @@
         const close = () => back.remove();
         back.querySelector("#tr-x").addEventListener("click", close);
         back.querySelector("#tr-close").addEventListener("click", close);
+
+        // NAME THE PICTURES, not just the count. "2 disagree" tells an admin something is
+        // off; `images (13).jpg, marked BLOCK, published, best label safe 0.641` tells them
+        // which picture to go and look at and which channel to argue with. Chasing one of
+        // these by hand - scoring an image in a shell to find out why it published - is the
+        // work this replaces.
+        back.querySelectorAll(".train-cat-why").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const cat = btn.dataset.cat;
+            const ex = (rep[cat] || {}).examples || [];
+            const host = btn.closest("td");
+            if (!ex.length) { return; }
+            if (host.querySelector(".train-cat-ex")) {
+              host.querySelector(".train-cat-ex").remove();
+              return;
+            }
+            const box = document.createElement("div");
+            box.className = "train-cat-ex";
+            box.innerHTML = ex.map((e) => `
+                <div class="train-cat-ex-row">
+                  <b>${esc(e.filename || ("#" + e.id))}</b><br>
+                  marked <b>${esc((e.marked || "").toUpperCase())}</b> &rarr;
+                  <b style="color:${e.verdict === "refused" ? "#dc2626" : "#16a34a"};">${esc(e.verdict)}</b>
+                  ${e.refused_by ? ` by <b>${esc(e.refused_by)}</b>` : ""}<br>
+                  best label <b>${esc(e.top_label || "?")}</b> ${e.top_score}
+                  &middot; probe ${e.probe_unsafe}
+                </div>`).join("");
+            host.appendChild(box);
+          });
+        });
       }
 
       async function trainingHistoryModal() {
@@ -1544,6 +1966,109 @@
         }
       }
 
+      function imagePreviewModal(img) {
+        const isSens = isSensitiveImage(img);
+        const pending = pendingChanges.get(img.id);
+        const action = pending && pending.action !== undefined ? pending.action : img.action;
+        const isAllow = action === "allow";
+        let modalBlurred = isImageBlurred(img);
+
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        back.style.zIndex = "100";
+        back.innerHTML = `
+          <div class="modal img-preview-modal-dialog" role="dialog" aria-modal="true">
+            <div class="modal-head">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <h2 style="font-size:16px; margin:0; word-break:break-all;">${esc(img.filename)}</h2>
+                ${isSens ? `<span class="img-sensitive-tag">18+ Nudity / Sexual</span>` : ""}
+              </div>
+              <button class="btn-link" id="prev-close-x" type="button" aria-label="Close">✕</button>
+            </div>
+            <div class="img-preview-modal-body" id="prev-body">
+              <img class="img-preview-modal-img ${modalBlurred ? "blurred" : ""}" id="prev-img" src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}">
+              <div class="img-preview-modal-overlay" id="prev-overlay" style="${modalBlurred ? "" : "display:none;"}">
+                <div class="img-sensitive-badge ${isSens ? "" : "neutral"}" style="font-size:12px; padding:4px 10px;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                  ${isSens ? "Explicit / Sexual Content" : "Hidden / Blurred Image"}
+                </div>
+                <button class="btn-reveal-img" id="prev-reveal-btn" type="button" style="font-size:13px; padding:8px 16px;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  Reveal Image
+                </button>
+              </div>
+            </div>
+            <div class="modal-body" style="padding:12px 16px; font-size:13px; background:#f8fafc; border-top:1px solid var(--line);">
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px;">
+                <div><span style="color:var(--muted); font-size:11px; display:block;">Category</span><b>${esc(img.category)}</b></div>
+                <div><span style="color:var(--muted); font-size:11px; display:block;">Policy Action</span>
+                  <span class="img-badge ${isAllow ? "allow" : "block"}">${isAllow ? "ALLOWED" : "BLOCKED"}</span>
+                </div>
+                <div><span style="color:var(--muted); font-size:11px; display:block;">Source</span><b>${esc(img.source || "dataset")}</b></div>
+                <div><span style="color:var(--muted); font-size:11px; display:block;">Exemplar Status</span><b>${img.is_exemplar ? "Live Rule" : "No"}</b></div>
+              </div>
+              ${img.description ? `<div style="margin-top:8px; font-size:12px; color:#475569;"><span style="color:var(--muted);">Description: </span>${esc(img.description)}</div>` : ""}
+            </div>
+            <div class="modal-foot" style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <button class="btn btn-outline" id="prev-toggle-blur-btn" type="button" style="font-size:12px;">
+                  ${modalBlurred ? "Show Image" : "Blur Image"}
+                </button>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-outline" id="prev-close-btn" type="button">Close</button>
+              </div>
+            </div>
+          </div>`;
+
+        document.body.appendChild(back);
+        const close = () => back.remove();
+        back.querySelector("#prev-close-x").addEventListener("click", close);
+        back.querySelector("#prev-close-btn").addEventListener("click", close);
+        back.addEventListener("click", (e) => { if (e.target === back) close(); });
+
+        const prevImg = back.querySelector("#prev-img");
+        const prevOverlay = back.querySelector("#prev-overlay");
+        const toggleBtn = back.querySelector("#prev-toggle-blur-btn");
+
+        function setModalBlur(blurred) {
+          modalBlurred = blurred;
+          if (blurred) {
+            prevImg.classList.add("blurred");
+            prevOverlay.style.display = "flex";
+            if (toggleBtn) toggleBtn.textContent = "Show Image";
+            if (isSens) {
+              revealedImageIds.delete(img.id);
+            } else {
+              blurredImageIds.add(img.id);
+            }
+            const cardWrap = document.querySelector(`.img-thumb-wrap[data-id="${img.id}"]`);
+            if (cardWrap) {
+              cardWrap.classList.remove("is-revealed");
+              cardWrap.classList.add("is-blurred");
+            }
+          } else {
+            prevImg.classList.remove("blurred");
+            prevOverlay.style.display = "none";
+            if (toggleBtn) toggleBtn.textContent = "Blur Image";
+            if (isSens) {
+              revealedImageIds.add(img.id);
+            } else {
+              blurredImageIds.delete(img.id);
+            }
+            const cardWrap = document.querySelector(`.img-thumb-wrap[data-id="${img.id}"]`);
+            if (cardWrap) {
+              cardWrap.classList.remove("is-blurred");
+              cardWrap.classList.add("is-revealed");
+            }
+          }
+        }
+
+        const revealBtn = back.querySelector("#prev-reveal-btn");
+        if (revealBtn) revealBtn.addEventListener("click", () => setModalBlur(false));
+        if (toggleBtn) toggleBtn.addEventListener("click", () => setModalBlur(!modalBlurred));
+      }
+
       // Initialize
       renderShell();
       loadCategories();
@@ -1564,6 +2089,18 @@
       const close = () => back.remove();
       let saved = null;
       let draft = null;
+      // WHICH PAGE THE BAR IS AIMED AT. "all" is the setting every page follows; a content
+      // type is that one page on its own. The server has taken a level per content type from
+      // the start - `_settings_view` has always returned `surfaces` - and the dashboard drove
+      // only the all-at-once endpoint, so the per-page settings existed and could be reached
+      // by nothing but a hand-edited YAML file.
+      let scope = "all";
+      // Taken once when the modal opens: the nav does not change while it is on screen, and
+      // re-reading the DOM on every repaint would be work for nothing.
+      const SURFACES = surfaceList();
+      // Pending per-page changes, applied on Save. Keyed by content type; absent means the
+      // page is left exactly as it is, which is not the same as setting it to the default.
+      let overrides = {};
 
       const sessionEnded = (err) => { close(); loginView(err.message); };
       back.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
@@ -1571,16 +2108,100 @@
 
       const label = (s) => `${s.enabled ? "ON" : "OFF"} · ${s.level ? levelName(s.level) : (s.mixed ? "mixed" : "project default")}`;
 
+      /** What one page is set to right now: a pending change if there is one, else what the
+       *  server last reported, else the everything-setting it inherits. */
+      function surfaceState(ct) {
+        if (overrides[ct]) return { ...overrides[ct], pending: true };
+        const srv = (saved.surfaces || {})[ct];
+        if (srv && (srv.level || srv.enabled === false)) {
+          return { enabled: srv.enabled !== false, level: srv.level || null, pending: false };
+        }
+        return { enabled: srv ? srv.enabled !== false : true, level: null, pending: false,
+                 inherited: true };
+      }
+
+      /** The scope the bar is currently editing, as {enabled, level}. */
+      function scopeState() {
+        if (scope === "all") return { enabled: draft.enabled, level: draft.level };
+        const st = surfaceState(scope);
+        return { enabled: st.enabled, level: st.level || draft.level };
+      }
+
+      function setScopeState(patch) {
+        if (scope === "all") { Object.assign(draft, patch); return; }
+        const now = scopeState();
+        overrides[scope] = { enabled: now.enabled, level: now.level, ...patch };
+      }
+
+      const heatNumber = (lvl) => (HEAT_BY_NAME[lvl] || {}).level || NAMED_AT[lvl] || 5;
+
+      /** One scope chip. Shared so the tabbed and the off-tab groups cannot drift apart. */
+      function chip(sf) {
+        const st = surfaceState(sf.ct);
+        const own = !st.inherited;
+        const val = !st.enabled ? "OFF" : own ? `L${heatNumber(st.level)}` : "default";
+        const title = sf.noTab
+          ? `${sf.ct} — published elsewhere on BONC, no tab in this dashboard`
+          : `${sf.tab} tab`;
+        return `<button type="button" class="scope-chip ${scope === sf.ct ? "active" : ""} ${own ? "own" : ""} ${st.pending ? "pending" : ""}"
+                  data-scope="${esc(sf.ct)}" title="${esc(title)}">
+          <span class="scope-name">${esc(sf.tab)}</span>
+          <span class="scope-val">${esc(val)}</span>
+        </button>`;
+      }
+
       function draw(msg = "", ok = false, confirming = false) {
         const lv = saved.levels;
         q("mm-body").innerHTML = `
           <div class="adm-msg ${msg ? (ok ? "ok" : "err") : ""}" role="status" aria-live="polite">${esc(msg)}</div>
           <p class="adm-current">Currently saved: <b>${esc(label(saved))}</b></p>
-          ${saved.mixed ? `<p class="adm-warn">Some pages have different settings right now. Saving will make them all match.</p>` : ""}
+          ${saved.mixed ? `<p class="adm-current">Pages differ right now - the chips below show which.
+            Changing <b>Every page</b> makes them all match again.</p>` : ""}
+          <!-- WHICH PAGE THIS CHANGES. Everything below - the toggle, the bar, the policy
+               card - applies to whatever is picked here. A page with its own setting says so
+               on its chip, so the ones that differ from the default are visible without
+               opening each in turn. -->
+          <div class="scope-picker" ${confirming ? 'style="opacity:.5;pointer-events:none"' : ""}>
+            <div class="scope-label">Applies to</div>
+            <div class="scope-chips" id="mm-scopes">
+              <button type="button" class="scope-chip ${scope === "all" ? "active" : ""}" data-scope="all">
+                <span class="scope-name">Every page</span>
+                <!-- saved.enabled is all() over the pages, so switching ONE page off made
+                     this read OFF - "everything is off" - while every other chip still
+                     showed its own level. When the pages disagree the honest summary is that
+                     they disagree, not whichever value the aggregate collapsed to. -->
+                <span class="scope-val">${esc(saved.mixed ? "mixed"
+                  : (draft.enabled ? `L${heatNumber(draft.level)}` : "OFF"))}</span>
+              </button>
+              ${SURFACES.filter((sf) => !sf.noTab).map(chip).join("")}
+            </div>
+            <!-- The surfaces with no tab, grouped and explained rather than badged. A chip
+                 reading "product_listing NO TAB" sitting in the same row as "Articles" makes
+                 an admin account for the dashboard's internals before they can say anything
+                 about the setting. One sentence does that for them. -->
+            ${SURFACES.some((sf) => sf.noTab) ? `
+            <div class="scope-group">
+              <div class="scope-group-label">Elsewhere on BONC</div>
+              <p class="scope-group-note">Listings, ads and feed posts are checked by the same
+                moderator, but they are published from other parts of BONC and have no tab
+                here. Their levels are set the same way.</p>
+              <div class="scope-chips" id="mm-scopes-offtab">
+                ${SURFACES.filter((sf) => sf.noTab).map(chip).join("")}
+              </div>
+            </div>` : ""}
+            ${scope === "all"
+              ? `<p class="scope-note">Changing this sets <b>every</b> page at once and clears
+                   any page-by-page settings below.</p>`
+              : `<p class="scope-note">Changing this affects <b>${esc((SURFACES.find((x) => x.ct === scope) || {}).tab || scope)}</b>
+                   only. <button type="button" class="btn-link" id="mm-follow">Match the default
+                   (L${heatNumber(draft.level)})</button></p>`}
+          </div>
           <div class="adm-switch-row">
-            <div><b>AI moderation</b><div class="adm-sub">${draft.enabled ? "ON: content is checked before it is published." : "OFF: content on every page is published without AI checks."}</div></div>
-            <label class="adm-switch"><input type="checkbox" role="switch" id="mm-enabled" ${draft.enabled ? "checked" : ""} ${confirming ? "disabled" : ""}>
-              <span class="adm-slider"></span><span class="adm-state">${draft.enabled ? "ON" : "OFF"}</span></label>
+            <div><b>AI moderation</b><div class="adm-sub">${scopeState().enabled
+                ? `ON: ${scope === "all" ? "content is checked before it is published." : "this page is checked before publishing."}`
+                : `OFF: ${scope === "all" ? "content on every page is published without AI checks." : "this page publishes with no AI check."}`}</div></div>
+            <label class="adm-switch"><input type="checkbox" role="switch" id="mm-enabled" ${scopeState().enabled ? "checked" : ""} ${confirming ? "disabled" : ""}>
+              <span class="adm-slider"></span><span class="adm-state">${scopeState().enabled ? "ON" : "OFF"}</span></label>
           </div>
           ${heatAvailable(lv) ? `
           <div class="heat-control-panel" ${confirming ? 'style="opacity:.5;pointer-events:none"' : ""}>
@@ -1628,8 +2249,10 @@
             ${lv.map((n) => `<label class="adm-level"><input type="radio" name="mm-level" value="${esc(n)}" ${draft.level === n ? "checked" : ""}>
               <span><b>${esc(levelName(n))}</b><span class="adm-sub">${esc(LEVEL_TEXT[n] || "")}</span></span></label>`).join("")}
           </fieldset>`}
-          ${draft.enabled ? "" : `<p class="adm-sub">The level is remembered for when moderation is turned back ON.</p>`}
-          <p class="adm-sub">Applies to every content type: Articles, Add Business, Videos, Requests, Proposals, Business Proposals and the rest.</p>
+          ${scopeState().enabled ? "" : `<p class="adm-sub">The level is remembered for when moderation is turned back ON.</p>`}
+          ${Object.keys(overrides).length ? `<p class="adm-warn">Unsaved page settings:
+            ${esc(Object.keys(overrides).map((ct) => (SURFACES.find((x) => x.ct === ct) || {}).tab || ct).join(", "))}.
+            They are applied when you press Save.</p>` : ""}
           ${confirming ? `<div class="adm-confirm" role="alertdialog"><b>Turn moderation OFF?</b>
             <p>Everything people submit, on every page, will be published with no AI check. Login and file-safety checks stay on.</p>
             <div class="adm-row"><button class="btn btn-outline" id="mm-keep" type="button">Keep it ON</button>
@@ -1651,7 +2274,7 @@
       function applyHeat(lvl) {
         const n = Math.max(1, Math.min(10, parseInt(lvl, 10) || 5));
         const cfg = HEAT_LEVELS[n - 1];
-        draft.level = cfg.name;
+        setScopeState({ level: cfg.name });
         q("heat-slider").value = n;
         q("heat-badge-lvl").textContent = `Level ${cfg.level} / 10`;
         q("heat-badge-val").textContent = cfg.val.toFixed(2);
@@ -1683,8 +2306,7 @@
         // Open where the saved setting actually is. A named level (strict/medium/lenient) is
         // still valid server-side, so it maps to its nearest step instead of being read as
         // "nothing set" and quietly reset to Balanced the first time anyone saves.
-        const cur = HEAT_BY_NAME[draft.level];
-        applyHeat(cur ? cur.level : (NAMED_AT[draft.level] || 5));
+        applyHeat(heatNumber(scopeState().level));
       }
 
       function bind(confirming) {
@@ -1693,7 +2315,30 @@
           q("mm-yes").addEventListener("click", () => doSave());
           return;
         }
-        q("mm-enabled").addEventListener("change", (ev) => { draft.enabled = ev.target.checked; draw(); });
+        q("mm-enabled").addEventListener("change", (ev) => {
+          setScopeState({ enabled: ev.target.checked }); draw();
+        });
+        ["mm-scopes", "mm-scopes-offtab"].forEach((id) => {
+          if (!q(id)) return;
+          q(id).addEventListener("click", (ev) => {
+            const btn = ev.target.closest(".scope-chip");
+            if (!btn) return;
+            scope = btn.dataset.scope;
+            draw();
+          });
+        });
+        if (q("mm-follow")) {
+          // COPIES the default rather than going back to inheriting it. set_feature() takes
+          // level=None to mean "leave it alone", so there is no way through this API to clear
+          // a page's own bar once it has one - and a button labelled "follow the default"
+          // that actually pins today's default would be a lie the first time the default
+          // moved. So it says what it does. Clearing needs a server change in levels.py,
+          // which belongs to the moderation-levels work.
+          q("mm-follow").addEventListener("click", () => {
+            setScopeState({ enabled: draft.enabled, level: draft.level });
+            draw();
+          });
+        }
         if (q("heat-slider")) {
           wireHeat();
         } else {
@@ -1707,6 +2352,8 @@
         });
         q("mm-save").addEventListener("click", () => {
           if (!draft.level) return draw("Choose a moderation level.");
+          // The confirmation is for switching the whole site off. Turning one page off is a
+          // smaller act with a smaller blast radius and does not need the alarm.
           if (!draft.enabled && saved.enabled) return draw("", false, true);
           doSave();
         });
@@ -1715,15 +2362,41 @@
       async function doSave() {
         const foot = q("mm-foot");
         foot.innerHTML = `<button class="btn btn-primary" disabled><span class="spinner"></span> Saving…</button>`;
+        // THE EVERYTHING-SETTING GOES FIRST, because it writes to every page and would
+        // otherwise overwrite the per-page settings sent before it. Sending them the other
+        // way round silently discarded whichever page the admin had just set.
+        const globalChanged = draft.enabled !== saved.enabled || draft.level !== saved.level;
+        const pages = Object.entries(overrides);
         try {
-          const next = await call("PUT", "/v1/admin/moderation-settings", { enabled: draft.enabled, level: draft.level });
-          saved = next;
-          draft = { enabled: next.enabled, level: next.level };
-          draw(`Saved. Moderation is now ${label(next)} on every page.`, true);
+          let next = saved;
+          if (globalChanged || !pages.length) {
+            next = await call("PUT", "/v1/admin/moderation-settings",
+                              { enabled: draft.enabled, level: draft.level });
+          }
+          for (const [ct, st] of pages) {
+            const body = { enabled: st.enabled };
+            if (st.level) body.level = st.level;
+            await call("PUT", `/v1/admin/moderation-levels/${encodeURIComponent(ct)}`, body);
+          }
+          // Re-read rather than patching what we think we sent: the server decides what a
+          // page ends up at, and the chips have to show that and not our guess at it.
+          saved = await call("GET", "/v1/admin/moderation-settings");
+          draft = { enabled: saved.enabled, level: saved.level || draft.level };
+          const named = pages.map(([ct]) =>
+            (SURFACES.find((x) => x.ct === ct) || {}).tab || ct);
+          overrides = {};
+          draw(pages.length
+            ? `Saved. ${esc(named.join(", "))} ${pages.length > 1 ? "have" : "has"} its own setting; every other page is ${label(saved)}.`
+            : `Saved. Moderation is now ${label(saved)} on every page.`, true);
         } catch (err) {
           if (err instanceof SessionExpired) return sessionEnded(err);
-          draft = { enabled: saved.enabled, level: saved.level };
-          draw(`${err.message} Nothing was changed. Check your connection and try again.`);
+          // Part of a multi-page save may already have landed, so the saved state is re-read
+          // instead of assumed. Saying "nothing was changed" when something was is worse
+          // than saying nothing.
+          try { saved = await call("GET", "/v1/admin/moderation-settings"); } catch (_e) { /* keep what we had */ }
+          draft = { enabled: saved.enabled, level: saved.level || draft.level };
+          overrides = {};
+          draw(`${err.message} The settings shown are what the server has now.`);
         }
       }
 

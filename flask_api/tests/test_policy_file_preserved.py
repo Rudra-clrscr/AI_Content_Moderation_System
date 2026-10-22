@@ -104,3 +104,67 @@ def test_the_differ_falls_back_loudly_rather_than_losing_the_policy():
     new = {"version": 1, "labels": {"only": {"unsafe": True, "prompts": ["a photo of a thing"]}}}
     out = _render_preserving(text, doc, new)
     assert yaml.safe_load(out)["labels"]["only"]["prompts"] == ["a photo of a thing"]
+
+
+# ---- a label that stops refusing stops carrying a bar ---------------------------------
+
+def test_turning_a_rule_off_takes_its_bar_with_it():
+    """build_clip_prompts.py reads reject_min only inside `if spec.get("unsafe")`, so a bar on
+    a safe label is silently ignored - config that reads as live and does nothing.
+
+    Flipping `physique` to allow from the dashboard left exactly that behind: `unsafe: false`
+    with `reject_min: 0.55` still under it.
+    """
+    text = original()
+    doc = yaml.safe_load(text)
+    # Whichever label happens to carry a measured bar. Naming one pins the test to a policy
+    # decision an admin can change from the dashboard, and `physique` was changed the same
+    # day this was written - which turned a real regression into a test that fails for a
+    # reason it is not about.
+    target = next((n for n, sp in doc["labels"].items()
+                   if sp.get("unsafe") and sp.get("reject_min") is not None), None)
+    assert target, "this test needs a refusing label that has a bar to lose"
+
+    new = yaml.safe_load(text)
+    new["labels"][target]["unsafe"] = False
+    new["labels"][target].pop("reject_min", None)
+    new["labels"][target].pop("category", None)
+
+    out = _render_preserving(text, doc, new)
+    after = yaml.safe_load(out)["labels"][target]
+    assert after["unsafe"] is False
+    assert "reject_min" not in after
+    assert "category" not in after
+    assert comments(out) <= comments(text)          # the bar's own workings go with it
+    assert after["prompts"] == doc["labels"][target]["prompts"]
+
+
+def test_removing_a_field_leaves_the_other_rules_untouched():
+    text = original()
+    doc = yaml.safe_load(text)
+    new = yaml.safe_load(text)
+    target = next((n for n, sp in doc["labels"].items()
+                   if sp.get("reject_min") is not None), None)
+    assert target, "this test needs a label that has a bar to lose"
+    new["labels"][target].pop("reject_min", None)
+    out = _render_preserving(text, doc, new)
+    after = yaml.safe_load(out)["labels"]
+    for name in doc["labels"]:
+        if name != target:
+            assert after[name] == doc["labels"][name], name
+
+
+def test_a_bar_sent_for_a_safe_label_is_dropped_on_the_way_in():
+    """The flip arrives from the dashboard carrying the old reject_min, because the toggle
+    resends the rule as it stands. Validation is where that gets dropped."""
+    from app.admin_policy import _validate
+    name, entry = _validate("physique", {"unsafe": False, "prompts": ["a photo of a thing"],
+                                         "reject_min": 0.55, "category": "physique_display"})
+    assert name == "physique"
+    assert entry["unsafe"] is False
+    assert "reject_min" not in entry
+    assert "category" not in entry
+
+    name, entry = _validate("weapon", {"unsafe": True, "prompts": ["a photo of a gun"],
+                                       "reject_min": 0.55})
+    assert entry["reject_min"] == 0.55          # still kept where it means something

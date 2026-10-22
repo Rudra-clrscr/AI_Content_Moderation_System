@@ -456,6 +456,31 @@ class SystemStore:
 
     # ---- Image Querying & Updates -----------------------------------------------------
 
+    @staticmethod
+    def is_sensitive_image(
+        category: str = "",
+        file_path: str = "",
+        description: str = "",
+        filename: str = "",
+    ) -> bool:
+        """Identify nudity, sexual, and pornographic content across category, file path, and text."""
+        c = (category or "").lower().strip()
+        p = (file_path or "").lower().replace("\\", "/")
+        d = (description or "").lower()
+        f = (filename or "").lower()
+        keywords = ("sexual", "nudity", "nude", "porn", "pornograph", "nsfw", "erotic", "explicit_adult")
+        if any(k in c for k in keywords):
+            return True
+        if any(k in d for k in keywords):
+            return True
+        if any(k in f for k in keywords):
+            return True
+        path_kws = ("images/nudity/", "images/sexual/", "images/porn/", "/nudity", "/sexual", "/porn", "_quarantine_explicit")
+        if any(k in p for k in path_kws):
+            return True
+        return False
+
+
     def list_images(
         self,
         category: str | None = None,
@@ -494,7 +519,32 @@ class SystemStore:
                 params + [limit, offset],
             ).fetchall()
 
-            items = [dict(r) for r in rows]
+            items = []
+            for r in rows:
+                item = dict(r)
+                item["is_sensitive"] = self.is_sensitive_image(
+                    category=item.get("category", ""),
+                    file_path=item.get("file_path", ""),
+                    description=item.get("description", ""),
+                    filename=item.get("filename", ""),
+                )
+                items.append(item)
+
+            # What the CURRENT FILTER holds, which is not the same question as the global
+            # stats below and is the one an admin bulk-selecting is actually asking. A search
+            # for "gym" returns 64 pictures of which 49 are `allow` examples - gym adverts and
+            # class photos the policy protects on purpose - so "select all the gym images and
+            # retrain" teaches both directions at once and mostly teaches ALLOW. Shown next to
+            # the buttons because there is no way to infer it from a grid of thumbnails.
+            filtered = db.execute(
+                f"SELECT COUNT(*) as total, "
+                f"SUM(CASE WHEN action = 'allow' THEN 1 ELSE 0 END) as allowed, "
+                f"SUM(CASE WHEN action = 'block' THEN 1 ELSE 0 END) as blocked, "
+                f"SUM(CASE WHEN is_selected = 1 THEN 1 ELSE 0 END) as selected, "
+                f"SUM(CASE WHEN is_selected = 1 AND action = 'allow' THEN 1 ELSE 0 END) as teaching_allow, "
+                f"SUM(CASE WHEN is_selected = 1 AND action = 'block' THEN 1 ELSE 0 END) as teaching_block "
+                f"FROM image_policy {where_sql}", params
+            ).fetchone()
 
             # Global statistics
             stats = db.execute(
@@ -510,6 +560,14 @@ class SystemStore:
         return {
             "items": items,
             "pagination": {"page": page, "limit": limit, "total": total, "total_pages": total_pages},
+            "filtered": {
+                "total": filtered["total"] or 0,
+                "allowed": filtered["allowed"] or 0,
+                "blocked": filtered["blocked"] or 0,
+                "selected": filtered["selected"] or 0,
+                "teaching_allow": filtered["teaching_allow"] or 0,
+                "teaching_block": filtered["teaching_block"] or 0,
+            },
             "stats": {
                 "total": stats["total"] or 0,
                 "allowed": stats["allowed"] or 0,
@@ -527,7 +585,16 @@ class SystemStore:
                 "FROM image_policy WHERE id = ?",
                 (image_id,),
             ).fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            item = dict(row)
+            item["is_sensitive"] = self.is_sensitive_image(
+                category=item.get("category", ""),
+                file_path=item.get("file_path", ""),
+                description=item.get("description", ""),
+                filename=item.get("filename", ""),
+            )
+            return item
 
     def add_image(
         self,
@@ -617,18 +684,38 @@ class SystemStore:
                 count += cur.rowcount
         return count
 
-    def set_selection_bulk(self, is_selected: bool, category: str | None = None) -> int:
-        """Select or deselect all images, optionally filtered by category."""
+    def set_selection_bulk(self, is_selected: bool, category: str | None = None,
+                           search: str | None = None, action: str | None = None) -> int:
+        """Select or deselect images under the SAME filter the grid is showing.
+
+        `search` and `action` are here because leaving them out made the button act on a
+        different set of pictures than the one on screen. An admin looking for the gym
+        pictures searches "gym" - there is no gym category, they live under `physique` and
+        `safe` - sees 64 of them, clicks Deselect All, and deselects the whole category
+        instead. Then they retrain, test, and reasonably conclude the retrain did nothing,
+        because the thing they thought they changed was never what changed.
+        """
         now = time.time()
         sel = 1 if is_selected else 0
+        clauses, params = [], []
+        if category and category.lower() != "all":
+            clauses.append("category = ?")
+            params.append(category.strip().lower())
+        if action and action.lower() != "all":
+            clauses.append("action = ?")
+            params.append(action.strip().lower())
+        # Matched exactly as list_images matches it, or the button still disagrees with the
+        # grid - a near-miss here is the same bug in a smaller size.
+        if search and search.strip():
+            clauses.append("(filename LIKE ? OR description LIKE ?)")
+            pat = f"%{search.strip()}%"
+            params.extend([pat, pat])
+        where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._tx() as db:
-            if category and category.lower() != "all":
-                cur = db.execute(
-                    "UPDATE image_policy SET is_selected = ?, updated_at = ? WHERE category = ?",
-                    (sel, now, category.strip().lower()),
-                )
-            else:
-                cur = db.execute("UPDATE image_policy SET is_selected = ?, updated_at = ?", (sel, now))
+            cur = db.execute(
+                f"UPDATE image_policy SET is_selected = ?, updated_at = ?{where_sql}",
+                [sel, now] + params,
+            )
             return cur.rowcount
 
     def get_selected_for_training(self) -> list[dict[str, Any]]:
@@ -649,8 +736,9 @@ class SystemStore:
         """
         with self._tx() as db:
             rows = db.execute(
-                "SELECT id, filename, file_path, category, action, embedding FROM image_policy "
-                "WHERE embedding IS NOT NULL ORDER BY id ASC LIMIT ?", (int(limit),)
+                "SELECT id, filename, file_path, category, action, is_selected, embedding "
+                "FROM image_policy WHERE embedding IS NOT NULL ORDER BY id ASC LIMIT ?",
+                (int(limit),)
             ).fetchall()
             return [dict(r) for r in rows]
 
