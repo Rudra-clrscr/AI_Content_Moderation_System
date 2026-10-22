@@ -2121,6 +2121,7 @@
       // Pending per-page changes, applied on Save. Keyed by content type; absent means the
       // page is left exactly as it is, which is not the same as setting it to the default.
       let overrides = {};
+      let globalDirty = false;
 
       const sessionEnded = (err) => { close(); loginView(err.message); };
       back.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
@@ -2318,10 +2319,10 @@
             <span class="step-lvl">L${cfg.level}</span>
             <span class="step-val">${cfg.val.toFixed(2)}</span>
           </button>`).join("");
-        q("heat-slider").addEventListener("input", (e) => applyHeat(e.target.value));
+        q("heat-slider").addEventListener("input", (e) => { if (scope === "all") globalDirty = true; applyHeat(e.target.value); });
         q("heat-steppers").addEventListener("click", (e) => {
           const btn = e.target.closest(".heat-step-btn");
-          if (btn) applyHeat(btn.dataset.level);
+          if (btn) { if (scope === "all") globalDirty = true; applyHeat(btn.dataset.level); }
         });
         // Open where the saved setting actually is. A named level (strict/medium/lenient) is
         // still valid server-side, so it maps to its nearest step instead of being read as
@@ -2331,12 +2332,12 @@
 
       function bind(confirming) {
         if (confirming) {
-          q("mm-keep").addEventListener("click", () => { draft.enabled = true; draw(); });
+          q("mm-keep").addEventListener("click", () => { if (scope === "all") globalDirty = true; draft.enabled = true; draw(); });
           q("mm-yes").addEventListener("click", () => doSave());
           return;
         }
         q("mm-enabled").addEventListener("change", (ev) => {
-          setScopeState({ enabled: ev.target.checked }); draw();
+          if (scope === "all") globalDirty = true; setScopeState({ enabled: ev.target.checked }); draw();
         });
         ["mm-scopes", "mm-scopes-offtab"].forEach((id) => {
           if (!q(id)) return;
@@ -2363,7 +2364,7 @@
           wireHeat();
         } else {
           back.querySelectorAll("input[name=mm-level]").forEach((r) =>
-            r.addEventListener("change", () => { draft.level = r.value; }));
+            r.addEventListener("change", () => { if (scope === "all") globalDirty = true; draft.level = r.value; }));
         }
         q("mm-cancel").addEventListener("click", close);
         q("mm-logout").addEventListener("click", async () => {
@@ -2372,9 +2373,10 @@
         });
         q("mm-save").addEventListener("click", () => {
           if (!draft.level) return draw("Choose a moderation level.");
+          if (!globalDirty && !Object.keys(overrides).length) return draw("No changes to save.", true);
           // The confirmation is for switching the whole site off. Turning one page off is a
           // smaller act with a smaller blast radius and does not need the alarm.
-          if (!draft.enabled && saved.enabled) return draw("", false, true);
+          if (scope === "all" && !draft.enabled && saved.enabled) return draw("", false, true);
           doSave();
         });
       }
@@ -2385,11 +2387,11 @@
         // THE EVERYTHING-SETTING GOES FIRST, because it writes to every page and would
         // otherwise overwrite the per-page settings sent before it. Sending them the other
         // way round silently discarded whichever page the admin had just set.
-        const globalChanged = draft.enabled !== saved.enabled || draft.level !== saved.level;
+        const shouldSaveGlobal = globalDirty || (!Object.keys(overrides).length && scope === "all");
         const pages = Object.entries(overrides);
         try {
           let next = saved;
-          if (globalChanged || !pages.length) {
+          if (shouldSaveGlobal) {
             next = await call("PUT", "/v1/admin/moderation-settings",
                               { enabled: draft.enabled, level: draft.level });
           }
@@ -2401,7 +2403,9 @@
           // Re-read rather than patching what we think we sent: the server decides what a
           // page ends up at, and the chips have to show that and not our guess at it.
           saved = await call("GET", "/v1/admin/moderation-settings");
-          draft = { enabled: saved.enabled, level: saved.level || draft.level };
+          const anyOn = Object.values(saved.surfaces || {}).some((s) => s.enabled !== false);
+          draft = { enabled: saved.enabled || anyOn, level: saved.level || draft.level };
+          globalDirty = false;
           const named = pages.map(([ct]) =>
             (SURFACES.find((x) => x.ct === ct) || {}).tab || ct);
           overrides = {};
@@ -2414,7 +2418,9 @@
           // instead of assumed. Saying "nothing was changed" when something was is worse
           // than saying nothing.
           try { saved = await call("GET", "/v1/admin/moderation-settings"); } catch (_e) { /* keep what we had */ }
-          draft = { enabled: saved.enabled, level: saved.level || draft.level };
+          const anyOn = Object.values(saved.surfaces || {}).some((s) => s.enabled !== false);
+          draft = { enabled: saved.enabled || anyOn, level: saved.level || draft.level };
+          globalDirty = false;
           overrides = {};
           draw(`${err.message} The settings shown are what the server has now.`);
         }
@@ -2423,7 +2429,8 @@
       (async () => {
         try {
           saved = await call("GET", "/v1/admin/moderation-settings");
-          draft = { enabled: saved.enabled, level: saved.level || (saved.levels.includes("medium") ? "medium" : saved.levels[0]) };
+          const anyOn = Object.values(saved.surfaces || {}).some((s) => s.enabled !== false);
+          draft = { enabled: saved.enabled || anyOn, level: saved.level || (saved.levels.includes("medium") ? "medium" : saved.levels[0]) };
           draw();
           q("mm-save").focus();
         } catch (err) {

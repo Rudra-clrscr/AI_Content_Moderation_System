@@ -97,8 +97,8 @@ def test_sentences_are_scored_in_one_batch_when_the_model_allows(make_settings):
     scorer = BatchScorer()
     text = "Leather wallets in stock. Belts in all sizes. Bags made to order. Shoes for every season."
     post(create_app(make_settings(targeted=TargetedAbuse(enabled=False)), scorer=scorer).test_client(), text)
-    assert scorer.batches == [["Leather wallets in stock", "Belts in all sizes", "Bags made to order",
-                               "Shoes for every season"]]
+    assert scorer.batches == [["Leather wallets in stock.", "Belts in all sizes.", "Bags made to order.",
+                               "Shoes for every season."]]
 
 
 def test_short_fragments_are_merged_not_scored_alone():

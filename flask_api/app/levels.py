@@ -209,8 +209,20 @@ class ModerationLevels:
                 return None
 
         default = policy(raw.get("default") or {}, "default") or FeaturePolicy(True, None, None)
+
+        # Only surfaces the pipeline actually judges. `for_type` is only ever called with a
+        # real ContentType, so `articles` (the plural) would sit in the table being consulted
+        # by nothing - and worse, be reported by /ready as a feature with moderation disabled,
+        # which is an operator reading that articles are unmoderated when they are not.
+        from app.pipeline import ContentType
+        known = {c.value for c in ContentType}
+
         features = {}
         for key, spec in (raw.get("features") or {}).items():
+            if str(key) not in known:
+                log.error("ignoring features.%s in %s: no such surface. Expected one of %s",
+                          key, path, ", ".join(sorted(known)))
+                continue
             got = policy(spec or {}, f"features.{key}")
             if got is not None:
                 features[str(key)] = got

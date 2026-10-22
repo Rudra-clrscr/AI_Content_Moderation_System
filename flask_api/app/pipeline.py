@@ -86,11 +86,40 @@ class ModerationRequest:
         return cls(d["content"], ContentType(d["content_type"]), d.get("content_id"), d["request_id"])
 
 
+_TERMINATORS = ".!?।॥"
+
+
+def _scored_end(content: str, end: int) -> int:
+    """`end` extended over the sentence's own terminating punctuation, for SCORING only.
+
+    sentence_spans deliberately stops before the full stop, and the offsets it returns are
+    what the author sees highlighted - they stay exactly as they are. But the text handed to
+    the model is a different question: the model was trained on sentences that end in
+    something, and the whole-document pass always sees the full stop while the scan never did.
+
+    Usually the two agree anyway. Over 120 sentences from res/, dropping the terminator moves
+    the score by a median of 0.0000 and never across a bar. It is the exceptions that matter,
+    because the scan exists for them: "a person like that man needs to be properly trained"
+    scores 0.0118 without its full stop and 0.8544 with it, so a sentence the model refuses
+    on its own sailed through inside a longer article.
+    """
+    while end < len(content) and content[end] in _TERMINATORS:
+        end += 1
+    return end
+
+
 def _span_scores(content: str, view: str, spans: list[tuple[int, int]], score: "_Scorer") -> list[ScoreResult]:
     """Score each span of `content`; where the de-obfuscated `view` reads differently, score that
-    too and keep the riskier result. All texts go to the model in one batch."""
-    texts = [content[s:e] for s, e in spans]
-    alt = [(i, view[s:e]) for i, (s, e) in enumerate(spans) if view[s:e] != texts[i]]
+    too and keep the riskier result. All texts go to the model in one batch.
+
+    The spans are NOT widened - only the text read out of them is, over a trailing full stop.
+    Callers zip these results back against the spans they passed in, so every offset reported
+    to the author is the one they handed over.
+    """
+    ends = [_scored_end(content, e) for _, e in spans]
+    texts = [content[s:e] for (s, _), e in zip(spans, ends)]
+    alt = [(i, view[s:e]) for i, ((s, _), e) in enumerate(zip(spans, ends))
+           if view[s:e] != texts[i]]
     results = score.many(texts + [t for _, t in alt])
     best = results[: len(texts)]
     for (i, _), r in zip(alt, results[len(texts):]):
