@@ -86,11 +86,19 @@
   // anywhere in the product.
   //
   // The three with no tab still have to appear - they are real surfaces with real settings,
-  // and leaving them out would hide a page's moderation level rather than show it - so they
-  // are listed under the content type's own name and marked as having no tab, instead of
-  // being given an invented product name.
+  // and leaving them out would hide a page's moderation level rather than show it. They are
+  // shown in a group of their own with a line saying what they are, because a badge reading
+  // "NO TAB" next to `product_listing` makes an admin explain the dashboard's internals
+  // before they can explain the setting. contracts/moderation_result.md calls them "existing
+  // surfaces": BONC publishes listings, ads and feed posts elsewhere, and this reference
+  // dashboard only implements six of the tabs.
+  //
+  // Their names are BONC's own, from the `nouns` block in config/feedback_messages.yaml -
+  // the words authors are already shown ("Your listing needs a few changes"). That file is
+  // the source of truth; these three are copied because they have no nav entry to read.
   const SURFACE_ORDER = ["business_profile", "video", "article", "request", "proposal",
                          "business_proposal", "post", "advertisement", "product_listing"];
+  const OFF_TAB_NAMES = { post: "Post", advertisement: "Ad", product_listing: "Listing" };
 
   function surfaceList() {
     const named = {};
@@ -106,7 +114,10 @@
       if (ct && !seen.has(ct)) { seen.add(ct); out.push({ ct, tab: named[ct] }); }
     });
     for (const ct of SURFACE_ORDER) {
-      if (!seen.has(ct)) { seen.add(ct); out.push({ ct, tab: ct, noTab: true }); }
+      if (!seen.has(ct)) {
+        seen.add(ct);
+        out.push({ ct, tab: OFF_TAB_NAMES[ct] || ct, noTab: true });
+      }
     }
     return out;
   }
@@ -2124,6 +2135,21 @@
 
       const heatNumber = (lvl) => (HEAT_BY_NAME[lvl] || {}).level || NAMED_AT[lvl] || 5;
 
+      /** One scope chip. Shared so the tabbed and the off-tab groups cannot drift apart. */
+      function chip(sf) {
+        const st = surfaceState(sf.ct);
+        const own = !st.inherited;
+        const val = !st.enabled ? "OFF" : own ? `L${heatNumber(st.level)}` : "default";
+        const title = sf.noTab
+          ? `${sf.ct} — published elsewhere on BONC, no tab in this dashboard`
+          : `${sf.tab} tab`;
+        return `<button type="button" class="scope-chip ${scope === sf.ct ? "active" : ""} ${own ? "own" : ""} ${st.pending ? "pending" : ""}"
+                  data-scope="${esc(sf.ct)}" title="${esc(title)}">
+          <span class="scope-name">${esc(sf.tab)}</span>
+          <span class="scope-val">${esc(val)}</span>
+        </button>`;
+      }
+
       function draw(msg = "", ok = false, confirming = false) {
         const lv = saved.levels;
         q("mm-body").innerHTML = `
@@ -2147,18 +2173,22 @@
                 <span class="scope-val">${esc(saved.mixed ? "mixed"
                   : (draft.enabled ? `L${heatNumber(draft.level)}` : "OFF"))}</span>
               </button>
-              ${SURFACES.map((sf) => {
-                const st = surfaceState(sf.ct);
-                const own = !st.inherited;
-                return `<button type="button" class="scope-chip ${scope === sf.ct ? "active" : ""} ${own ? "own" : ""} ${st.pending ? "pending" : ""}" data-scope="${esc(sf.ct)}"
-                          title="${esc(sf.noTab
-                            ? sf.ct + " — a content type with no tab of its own"
-                            : sf.tab + " tab")}">
-                  <span class="scope-name">${esc(sf.tab)}${sf.noTab ? `<span class="scope-notab">no tab</span>` : ""}</span>
-                  <span class="scope-val">${esc(!st.enabled ? "OFF" : own ? `L${heatNumber(st.level)}` : "default")}</span>
-                </button>`;
-              }).join("")}
+              ${SURFACES.filter((sf) => !sf.noTab).map(chip).join("")}
             </div>
+            <!-- The surfaces with no tab, grouped and explained rather than badged. A chip
+                 reading "product_listing NO TAB" sitting in the same row as "Articles" makes
+                 an admin account for the dashboard's internals before they can say anything
+                 about the setting. One sentence does that for them. -->
+            ${SURFACES.some((sf) => sf.noTab) ? `
+            <div class="scope-group">
+              <div class="scope-group-label">Elsewhere on BONC</div>
+              <p class="scope-group-note">Listings, ads and feed posts are checked by the same
+                moderator, but they are published from other parts of BONC and have no tab
+                here. Their levels are set the same way.</p>
+              <div class="scope-chips" id="mm-scopes-offtab">
+                ${SURFACES.filter((sf) => sf.noTab).map(chip).join("")}
+              </div>
+            </div>` : ""}
             ${scope === "all"
               ? `<p class="scope-note">Changing this sets <b>every</b> page at once and clears
                    any page-by-page settings below.</p>`
@@ -2288,14 +2318,15 @@
         q("mm-enabled").addEventListener("change", (ev) => {
           setScopeState({ enabled: ev.target.checked }); draw();
         });
-        if (q("mm-scopes")) {
-          q("mm-scopes").addEventListener("click", (ev) => {
+        ["mm-scopes", "mm-scopes-offtab"].forEach((id) => {
+          if (!q(id)) return;
+          q(id).addEventListener("click", (ev) => {
             const btn = ev.target.closest(".scope-chip");
             if (!btn) return;
             scope = btn.dataset.scope;
             draw();
           });
-        }
+        });
         if (q("mm-follow")) {
           // COPIES the default rather than going back to inheriting it. set_feature() takes
           // level=None to mean "leave it alone", so there is no way through this API to clear
