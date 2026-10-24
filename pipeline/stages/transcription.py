@@ -79,6 +79,7 @@ class TranscriptionStage:
             segments_iter, info = self.model.transcribe(
                 str(audio_p),
                 language=lang,
+                task=self.config.task,
                 vad_filter=self.config.vad_filter,
                 word_timestamps=self.config.word_timestamps,
                 initial_prompt=self.config.initial_prompt,
@@ -138,6 +139,75 @@ class TranscriptionStage:
                     num_workers=self.config.num_workers,
                 )
                 return self.transcribe(audio_path, on_segment_callback=on_segment_callback)
+            raise TranscriptionError(f"Transcription failed for '{audio_p.name}': {e}") from e
+
+    def transcribe_english(
+        self,
+        audio_path: Path | str,
+        on_segment_callback: Optional[Callable[[TranscriptSegment, float], None]] = None,
+    ) -> Tuple[str, float, List[TranscriptSegment], str, bool, str]:
+        """English text for the speech in `audio_path`, whatever language is spoken.
+
+        Returns (detected_language, language_probability, segments, full_text, translated,
+        source_text). `source_text` is what was actually said, in the original language, and is only
+        filled when the speech was translated: a translation can soften or drop an abusive word, so
+        the original wording is kept for a safety check of its own.
+
+        Whisper detects the language before it yields the first segment, so the language is
+        read first and the segments only after we know which job to run: English speech is
+        transcribed as it was said; any other language is re-run as Whisper's `translate`
+        task. The first run's lazy generator is dropped unread, so the extra cost is only the
+        language detection. Needs a multilingual model (not "*.en").
+        """
+        audio_p = Path(audio_path).resolve()
+        if not audio_p.exists():
+            raise FileNotFoundError(f"Audio file not found: {audio_p}")
+        lang_cfg = self.config.language
+        if lang_cfg and lang_cfg.lower() in ("auto", "none"):
+            lang_cfg = None
+
+        def run(task: str, language: Optional[str]):
+            return self.model.transcribe(
+                str(audio_p), language=language, task=task,
+                vad_filter=self.config.vad_filter, word_timestamps=False,
+                initial_prompt=self.config.initial_prompt,
+            )
+
+        try:
+            segments_iter, info = run("transcribe", lang_cfg)
+            language, probability, translated = info.language, info.language_probability, False
+            source_text = ""
+            if language != "en":
+                # Read the speech as it was said FIRST: this is the text that still contains
+                # the abusive word, before translation has a chance to clean it up.
+                source_text = " ".join(
+                    t for t in (seg.text.strip() for seg in segments_iter) if t)
+                segments_iter, info = run("translate", language)
+                translated = True
+            total = info.duration
+            segments: List[TranscriptSegment] = []
+            parts: List[str] = []
+            for idx, seg in enumerate(segments_iter, start=1):
+                text = seg.text.strip()
+                ts = TranscriptSegment(
+                    id=idx, start=seg.start, end=seg.end, text=text,
+                    avg_logprob=getattr(seg, "avg_logprob", 0.0),
+                    no_speech_prob=getattr(seg, "no_speech_prob", 0.0), words=[],
+                )
+                segments.append(ts)
+                if text:
+                    parts.append(text)
+                if on_segment_callback:
+                    on_segment_callback(ts, min(1.0, seg.end / total) if total > 0 else 0.0)
+            return language, probability, segments, " ".join(parts), translated, source_text
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "cublas" in err_msg or "cuda" in err_msg or "cudnn" in err_msg:
+                self._model = WhisperModel(
+                    self.config.model_size, device="cpu", compute_type="int8",
+                    cpu_threads=self.config.cpu_threads, num_workers=self.config.num_workers,
+                )
+                return self.transcribe_english(audio_path, on_segment_callback=on_segment_callback)
             raise TranscriptionError(f"Transcription failed for '{audio_p.name}': {e}") from e
 
     def process(

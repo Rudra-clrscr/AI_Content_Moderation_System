@@ -28,10 +28,14 @@ class AudioExtractionStage:
         sample_rate: int = 16000,
         channels: int = 1,
         temp_dir: Optional[Path] = None,
+        max_seconds: Optional[float] = None,
+        timeout: Optional[float] = None,
     ):
         self.sample_rate = sample_rate
         self.channels = channels
         self.temp_dir = temp_dir
+        self.max_seconds = max_seconds   # None = whole track (the CLI); the web service sets a cap
+        self.timeout = timeout           # seconds ffmpeg may run; None = no limit
         self.ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
     def get_output_audio_path(self, video_path: Path) -> Path:
@@ -65,6 +69,7 @@ class AudioExtractionStage:
             "-hide_banner",
             "-loglevel", "error",
             "-i", str(video_p),
+            *(["-t", str(self.max_seconds)] if self.max_seconds else []),
             "-vn",                      # Disable video recording
             "-acodec", "pcm_s16le",     # 16-bit uncompressed PCM
             "-ar", str(self.sample_rate), # 16000 Hz
@@ -81,6 +86,7 @@ class AudioExtractionStage:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=False,
+                timeout=self.timeout,
             )
             elapsed = time.time() - start_t
 
@@ -96,6 +102,8 @@ class AudioExtractionStage:
 
             return out_audio_p
 
+        except subprocess.TimeoutExpired:
+            raise AudioExtractionError(f"Audio extraction took longer than {self.timeout}s")
         except Exception as e:
             if not isinstance(e, AudioExtractionError):
                 raise AudioExtractionError(f"Error during audio extraction: {e}") from e
