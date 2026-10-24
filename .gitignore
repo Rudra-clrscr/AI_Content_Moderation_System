@@ -151,3 +151,5 @@ flask_api/models/grievance-v7/
 # approach is recorded in training/train_dualhead.py rather than deleted, because the failure
 # mode - two heads on one backbone pulling against each other - is worth not rediscovering.
 flask_api/models/v7/
+__pycache__/
+*.py[cod]

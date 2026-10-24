@@ -26,6 +26,10 @@ Env overrides (all optional):
     VISUAL_REJECT_MIN     float, overrides visual.reject_min
     VISUAL_PROBE_REJECT_MIN  float, overrides visual.probe_reject_min (the trained probe)
     VISUAL_DEVICE         auto | cuda | directml | cpu, where the visual check runs
+    VIDEO_CHECK           0 to turn off listening to a video's audio (app/video.py); video then follows
+                          media.allow_unchecked_video exactly as it did before
+    VIDEO_ASR_MODEL       Whisper size for that check: tiny | base | small | medium | large-v3
+    VIDEO_ASR_DEVICE      auto | cpu | cuda
     MEDIA_UPLOAD          0 to turn off image/video attachment checking
     PDF_OCR               0 to turn off OCR of scanned pages (they are then refused, as before)
     DB_SERVER, DB_NAME    SQL Server host and database
@@ -47,6 +51,7 @@ from dotenv import load_dotenv
 
 from app.routing import Thresholds
 from app.media import MediaLimits
+from app.video import VideoCheck, VideoConfig
 from app.clip import VisualCheck, VisualConfig
 from app.ocr import OcrConfig, OcrEngine
 from app.pdf import PdfLimits
@@ -96,6 +101,9 @@ class Settings:
     # Off by default: the model files are not in the repo, so a deployment that has not run
     # scripts/fetch_clip.py behaves exactly as it did before the visual check existed.
     visual: VisualCheck = field(default_factory=lambda: VisualCheck(VisualConfig(enabled=False)))
+    # Off in code like `visual`: the Whisper model is downloaded on first use, so a bare Settings()
+    # (every existing test) behaves exactly as it did before video audio was checked.
+    video: VideoCheck = field(default_factory=VideoCheck)
 
     def model_kwargs(self) -> dict:
         """Keyword args for ModelRegistry.load / OnnxScorer."""
@@ -132,6 +140,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
     ocr = pdf.get("ocr", {})
     med = raw.get("media", {})
     vis = med.get("visual", {})
+    vid = med.get("video", {})
     env = os.environ.get
     triage_threshold = env("TRIAGE_THRESHOLD", tr.get("threshold"))
     triage = (TriageFilter.load(_resolve(tr.get("dir", "models/triage-v1")),
@@ -233,6 +242,18 @@ def load_settings(path: str | Path | None = None) -> Settings:
             trust_short_confidence=float(ocr.get("trust_short_confidence", 0.90)),
             rec_model_path=str(ocr.get("rec_model_path") or ""),
             rec_lang=str(ocr.get("rec_lang") or ""),
+        )),
+        video=VideoCheck(VideoConfig(
+            enabled=_as_bool(env("VIDEO_CHECK", vid.get("enabled", False))),
+            max_bytes=int(vid.get("max_bytes", 100_000_000)),
+            max_seconds=float(vid.get("max_seconds", 600)),
+            model_size=str(env("VIDEO_ASR_MODEL", vid.get("model_size", "small"))),
+            device=str(env("VIDEO_ASR_DEVICE", vid.get("device", "auto"))),
+            compute_type=str(vid.get("compute_type", "auto")),
+            cpu_threads=int(vid.get("cpu_threads", 4)),
+            vad_filter=_as_bool(vid.get("vad_filter", True)),
+            max_concurrent=int(vid.get("max_concurrent", 1)),
+            ffmpeg_timeout=float(vid.get("ffmpeg_timeout", 120)),
         )),
         visual=VisualCheck(VisualConfig(
             enabled=_as_bool(env("VISUAL_CHECK", vis.get("enabled", False))),

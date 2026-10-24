@@ -110,6 +110,24 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # PICTURE is never classified - there is no nudity/violence/
                             # counterfeit detector in this service, so an image with no text is
                             # allowed and the result says visual_content_checked: false.
+  video:                    # LISTEN TO THE VIDEO (app/video.py): audio -> English text -> the text pipeline.
+    enabled: true           # The speech is transcribed with Faster-Whisper and judged by exactly the
+                            # rules a typed article is, at the level the admin set for that surface
+                            # (Admin: ON/OFF and Lenient/Medium/Strict). Admin OFF skips the listening.
+                            # If faster-whisper or its model is missing the check turns itself off and
+                            # allow_unchecked_video above decides, as before. VIDEO_CHECK=0 forces that.
+                            # What it does NOT do: look at the pictures. Results say
+                            # visual_content_checked: false.
+    max_bytes: 100000000    # one video (100 MB). Raise MAX_CONTENT_LENGTH-sized proxies to match.
+    max_seconds: 600        # 10 minutes. Longer is REFUSED: half-listened-to video is not checked video.
+    model_size: small       # multilingual only (no ".en"): non-English speech is translated to English.
+                            # tiny/base are faster and miss more words; medium/large-v3 need a GPU.
+    device: auto            # auto | cpu | cuda
+    compute_type: auto      # int8 on CPU, float16 on CUDA
+    cpu_threads: 4
+    vad_filter: true        # ignore silence and music, so Whisper invents fewer words
+    max_concurrent: 1       # transcriptions running at once
+    ffmpeg_timeout: 120     # seconds the audio extraction may take
   visual:                   # LOOK AT THE PICTURE, not just the words in it (app/clip.py).
     enabled: true           # CLIP scores the image against the written descriptions in
                             # config/visual_policy.yaml, so the policy is that file and adding

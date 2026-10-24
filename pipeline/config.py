@@ -31,6 +31,7 @@ class PipelineConfig:
 
     # Transcription Options
     language: Optional[str] = None  # None / "auto" triggers Whisper language detection
+    task: Literal["transcribe", "translate"] = "transcribe"  # "translate" = speech in any language -> English text
     vad_filter: bool = True  # Silero VAD to filter out non-speech segments
     word_timestamps: bool = True  # Generate word-level timestamps
     initial_prompt: Optional[str] = None  # Context prompt to guide vocabulary/spelling

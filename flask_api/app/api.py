@@ -10,6 +10,7 @@ from werkzeug.exceptions import HTTPException
 
 from app.gate import GateMatch, GateResult
 from app.media import MediaError, detect_kind, read_image
+from app.video import VideoFailed, VideoUnavailable
 from app.model import ModelNotReady
 from app.pdf import PdfError
 from app.pdf import extract as pdf_extract
@@ -56,9 +57,7 @@ def _parse_request() -> ModerationRequest | tuple:
     if content_id is not None and not isinstance(content_id, (str, int)):
         return _error(400, "invalid_content_id", "'content_id' must be a string or integer")
 
-    user_id = body.get("user_id") or body.get("user") or body.get("author")
-    return ModerationRequest(content, content_type, None if content_id is None else str(content_id),
-                             user_id=None if user_id is None else str(user_id))
+    return ModerationRequest(content, content_type, None if content_id is None else str(content_id))
 
 
 def _moderate(req: ModerationRequest, extra: dict | None = None,
@@ -155,8 +154,9 @@ def moderate_media():
         scores the picture itself against `config/visual_policy.yaml`, which catches a weapon
         or gore photograph carrying no words at all. With the visual check off or its model
         missing, the result says `visual_content_checked: false` and behaves as it used to.
-      * **Video** — nothing can be read. The shipped config sets `media.allow_unchecked_video`,
-        so it is allowed with `checked: false`; turn the flag off to refuse video instead.
+      * **Video** — its audio is transcribed to English and judged like typed text, at the
+        admin's level for the surface (see app/video.py); the pictures are not examined. If the
+        audio check is unavailable, `media.allow_unchecked_video` decides, as it always did.
 
     `/v1/moderate/pdf` is the original path and still works; it accepts the other kinds too.
     """
@@ -175,7 +175,8 @@ def moderate_media():
         return _error(400, "invalid_content_type", "unknown 'content_type'", allowed=_CONTENT_TYPES)
     content_id = request.form.get("content_id") or None
 
-    cap = max(pdf_limits.max_bytes, media.max_bytes)
+    cap = max(pdf_limits.max_bytes, media.max_bytes,
+              svc.settings.video.config.max_bytes if svc.settings.video.enabled else 0)
     data = upload.read(cap + 1)
     if len(data) > cap:
         return _error(413, "media_too_large", f"the file is larger than {cap} bytes", limit=cap)
@@ -260,6 +261,10 @@ def moderate_media():
             return jsonify({**_allowed_without_text(upload.filename, content_type, content_id), **extra}), 200
 
     elif kind == "video":
+        if svc.settings.video.enabled:
+            return _moderate_video(svc, data, upload.filename, content_type, content_id, block)
+        # The audio check is switched off (or not installed): video is handled exactly as it
+        # always was, by media.allow_unchecked_video.
         if not media.allow_unchecked_video:
             return _error(422, "media_not_checkable",
                           "video cannot be checked by this service, so it cannot be published. "
@@ -293,6 +298,78 @@ def moderate_media():
         thresholds = Thresholds(allow_max=media.ocr_text_reject_min,
                                 reject_min=media.ocr_text_reject_min)
     return _moderate(ModerationRequest(text, content_type, content_id), extra, thresholds)
+
+
+def _moderate_video(svc, data: bytes, filename: str, content_type: ContentType,
+                    content_id: str | None, block: dict):
+    """Listen to a video, then judge what was said exactly as if it had been typed.
+
+    The speech becomes English text (app/video.py) and goes through `_moderate`, so the gate,
+    the DeBERTa model, the sink and - above all - the admin's setting for this surface all
+    apply with no second code path: ON/OFF, and the lenient/medium/strict bar. Anything other
+    than `allow` is not published, which is also what the front end enforces.
+
+    The pictures are NOT examined, and every branch says so (`visual_content_checked: false`).
+    """
+    media = svc.settings.media
+    video = svc.settings.video
+    block.update(audio_checked=False, visual_content_checked=False)
+
+    # Admin OFF for this surface: nothing is listened to and nothing is judged. `_moderate`
+    # records it as published-unmoderated (`decided_by: disabled`), never as clean. Skipping the
+    # listening here also saves the CPU a transcription would have cost.
+    if not svc.levels.for_type(content_type.value).enabled:
+        block.update(checked=False, moderation_enabled=False)
+        return _moderate(ModerationRequest(f"[{filename}]", content_type, content_id), {"media": block})
+
+    if len(data) > video.config.max_bytes:
+        return _error(413, "media_too_large", f"the video is larger than {video.config.max_bytes} bytes",
+                      limit=video.config.max_bytes)
+    try:
+        speech = video.check(data)
+    except VideoUnavailable:
+        # The check cannot run on this machine at all: fall back to the pre-existing policy
+        # rather than closing the Videos tab. The record says checked: false.
+        if not media.allow_unchecked_video:
+            return _error(422, "media_not_checkable",
+                          "video cannot be checked by this service, so it cannot be published. "
+                          "Upload a still image or a PDF instead.", kind="video")
+        block.update(text_found=False, checked=False)
+        return jsonify({**_allowed_without_text(filename, content_type, content_id), "media": block}), 200
+    except MediaError as exc:
+        status = 413 if exc.code in ("media_too_large", "media_too_long") else 422
+        return _error(status, exc.code, exc.message, **exc.extra)
+    except VideoFailed:
+        # It was listening and it broke. Refused, because publishing a video nobody listened to
+        # is the hole this closes - and the author did nothing wrong, so offer a retry.
+        return _error(503, "media_not_checkable",
+                      "this video could not be checked just now. Please try again in a moment.",
+                      kind="video")
+
+    block.update(speech.as_dict(), audio_checked=True, checked=True,
+                 text_found=speech.has_speech, text_readable=True)
+    if not speech.has_speech:
+        # No audio track, or no speech in it: nothing was said, so nothing is harmful in what
+        # was said. Allowed, and recorded like any other upload with no text to judge.
+        return jsonify({**_allowed_without_text(filename, content_type, content_id), "media": block}), 200
+    if speech.translated and speech.source_text:
+        # The English is a TRANSLATION, and a translation launders abuse: Whisper turns a Hindi
+        # curse into something clean, and the text model is English-centric anyway. The gate has
+        # Hindi and Hinglish rules (Devanagari and Roman script), so it reads the words as they
+        # were SPOKEN as well. Only a block-level match refuses here; everything else still goes
+        # to the model below, on the English.
+        source = ModerationRequest(speech.source_text, content_type, content_id)
+        gate, gate_ms = svc.pipeline.run_gate(source)
+        if gate.blocked:
+            policy = svc.levels.for_type(content_type.value)
+            result = {**svc.pipeline.gate_only_result(source, gate, gate_ms), "moderation": policy.as_dict()}
+            svc.sink.emit(result)
+            return jsonify({**result, "media": block}), 200
+    limit = svc.settings.pdf.max_chars
+    if len(speech.text) > limit:
+        return _error(413, "content_too_long",
+                      f"the video's speech is {len(speech.text)} characters, over the {limit} character limit")
+    return _moderate(ModerationRequest(speech.text, content_type, content_id), {"media": block})
 
 
 def _visual_reject(filename: str, looked, content_type: ContentType,
@@ -401,6 +478,7 @@ def ready():
         # this here rather than infer it from a published result - the visual check turns
         # itself off when its model is missing, and that is exactly when you want to know.
         "visual": svc.settings.visual.status,
+        "video": svc.settings.video.status,
         # Which surfaces are currently unmoderated. An operator should be able to read that
         # from outside rather than infer it from what gets published.
         "moderation_disabled_for": svc.levels.disabled_features(),
@@ -450,14 +528,6 @@ def set_moderation_level(content_type: str):
     if unknown:
         return _error(400, "invalid_request", f"unknown fields {sorted(unknown)}; "
                                               f"expected any of {sorted(known)}")
-    # The surface has to be one the pipeline actually judges. Anything else was accepted,
-    # saved and answered 200, and then consulted by nothing - `for_type` is only ever called
-    # with a real ContentType - so "articles" instead of "article" produced a setting that
-    # looked saved on every subsequent read and moderated nothing at all.
-    if content_type not in _CONTENT_TYPES:
-        return _error(404, "unknown_content_type",
-                      f"no such surface {content_type!r}; "
-                      f"expected one of {sorted(_CONTENT_TYPES)}")
     try:
         policy = _svc().levels.set_feature(
             content_type, enabled=body.get("enabled"), level=body.get("level"),
@@ -468,23 +538,6 @@ def set_moderation_level(content_type: str):
     remember(content_type, body)           # saved, so a restart keeps it
     log.warning("moderation level changed by admin: %s -> %s", content_type, policy.as_dict())
     return jsonify({"content_type": content_type, **policy.as_dict()}), 200
-
-
-@bp.delete("/v1/admin/moderation-levels/<content_type>")
-def delete_moderation_level(content_type: str):
-    """Remove a per-feature override, reverting it to inherit the default."""
-    denied = _require_admin()
-    if denied:
-        return denied
-    if content_type not in _CONTENT_TYPES:
-        return _error(404, "unknown_content_type",
-                      f"no such surface {content_type!r}; "
-                      f"expected one of {sorted(_CONTENT_TYPES)}")
-    _svc().levels.clear_feature(content_type)
-    from app.admin_auth import forget
-    forget(content_type)
-    log.warning("moderation level cleared by admin: %s reverted to default", content_type)
-    return jsonify({"content_type": content_type, "cleared": True}), 200
 
 
 @bp.post("/v1/admin/model/reload")
