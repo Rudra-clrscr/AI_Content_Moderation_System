@@ -2,15 +2,18 @@
 # regenerated exactly by `python training/synth_data.py --seed 4`, so none of it belongs in git.
 res/
 
-# Superseded model bundles. Only the live bundle (models/v6) and the triage filter are tracked;
+# Superseded model bundles. Only the live bundle (models/v8) and the triage filter are tracked;
 # v1, v3 and v4 are kept on the machines that need them for rollback or comparison. Their objects
 # are still in this repo's LFS history from earlier commits — removing them from tracking does
 # not reclaim that storage, which would need a history rewrite.
-# v5 was the live bundle until v6 replaced it. Dropped from git rather than kept alongside:
-# two 354 MB ONNX files in LFS is ~725 MB against a 1 GB free tier, and every clone pulls both.
-# It stays on the machines that already have it, so a rollback is a local copy plus one line in
-# settings.yaml - and `git log` still has the commit it was tracked in.
+# v5 was the live bundle until v6 replaced it, and v6 until v8 did. Each is dropped from git
+# rather than kept alongside the next: two 371 MB ONNX files in LFS is ~742 MB against a 1 GB
+# free tier, and every clone pulls both. They stay on the machines that already have them, so a
+# rollback - including the grievance.enabled: true path that settings.yaml documents against
+# models/v6 - is a local copy plus one line in settings.yaml, and `git log` still has the commits
+# they were tracked in.
 flask_api/models/v5/
+flask_api/models/v6/
 flask_api/models/v1/
 flask_api/models/v3/
 flask_api/models/v4/
@@ -131,15 +134,17 @@ flask_api/models/grievance-v3/
 # temperature to half its job.
 flask_api/models/grievance-v7/
 
-# The single text model now in service (371 MB): v6's lineage with the grievance genre folded
-# in as unsafe, so one model answers both questions on every surface. Rebuild:
+# The single text model now in service (371 MB), and the one text bundle that IS tracked, so a
+# fresh clone gets a working moderator instead of a 40-minute rebuild: v6's lineage with the
+# grievance genre folded in as unsafe, so one model answers both questions on every surface.
+# It is listed here with no pattern on purpose - the recipe below is the bundle's only
+# provenance, and deleting it with the ignore rule would lose how it was built:
 #   python training/generate_workplace_grievances.py --check-collisions
 #   python training/generate_support_complaints.py
 #   <build the combined corpus: v6's splits at 35% rehearsal + the two grievance files as
 #    unsafe/safe - see settings.yaml model.dir for what the mix is and why>
 #   python training/train_incremental.py --init D:/AI/bonc-v6new/ckpt #          --new D:/AI/bonc-data-v8single/train.csv --replay D:/AI/bonc-data-v6r2 #          --replay-frac 0.0 --out D:/AI/bonc-v8single/ckpt --max-len 256 --lr 1.2e-5
 #   python training/calibrate_export.py --ckpt D:/AI/bonc-v8single/ckpt #          --data D:/AI/bonc-data-v8single --bundle flask_api/models/v8 #          --version bonc-v8-single --max-len 256 --min-temperature 1.0
-flask_api/models/v8/
 
 # The two-headed experiment (models/v7, [unsafe, grievance]). Kept out of git and out of
 # service: 0 of 4 acceptance gates, and it published phishing that models/v6 caught. The
