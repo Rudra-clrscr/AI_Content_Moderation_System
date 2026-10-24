@@ -429,13 +429,17 @@
   async function checkAttachments() {
     const pending = attachments.filter((a) => a.state === "new" && a.file);
     await Promise.all(pending.map(async (a) => {
-      a.state = "checking"; a.detail = ""; renderAttachments();
+      a.state = "checking"; a.detail = isVideoFile(a.file || a.name) ? "listening to the audio, this can take a minute" : ""; renderAttachments();
       try {
         const result = await M.moderateFile(a.file, { contentType: current });
         const media = result.media || {};
         if (result.decision !== "allow") {
           a.state = "bad";
           a.detail = result.feedback?.message || "Can't be published.";
+        } else if (result.decided_by === "disabled") {
+          // The admin has switched moderation off for this page: it was published, not checked.
+          a.state = "unchecked";
+          a.detail = "moderation is switched off, so this wasn't checked";
         } else if (media.text_found === true && media.text_readable === false) {
           // There is writing here that OCR could not read, and the deployment publishes those
           // anyway (media.allow_unreadable_image). Nothing in it has been checked, so it must
@@ -445,11 +449,13 @@
         } else if (media.visual_content_checked === false && media.text_found === false) {
           // Allowed, but nothing in it could be read. Say so rather than showing a tick.
           a.state = "unchecked";
-          a.detail = media.kind === "video" ? "video isn't watched by the moderator"
+          a.detail = media.kind === "video" ? (media.audio_checked ? "no speech found; the footage itself isn't checked"
+                                                         : "video isn't checked by the moderator")
                                             : "no text found; the picture itself isn't checked";
         } else {
           a.state = "ok";
           a.detail = media.kind === "pdf" ? `${media.page_count} page${media.page_count === 1 ? "" : "s"} read`
+                                          : media.kind === "video" ? "speech transcribed and checked (the picture isn't inspected)"
                                           : "text read and checked";
         }
       } catch (e) {

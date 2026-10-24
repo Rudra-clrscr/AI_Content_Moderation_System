@@ -54,7 +54,9 @@ def create_app(
     # bytes; UTF-8 worst case + JSON overhead, or a PDF upload plus its multipart envelope.
     json_limit = settings.max_chars * 4 + 4096
     app.config["MAX_CONTENT_LENGTH"] = max(json_limit, settings.pdf.max_bytes + 8192,
-                                           settings.media.max_bytes + 8192) \
+                                           settings.media.max_bytes + 8192,
+                                           (settings.video.config.max_bytes + 8192)
+                                           if settings.video.enabled else 0) \
         if settings.pdf.enabled else json_limit
 
     models = ModelRegistry()
@@ -90,8 +92,6 @@ def create_app(
     from app.admin_auth import init_admin, restore_levels
     admin = init_admin(app, admin_store, mailer, mail_async)
     restore_levels(app.extensions["moderation"].levels, admin.store)
-    from app.sinks import ChainedSink, AdminStoreSink
-    app.extensions["moderation"].sink = ChainedSink(app.extensions["moderation"].sink, AdminStoreSink(admin.store))
 
     from app.system_store import SystemStore
     from app.admin_images import admin_images_bp

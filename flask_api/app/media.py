@@ -18,12 +18,13 @@ those would break the feature for every honest seller.
 `visual_content_checked` says which of those two actually happened. It is `false` wherever the
 visual check is off or its model is missing, and the caller must not read that as clean.
 
-**Video** — nothing. Reading it would mean decoding frames and audio, which is a different
-project. The code default is to refuse, because accepting an unchecked video is the same hole
-as accepting an unchecked scan. The shipped config turns `media.allow_unchecked_video` on:
-until there is a visual model, refusing would close the Videos tab altogether, so footage is
-published with `checked: false` on the record instead of being silently passed as clean. The
-flag is named so that either setting is a decision someone makes on purpose.
+**Video** — its audio. The speech is transcribed to English (app/video.py) and judged by the same
+pipeline, at the same bar, as typed text, so the admin's ON/OFF and level for the surface apply. The
+PICTURES are not examined, and every result says `visual_content_checked: false`. If the audio check
+cannot run on a machine (faster-whisper or its model is missing), video falls back to the older
+`media.allow_unchecked_video` rule: the code default refuses, because accepting an unchecked video is
+the same hole as accepting an unchecked scan; the shipped config allows it with `checked: false` on the
+record, so the Videos tab keeps working while the model is being set up.
 
 The kind is decided by the file's leading bytes, never by its name: a `.png` that is really a
 PDF should be treated as a PDF, and an executable renamed `.jpg` should be refused.
