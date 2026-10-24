@@ -382,11 +382,28 @@
             <p>Decide what pictures are refused, in words. Each rule is a few phrasings the model matches against - edit one, add your own, or turn a rule off without retraining anything.</p>
             <button class="btn btn-primary" id="adm-policy-btn" type="button" style="background:#6d28d9; border-color:#6d28d9;">Manage Policy Rules</button>
           </div>
+
+          <!-- Card 4: Moderation Logs & Audit -->
+          <div class="adm-dash-card" id="card-logs">
+            <div class="adm-dash-icon" style="background:#e0f2fe; color:#0284c7;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
+            </div>
+            <h3>Moderation Logs & Audit</h3>
+            <p>Live stream of member moderation requests: inspect decisions (allow, revise, reject), user severity ratings, risk scores, and latency.</p>
+            <button class="btn btn-primary" id="adm-logs-btn" type="button" style="background:#0284c7; border-color:#0284c7;">View Moderation Logs</button>
+          </div>
         </div>`);
 
       $("adm-open").addEventListener("click", () => settingsModal());
       $("adm-images-btn").addEventListener("click", () => imagesOptionView());
       $("adm-policy-btn").addEventListener("click", () => policyView());
+      $("adm-logs-btn").addEventListener("click", () => logsView());
       $("adm-logout").addEventListener("click", async () => {
         try { await call("POST", "/v1/admin/auth/logout"); } catch { /* ignore */ }
         loginView("You have been logged out.", true);
@@ -2095,6 +2112,290 @@
       loadImages();
     }
 
+    // ===================================================================================
+    // MODERATION LOGS & AUDIT VIEW
+    // ===================================================================================
+    function logsView() {
+      let filter = { decision: "", surface: "", severity: "", q: "", page: 1, limit: 15 };
+      let logsData = { logs: [], total: 0, stats: { total: 0, allow: 0, revise: 0, reject: 0 } };
+
+      async function loadLogs() {
+        const queryParams = new URLSearchParams();
+        if (filter.decision) queryParams.set("decision", filter.decision);
+        if (filter.surface) queryParams.set("content_type", filter.surface);
+        if (filter.severity) queryParams.set("severity", filter.severity);
+        if (filter.q) queryParams.set("q", filter.q);
+        queryParams.set("limit", filter.limit);
+        queryParams.set("offset", (filter.page - 1) * filter.limit);
+
+        try {
+          logsData = await call("GET", `/v1/admin/moderation-logs?${queryParams.toString()}`);
+          render();
+        } catch (err) {
+          if (err instanceof SessionExpired) return sessionEnded(err);
+          render(err.message);
+        }
+      }
+
+      function formatTime(isoOrTs) {
+        if (!isoOrTs) return "—";
+        try {
+          const d = typeof isoOrTs === "number" ? new Date(isoOrTs * 1000) : new Date(isoOrTs);
+          if (isNaN(d.getTime())) return String(isoOrTs);
+          return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch (_e) {
+          return String(isoOrTs);
+        }
+      }
+
+      function render(msg = "") {
+        const total = logsData.total || 0;
+        const totalPages = Math.max(1, Math.ceil(total / filter.limit));
+        const curPage = Math.min(filter.page, totalPages);
+        const startItem = total === 0 ? 0 : (curPage - 1) * filter.limit + 1;
+        const endItem = Math.min(curPage * filter.limit, total);
+
+        frame("Moderation Logs & Audit Trail", "Inspect live and historical moderation events across all member surfaces.", `
+          <div class="logs-mgmt-shell">
+            <div class="img-top-bar">
+              <button class="btn btn-outline" id="logs-back-btn" type="button">← Back to Dashboard</button>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button class="btn btn-outline" id="logs-refresh-btn" type="button">↺ Refresh</button>
+                <button class="btn btn-outline" id="logs-clear-btn" type="button" style="color:var(--danger);" title="Clear audit logs">🗑️ Clear logs</button>
+              </div>
+            </div>
+
+            ${msg ? `<div class="adm-msg err" role="alert">${esc(msg)}</div>` : ""}
+
+            <div class="logs-stats-bar">
+              <div class="logs-stat-box">
+                <span class="logs-stat-val">${(logsData.stats.total || 0).toLocaleString()}</span>
+                <span class="logs-stat-lbl">Total Screened</span>
+              </div>
+              <div class="logs-stat-box">
+                <span class="logs-stat-val" style="color:#16a34a;">${(logsData.stats.allow || 0).toLocaleString()}</span>
+                <span class="logs-stat-lbl">Allowed</span>
+              </div>
+              <div class="logs-stat-box">
+                <span class="logs-stat-val" style="color:#d97706;">${(logsData.stats.revise || 0).toLocaleString()}</span>
+                <span class="logs-stat-lbl">Revisions</span>
+              </div>
+              <div class="logs-stat-box">
+                <span class="logs-stat-val" style="color:#dc2626;">${(logsData.stats.reject || 0).toLocaleString()}</span>
+                <span class="logs-stat-lbl">Refusals</span>
+              </div>
+            </div>
+
+            <div class="logs-toolbar">
+              <div class="logs-filters">
+                <input type="search" class="logs-search-input" id="logs-search" placeholder="Search user, content, ID…" value="${esc(filter.q)}">
+                <select class="logs-select" id="logs-decision-filter">
+                  <option value="" ${filter.decision === "" ? "selected" : ""}>All Decisions</option>
+                  <option value="allow" ${filter.decision === "allow" ? "selected" : ""}>ALLOW only</option>
+                  <option value="revise" ${filter.decision === "revise" ? "selected" : ""}>REVISE only</option>
+                  <option value="reject" ${filter.decision === "reject" ? "selected" : ""}>REJECT only</option>
+                </select>
+                <select class="logs-select" id="logs-surface-filter">
+                  <option value="" ${filter.surface === "" ? "selected" : ""}>All Surfaces</option>
+                  <option value="article" ${filter.surface === "article" ? "selected" : ""}>Articles</option>
+                  <option value="video" ${filter.surface === "video" ? "selected" : ""}>Videos</option>
+                  <option value="request" ${filter.surface === "request" ? "selected" : ""}>Requests</option>
+                  <option value="proposal" ${filter.surface === "proposal" ? "selected" : ""}>Proposals</option>
+                  <option value="business_proposal" ${filter.surface === "business_proposal" ? "selected" : ""}>Business Proposals</option>
+                  <option value="business_profile" ${filter.surface === "business_profile" ? "selected" : ""}>Business Profiles</option>
+                  <option value="post" ${filter.surface === "post" ? "selected" : ""}>Feed Posts</option>
+                  <option value="advertisement" ${filter.surface === "advertisement" ? "selected" : ""}>Advertisements</option>
+                  <option value="product_listing" ${filter.surface === "product_listing" ? "selected" : ""}>Listings</option>
+                </select>
+                <select class="logs-select" id="logs-severity-filter">
+                  <option value="" ${filter.severity === "" ? "selected" : ""}>All Severities</option>
+                  <option value="high" ${filter.severity === "high" ? "selected" : ""}>High Severity</option>
+                  <option value="medium" ${filter.severity === "medium" ? "selected" : ""}>Medium Severity</option>
+                  <option value="low" ${filter.severity === "low" ? "selected" : ""}>Low Severity</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="logs-table-wrap">
+              <table class="logs-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>User / ID</th>
+                    <th>Surface</th>
+                    <th>Decision</th>
+                    <th>Severity</th>
+                    <th>Risk Score</th>
+                    <th>Decided By</th>
+                    <th>Content Preview</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(logsData.logs || []).map((row) => {
+                    const dec = (row.decision || "").toLowerCase();
+                    const sev = (row.severity || "none").toLowerCase();
+                    const score = row.risk_score !== null && row.risk_score !== undefined ? Number(row.risk_score).toFixed(3) : "—";
+                    const scoreClass = row.risk_score > 0.5 ? "danger" : (row.risk_score > 0.25 ? "warn" : "safe");
+                    const user = row.user_id || row.content_id || "anonymous";
+                    return `<tr>
+                      <td style="white-space:nowrap; color:var(--muted); font-size:12px;">${esc(formatTime(row.decided_at || row.created_at))}</td>
+                      <td><span class="user-badge" title="${esc(user)}">👤 ${esc(user)}</span></td>
+                      <td><span class="surface-badge">${esc(row.content_type)}</span></td>
+                      <td><span class="badge-dec ${esc(dec)}">${esc(dec.toUpperCase())}</span></td>
+                      <td><span class="badge-sev ${esc(sev)}">${esc(sev)}</span></td>
+                      <td><span class="score-pill ${scoreClass}">${esc(score)}</span></td>
+                      <td style="font-size:12px; font-family:monospace; color:#475569;">${esc(row.decided_by || "—")}</td>
+                      <td><div class="log-preview-text" title="${esc(row.content_preview || "")}">${esc(row.content_preview || "—")}</div></td>
+                      <td><button class="btn btn-outline log-inspect-btn" type="button" data-id="${esc(row.request_id)}" style="padding:4px 8px; font-size:12px;">Inspect</button></td>
+                    </tr>`;
+                  }).join("") || `<tr><td colspan="9" style="text-align:center; padding:32px; color:var(--muted);">No moderation logs found matching the filter criteria.</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="logs-pagination">
+              <span>Showing <b>${startItem}</b> to <b>${endItem}</b> of <b>${total}</b> events</span>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-outline" id="logs-prev-btn" type="button" ${curPage <= 1 ? "disabled" : ""}>Previous</button>
+                <button class="btn btn-outline" id="logs-next-btn" type="button" ${curPage >= totalPages ? "disabled" : ""}>Next</button>
+              </div>
+            </div>
+          </div>
+        `);
+
+        $("logs-back-btn").addEventListener("click", () => signedIn(currentAdmin, false));
+        $("logs-refresh-btn").addEventListener("click", () => loadLogs());
+        $("logs-clear-btn").addEventListener("click", async () => {
+          if (!confirm("Are you sure you want to clear all moderation audit logs? This cannot be undone.")) return;
+          try {
+            await call("DELETE", "/v1/admin/moderation-logs");
+            loadLogs();
+          } catch (e) {
+            render("Failed to clear logs: " + e.message);
+          }
+        });
+
+        $("logs-search").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            filter.q = e.target.value;
+            filter.page = 1;
+            loadLogs();
+          }
+        });
+        $("logs-decision-filter").addEventListener("change", (e) => {
+          filter.decision = e.target.value;
+          filter.page = 1;
+          loadLogs();
+        });
+        $("logs-surface-filter").addEventListener("change", (e) => {
+          filter.surface = e.target.value;
+          filter.page = 1;
+          loadLogs();
+        });
+        $("logs-severity-filter").addEventListener("change", (e) => {
+          filter.severity = e.target.value;
+          filter.page = 1;
+          loadLogs();
+        });
+
+        if ($("logs-prev-btn")) {
+          $("logs-prev-btn").addEventListener("click", () => {
+            if (filter.page > 1) { filter.page--; loadLogs(); }
+          });
+        }
+        if ($("logs-next-btn")) {
+          $("logs-next-btn").addEventListener("click", () => {
+            if (filter.page < totalPages) { filter.page++; loadLogs(); }
+          });
+        }
+
+        document.querySelectorAll(".log-inspect-btn").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const reqId = btn.dataset.id;
+            const item = (logsData.logs || []).find((x) => x.request_id === reqId);
+            if (item) logDetailModal(item);
+          });
+        });
+      }
+
+      function logDetailModal(item) {
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        const dec = (item.decision || "").toLowerCase();
+        const sev = (item.severity || "none").toLowerCase();
+        const score = item.risk_score !== null && item.risk_score !== undefined ? Number(item.risk_score).toFixed(4) : "None (Not scored)";
+
+        back.innerHTML = `
+          <div class="modal adm-modal modal-log-detail" role="dialog" aria-modal="true">
+            <div class="modal-head">
+              <h2>Moderation Event Details</h2>
+              <button class="btn-link" id="det-close-x" type="button" aria-label="Close">✕</button>
+            </div>
+            <div class="modal-body" style="padding:16px 20px; overflow-y:auto;">
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px;">
+                <span class="badge-dec ${esc(dec)}">${esc(dec.toUpperCase())}</span>
+                <span class="badge-sev ${esc(sev)}">${esc(sev.toUpperCase())} SEVERITY</span>
+                <span class="surface-badge">${esc(item.content_type)}</span>
+                <span style="font-size:12px; color:var(--muted); margin-left:auto;">${esc(formatTime(item.decided_at || item.created_at))}</span>
+              </div>
+
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <div class="detail-lbl">User / Author</div>
+                  <div class="detail-val">👤 ${esc(item.user_id || item.content_id || "anonymous")}</div>
+                </div>
+                <div class="detail-item">
+                  <div class="detail-lbl">Content ID</div>
+                  <div class="detail-val">${esc(item.content_id || "—")}</div>
+                </div>
+                <div class="detail-item">
+                  <div class="detail-lbl">Risk Score</div>
+                  <div class="detail-val">${esc(score)}</div>
+                </div>
+                <div class="detail-item">
+                  <div class="detail-lbl">Decided By</div>
+                  <div class="detail-val">${esc(item.decided_by || "—")}</div>
+                </div>
+                <div class="detail-item">
+                  <div class="detail-lbl">Model Version</div>
+                  <div class="detail-val">${esc(item.model_version || "—")}</div>
+                </div>
+                <div class="detail-item">
+                  <div class="detail-lbl">Total Latency</div>
+                  <div class="detail-val">${item.latency_ms !== null && item.latency_ms !== undefined ? item.latency_ms + " ms" : "—"}</div>
+                </div>
+              </div>
+
+              <div class="detail-lbl" style="margin-bottom:6px;">Content Preview / Excerpt</div>
+              <div class="detail-content-box">${esc(item.content_preview || "(Empty content)")}</div>
+
+              ${item.feedback_title || item.feedback_message ? `
+                <div class="detail-lbl" style="margin-bottom:6px; color:#b91c1c;">Author Feedback Triggered</div>
+                <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px; margin-bottom:14px; font-size:13px; color:#991b1b;">
+                  <b>${esc(item.feedback_title || "Policy Feedback")}</b>
+                  <p style="margin:4px 0 0;">${esc(item.feedback_message || "")}</p>
+                </div>
+              ` : ""}
+
+              <div class="detail-lbl" style="margin-bottom:6px;">Complete Audit Payload (JSON)</div>
+              <pre class="detail-json-pre"><code>${esc(JSON.stringify(item.raw_result || item, null, 2))}</code></pre>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-primary" id="det-close-btn" type="button">Close</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(back);
+        const close = () => back.remove();
+        back.querySelector("#det-close-x").addEventListener("click", close);
+        back.querySelector("#det-close-btn").addEventListener("click", close);
+        back.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+      }
+
+      loadLogs();
+    }
+
     // ---- settings popup ----------------------------------------------------------------
     function settingsModal() {
       const back = document.createElement("div");
@@ -2132,7 +2433,12 @@
       /** What one page is set to right now: a pending change if there is one, else what the
        *  server last reported, else the everything-setting it inherits. */
       function surfaceState(ct) {
-        if (overrides[ct]) return { ...overrides[ct], pending: true };
+        if (overrides[ct]) {
+          if (overrides[ct].inherit) {
+            return { enabled: draft.enabled, level: null, pending: true, inherited: true };
+          }
+          return { ...overrides[ct], pending: true };
+        }
         const srv = (saved.surfaces || {})[ct];
         if (srv && (srv.level || srv.enabled === false)) {
           return { enabled: srv.enabled !== false, level: srv.level || null, pending: false };
@@ -2151,7 +2457,9 @@
       function setScopeState(patch) {
         if (scope === "all") { Object.assign(draft, patch); return; }
         const now = scopeState();
-        overrides[scope] = { enabled: now.enabled, level: now.level, ...patch };
+        const existing = { ...(overrides[scope] || {}) };
+        delete existing.inherit;
+        overrides[scope] = { ...existing, enabled: now.enabled, level: now.level, ...patch };
       }
 
       const heatNumber = (lvl) => (HEAT_BY_NAME[lvl] || {}).level || NAMED_AT[lvl] || 5;
@@ -2267,7 +2575,7 @@
             </div>
           </div>` : `
           <fieldset class="adm-levels" ${confirming ? "disabled" : ""}><legend>Moderation level</legend>
-            ${lv.map((n) => `<label class="adm-level"><input type="radio" name="mm-level" value="${esc(n)}" ${draft.level === n ? "checked" : ""}>
+            ${lv.map((n) => `<label class="adm-level"><input type="radio" name="mm-level" value="${esc(n)}" ${scopeState().level === n ? "checked" : ""}>
               <span><b>${esc(levelName(n))}</b><span class="adm-sub">${esc(LEVEL_TEXT[n] || "")}</span></span></label>`).join("")}
           </fieldset>`}
           ${scopeState().enabled ? "" : `<p class="adm-sub">The level is remembered for when moderation is turned back ON.</p>`}
@@ -2332,7 +2640,11 @@
 
       function bind(confirming) {
         if (confirming) {
-          q("mm-keep").addEventListener("click", () => { if (scope === "all") globalDirty = true; draft.enabled = true; draw(); });
+          q("mm-keep").addEventListener("click", () => {
+            draft.enabled = true;
+            if (draft.level === saved.level) globalDirty = false;
+            draw();
+          });
           q("mm-yes").addEventListener("click", () => doSave());
           return;
         }
@@ -2349,14 +2661,10 @@
           });
         });
         if (q("mm-follow")) {
-          // COPIES the default rather than going back to inheriting it. set_feature() takes
-          // level=None to mean "leave it alone", so there is no way through this API to clear
-          // a page's own bar once it has one - and a button labelled "follow the default"
-          // that actually pins today's default would be a lie the first time the default
-          // moved. So it says what it does. Clearing needs a server change in levels.py,
-          // which belongs to the moderation-levels work.
+          // Reverts this surface to inheriting the default, rather than pinning a copy of
+          // today's level. Clears the server-side override via DELETE on save.
           q("mm-follow").addEventListener("click", () => {
-            setScopeState({ enabled: draft.enabled, level: draft.level });
+            overrides[scope] = { inherit: true };
             draw();
           });
         }
@@ -2364,7 +2672,11 @@
           wireHeat();
         } else {
           back.querySelectorAll("input[name=mm-level]").forEach((r) =>
-            r.addEventListener("change", () => { if (scope === "all") globalDirty = true; draft.level = r.value; }));
+            r.addEventListener("change", () => {
+              if (scope === "all") globalDirty = true;
+              setScopeState({ level: r.value });
+              draw();
+            }));
         }
         q("mm-cancel").addEventListener("click", close);
         q("mm-logout").addEventListener("click", async () => {
@@ -2396,6 +2708,10 @@
                               { enabled: draft.enabled, level: draft.level });
           }
           for (const [ct, st] of pages) {
+            if (st.inherit) {
+              await call("DELETE", `/v1/admin/moderation-levels/${encodeURIComponent(ct)}`);
+              continue;
+            }
             const body = { enabled: st.enabled };
             if (st.level) body.level = st.level;
             await call("PUT", `/v1/admin/moderation-levels/${encodeURIComponent(ct)}`, body);

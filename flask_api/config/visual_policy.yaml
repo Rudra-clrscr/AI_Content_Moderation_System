@@ -482,3 +482,21 @@ labels:
       - a photo of a sports crowd cheering in a stadium
       - a photo of a parade with a marching band
       - a photo of a concert audience
+  animal:
+    unsafe: false
+    prompts:
+      - a photo of dog
+      - a photo of cat
+      - a photo of lion
+  religion:
+    unsafe: true
+    category: religion
+    prompts:
+      - a photo of religion
+  firework:
+    unsafe: true
+    category: parties
+    prompts:
+      - a photo of diwali
+      - a photo of firecrackers
+      - a photo of rocket show

@@ -147,3 +147,34 @@ def test_an_unknown_level_is_refused(client):
     res = set_page(client, "article", level="very_strict")
     assert res.status_code == 400
     assert settings_view(client)["surfaces"]["article"].get("level") != "very_strict"
+
+
+def delete_page(c, ct):
+    return c.delete(f"/v1/admin/moderation-levels/{ct}",
+                    headers={"X-Requested-With": "bonc-admin"})
+
+
+def test_clearing_a_page_reverts_it_to_inheriting_default(client):
+    """DELETE /v1/admin/moderation-levels/<ct> removes the per-surface override."""
+    set_page(client, "article", level="strict")
+    assert settings_view(client)["surfaces"]["article"]["level"] == "strict"
+
+    res = delete_page(client, "article")
+    assert res.status_code == 200
+    assert res.get_json()["cleared"] is True
+
+    # Without its own override, it inherits the default (level is None in as_dict)
+    assert "level" not in settings_view(client)["surfaces"]["article"]
+
+
+def test_clearing_an_unknown_page_returns_404(client):
+    res = delete_page(client, "articles")
+    assert res.status_code == 404
+
+
+def test_clearing_without_admin_returns_401(tmp_path):
+    from app import create_app
+    from app.config import load_settings
+    app = create_app(load_settings())
+    anon = app.test_client()
+    assert anon.delete("/v1/admin/moderation-levels/article").status_code == 401

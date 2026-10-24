@@ -72,6 +72,7 @@ class ModerationRequest:
     content_type: ContentType
     content_id: str | None = None
     request_id: str = ""
+    user_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.request_id:

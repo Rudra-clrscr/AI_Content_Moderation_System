@@ -161,6 +161,12 @@ class ModerationLevels:
             self._features = {**self._features, content_type: policy}
             return policy
 
+    def clear_feature(self, content_type: str) -> None:
+        """Remove a per-feature override so it reverts to inheriting the default."""
+        with self._lock:
+            if str(content_type) in self._features:
+                self._features = {k: v for k, v in self._features.items() if k != str(content_type)}
+
     # ---- loading ---------------------------------------------------------------------
 
     @classmethod

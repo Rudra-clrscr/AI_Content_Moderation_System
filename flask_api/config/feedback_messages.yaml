@@ -62,6 +62,8 @@ categories:
   wedding_content: wedding photos
   charity_solicitation: charity and donation appeals
   minors: pictures of children
+  religion: religious content
+  parties: parties and celebrations
 
 # Instruction shown next to each highlighted match, by rule id.
 rules:

@@ -174,6 +174,16 @@ def remember(ctype: str, body: dict) -> None:
         a.store.save_settings(data)
 
 
+def forget(ctype: str) -> None:
+    """Remove the saved override for one surface so it reverts to default."""
+    a: Admin = current_app.extensions["admin"]
+    with a.settings_lock:
+        data = a.store.load_settings()
+        if "features" in data and ctype in data["features"]:
+            data["features"].pop(ctype, None)
+            a.store.save_settings(data)
+
+
 # ---- who is calling -------------------------------------------------------------------
 
 def _err(status: int, code: str, message: str, **extra):
@@ -373,12 +383,19 @@ def _settings_view(levels) -> dict:
     pol = {t: levels.for_type(t) for t in ALL_SURFACES}
     enabled = [p.enabled for p in pol.values()]
     shown = [p.level for p in pol.values() if p.level]
+    surfaces = {}
+    for t in ALL_SURFACES:
+        p = levels.for_type(t)
+        d = p.as_dict()
+        if not p.enabled and p.level:
+            d["level"] = p.level
+        surfaces[t] = d
     return {
         "enabled": all(enabled),
         "level": shown[0] if shown and len(set(shown)) == 1 and len(shown) == len(pol) else None,
         "mixed": len(set(enabled)) > 1 or len(set(p.level for p in pol.values())) > 1,
         "levels": sorted(levels.as_dict()["levels"]),
-        "surfaces": {t: levels.for_type(t).as_dict() for t in ALL_SURFACES},
+        "surfaces": surfaces,
     }
 
 
@@ -418,3 +435,57 @@ def put_settings():
     log.warning("moderation set by admin: enabled=%s level=%s for %s", data["enabled"], data["level"],
                 ", ".join(ALL_SURFACES))
     return jsonify(_settings_view(levels)), 200
+
+
+# ---- moderation logs & audit trail endpoints ------------------------------------------
+
+@admin_bp.get("/v1/admin/moderation-logs")
+def get_moderation_logs():
+    denied = check_admin()
+    if denied:
+        return denied
+    a: Admin = current_app.extensions["admin"]
+    decision = request.args.get("decision")
+    content_type = request.args.get("content_type")
+    severity = request.args.get("severity")
+    query = request.args.get("q")
+    try:
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+    except (ValueError, TypeError):
+        limit = 50
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+    except (ValueError, TypeError):
+        offset = 0
+
+    logs_data = a.store.get_moderation_logs(
+        decision=decision,
+        content_type=content_type,
+        severity=severity,
+        query=query,
+        limit=limit,
+        offset=offset,
+    )
+    return jsonify(logs_data), 200
+
+
+@admin_bp.get("/v1/admin/moderation-logs/<request_id>")
+def get_moderation_log_detail(request_id: str):
+    denied = check_admin()
+    if denied:
+        return denied
+    a: Admin = current_app.extensions["admin"]
+    item = a.store.get_moderation_log_by_request_id(request_id)
+    if not item:
+        return _err(404, "not_found", f"No moderation log found for request {request_id}")
+    return jsonify(item), 200
+
+
+@admin_bp.delete("/v1/admin/moderation-logs")
+def clear_moderation_logs():
+    denied = check_admin()
+    if denied:
+        return denied
+    a: Admin = current_app.extensions["admin"]
+    count = a.store.clear_moderation_logs()
+    return jsonify({"cleared": True, "count": count}), 200

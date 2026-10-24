@@ -12,13 +12,16 @@
     "prompts.npz"
   ],
   "policy_file": "visual_policy.yaml",
-  "policy_digest": "c456eb40946f2b78",
+  "policy_digest": "fcb24cf36a2da6ed",
   "labels": {
+    "animal": "safe",
     "charity": "unsafe: charity_solicitation",
+    "firework": "unsafe: parties",
     "gore": "unsafe: graphic_violence",
     "manhandling": "unsafe: violence_or_unrest",
     "minor": "unsafe: minors",
     "physique": "unsafe: physique_display",
+    "religion": "unsafe: religion",
     "revealing": "unsafe: revealing_clothing",
     "romantic": "unsafe: romantic_content",
     "safe": "safe",
@@ -28,11 +31,14 @@
     "wedding": "unsafe: wedding_content"
   },
   "prompt_counts": {
+    "animal": 3,
     "charity": 4,
+    "firework": 3,
     "gore": 6,
     "manhandling": 14,
     "minor": 6,
     "physique": 7,
+    "religion": 1,
     "revealing": 7,
     "romantic": 5,
     "safe": 82,
