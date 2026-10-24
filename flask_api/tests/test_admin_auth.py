@@ -352,3 +352,57 @@ def test_provider_failure_is_reported_but_not_leaked(monkeypatch, make_settings,
     app.extensions["admin"].store.create_admin(EMAIL, generate_password_hash(PW))
     r = forgot(app.test_client())
     assert r.status_code == 200 and "401" not in r.get_data(as_text=True)
+
+
+# ---- moderation logs & audit trail in admin dashboard ---------------------------------
+
+def test_moderation_logs_requires_admin(app):
+    anon = app.test_client()
+    assert anon.get("/v1/admin/moderation-logs").status_code == 401
+    assert anon.delete("/v1/admin/moderation-logs").status_code == 401
+
+
+def test_moderation_logs_records_and_filters_events(admin, make_settings, scorer, sink):
+    # Post some content to /v1/moderate
+    post_res = admin.post("/v1/moderate", json={
+        "content": "Professional business profile text for engineering firm",
+        "content_type": "business_profile",
+        "content_id": "alice_developer",
+    })
+    assert post_res.status_code == 200
+
+    # Query moderation logs
+    logs_res = admin.get("/v1/admin/moderation-logs")
+    assert logs_res.status_code == 200
+    data = logs_res.get_json()
+    assert "logs" in data
+    assert "stats" in data
+    assert data["total"] >= 1
+
+    # Find the logged event
+    event = next((e for e in data["logs"] if e.get("content_id") == "alice_developer"), None)
+    assert event is not None
+    assert event["user_id"] == "alice_developer"
+    assert event["content_type"] == "business_profile"
+    assert event["decision"] == "allow"
+    assert event["severity"] in ("low", "none")
+
+    # Detail lookup by request_id
+    detail_res = admin.get(f"/v1/admin/moderation-logs/{event['request_id']}")
+    assert detail_res.status_code == 200
+    detail = detail_res.get_json()
+    assert detail["request_id"] == event["request_id"]
+    assert "raw_result" in detail
+
+    # Filter by surface
+    filtered = admin.get("/v1/admin/moderation-logs?content_type=business_profile").get_json()
+    assert any(e["content_id"] == "alice_developer" for e in filtered["logs"])
+
+    # Search by user
+    searched = admin.get("/v1/admin/moderation-logs?q=alice_developer").get_json()
+    assert any(e["user_id"] == "alice_developer" for e in searched["logs"])
+
+    # Clear logs
+    del_res = admin.delete("/v1/admin/moderation-logs", headers=HDR)
+    assert del_res.status_code == 200
+    assert admin.get("/v1/admin/moderation-logs").get_json()["total"] == 0

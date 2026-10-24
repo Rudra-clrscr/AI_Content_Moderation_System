@@ -37,6 +37,32 @@ CREATE TABLE IF NOT EXISTS setting (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS moderation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT NOT NULL UNIQUE,
+    user_id TEXT,
+    content_id TEXT,
+    content_type TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    decided_by TEXT,
+    severity TEXT,
+    risk_score REAL,
+    predicted_label TEXT,
+    feedback_title TEXT,
+    feedback_message TEXT,
+    content_preview TEXT,
+    gate_matches TEXT,
+    model_version TEXT,
+    latency_ms REAL,
+    raw_result TEXT,
+    created_at REAL NOT NULL,
+    decided_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mod_log_created ON moderation_log (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mod_log_decision ON moderation_log (decision);
+CREATE INDEX IF NOT EXISTS idx_mod_log_content_type ON moderation_log (content_type);
+CREATE INDEX IF NOT EXISTS idx_mod_log_severity ON moderation_log (severity);
+CREATE INDEX IF NOT EXISTS idx_mod_log_user ON moderation_log (user_id);
 """
 
 
@@ -152,3 +178,150 @@ class AdminStore:
         with self._tx() as db:
             db.execute("INSERT OR REPLACE INTO setting (key, value) VALUES ('moderation', ?)",
                        (json.dumps(data, sort_keys=True),))
+
+    # ---- moderation logs & audit trail ------------------------------------------------
+    def _extract_log_params(self, result: dict) -> dict:
+        feedback = result.get("feedback") or {}
+        severity = feedback.get("severity")
+        decision = (result.get("decision") or "").lower()
+        if not severity:
+            if decision == "reject":
+                severity = "high"
+            elif decision == "revise":
+                severity = "medium"
+            elif decision == "allow":
+                severity = "low"
+            else:
+                severity = "none"
+
+        content = result.get("content") or ""
+        content_preview = content[:250] + ("..." if len(content) > 250 else "")
+
+        user_id = result.get("user_id") or result.get("user") or result.get("author") or result.get("content_id") or "anonymous"
+        content_id = result.get("content_id")
+        latency = result.get("latency_ms")
+        total_ms = latency.get("total") if isinstance(latency, dict) else (latency if isinstance(latency, (int, float)) else None)
+
+        return {
+            "request_id": result.get("request_id") or f"req_{int(time.time()*1000)}",
+            "user_id": str(user_id) if user_id is not None else None,
+            "content_id": str(content_id) if content_id is not None else None,
+            "content_type": str(result.get("content_type") or "article"),
+            "decision": str(result.get("decision") or "unknown"),
+            "decided_by": str(result.get("decided_by") or ""),
+            "severity": str(severity),
+            "risk_score": result.get("risk_score"),
+            "predicted_label": result.get("predicted_label"),
+            "feedback_title": feedback.get("title") or "",
+            "feedback_message": feedback.get("message") or "",
+            "content_preview": content_preview,
+            "gate_matches": json.dumps(result.get("gate_matches") or []),
+            "model_version": result.get("model_version"),
+            "latency_ms": total_ms,
+            "raw_result": json.dumps(result, sort_keys=True),
+            "created_at": time.time(),
+            "decided_at": result.get("decided_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+
+    def record_moderation_log(self, result: dict) -> None:
+        try:
+            params = self._extract_log_params(result)
+            with self._tx() as db:
+                db.execute("""
+                    INSERT OR REPLACE INTO moderation_log (
+                        request_id, user_id, content_id, content_type,
+                        decision, decided_by, severity, risk_score,
+                        predicted_label, feedback_title, feedback_message,
+                        content_preview, gate_matches, model_version,
+                        latency_ms, raw_result, created_at, decided_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    params["request_id"], params["user_id"], params["content_id"], params["content_type"],
+                    params["decision"], params["decided_by"], params["severity"], params["risk_score"],
+                    params["predicted_label"], params["feedback_title"], params["feedback_message"],
+                    params["content_preview"], params["gate_matches"], params["model_version"],
+                    params["latency_ms"], params["raw_result"], params["created_at"], params["decided_at"]
+                ))
+        except Exception:
+            pass
+
+    def get_moderation_logs(self, *, decision: str | None = None, content_type: str | None = None,
+                            severity: str | None = None, query: str | None = None,
+                            limit: int = 50, offset: int = 0) -> dict:
+        where_clauses = []
+        args = []
+        if decision and decision.lower() != "all":
+            where_clauses.append("LOWER(decision) = LOWER(?)")
+            args.append(decision)
+        if content_type and content_type.lower() != "all":
+            where_clauses.append("LOWER(content_type) = LOWER(?)")
+            args.append(content_type)
+        if severity and severity.lower() != "all":
+            where_clauses.append("LOWER(severity) = LOWER(?)")
+            args.append(severity)
+        if query and query.strip():
+            q_like = f"%{query.strip()}%"
+            where_clauses.append("(user_id LIKE ? OR content_id LIKE ? OR content_preview LIKE ? OR request_id LIKE ? OR feedback_message LIKE ?)")
+            args.extend([q_like, q_like, q_like, q_like, q_like])
+
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        with self._tx() as db:
+            stats_rows = db.execute("SELECT LOWER(decision) as dec, COUNT(*) as cnt FROM moderation_log GROUP BY LOWER(decision)").fetchall()
+            stats = {"total": 0, "allow": 0, "revise": 0, "reject": 0}
+            for row in stats_rows:
+                d = row["dec"]
+                c = row["cnt"]
+                if d in stats:
+                    stats[d] = c
+                stats["total"] += c
+
+            total_row = db.execute(f"SELECT COUNT(*) as cnt FROM moderation_log {where_sql}", tuple(args)).fetchone()
+            total = total_row["cnt"] if total_row else 0
+
+            query_sql = f"""
+                SELECT id, request_id, user_id, content_id, content_type,
+                       decision, decided_by, severity, risk_score, predicted_label,
+                       feedback_title, feedback_message, content_preview,
+                       model_version, latency_ms, created_at, decided_at, raw_result
+                FROM moderation_log
+                {where_sql}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+            """
+            rows = db.execute(query_sql, tuple(args + [limit, offset])).fetchall()
+            logs = []
+            for r in rows:
+                item = dict(r)
+                if item.get("raw_result"):
+                    try:
+                        item["raw_result"] = json.loads(item["raw_result"])
+                    except Exception:
+                        pass
+                logs.append(item)
+
+        return {
+            "logs": logs,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "stats": stats
+        }
+
+    def get_moderation_log_by_request_id(self, request_id: str) -> dict | None:
+        with self._tx() as db:
+            row = db.execute("SELECT * FROM moderation_log WHERE request_id = ?", (request_id,)).fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            if item.get("raw_result"):
+                try:
+                    item["raw_result"] = json.loads(item["raw_result"])
+                except Exception:
+                    pass
+            return item
+
+    def clear_moderation_logs(self) -> int:
+        with self._tx() as db:
+            cursor = db.execute("DELETE FROM moderation_log")
+            return cursor.rowcount

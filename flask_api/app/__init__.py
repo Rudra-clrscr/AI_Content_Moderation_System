@@ -90,6 +90,8 @@ def create_app(
     from app.admin_auth import init_admin, restore_levels
     admin = init_admin(app, admin_store, mailer, mail_async)
     restore_levels(app.extensions["moderation"].levels, admin.store)
+    from app.sinks import ChainedSink, AdminStoreSink
+    app.extensions["moderation"].sink = ChainedSink(app.extensions["moderation"].sink, AdminStoreSink(admin.store))
 
     from app.system_store import SystemStore
     from app.admin_images import admin_images_bp

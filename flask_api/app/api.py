@@ -56,7 +56,9 @@ def _parse_request() -> ModerationRequest | tuple:
     if content_id is not None and not isinstance(content_id, (str, int)):
         return _error(400, "invalid_content_id", "'content_id' must be a string or integer")
 
-    return ModerationRequest(content, content_type, None if content_id is None else str(content_id))
+    user_id = body.get("user_id") or body.get("user") or body.get("author")
+    return ModerationRequest(content, content_type, None if content_id is None else str(content_id),
+                             user_id=None if user_id is None else str(user_id))
 
 
 def _moderate(req: ModerationRequest, extra: dict | None = None,
@@ -466,6 +468,23 @@ def set_moderation_level(content_type: str):
     remember(content_type, body)           # saved, so a restart keeps it
     log.warning("moderation level changed by admin: %s -> %s", content_type, policy.as_dict())
     return jsonify({"content_type": content_type, **policy.as_dict()}), 200
+
+
+@bp.delete("/v1/admin/moderation-levels/<content_type>")
+def delete_moderation_level(content_type: str):
+    """Remove a per-feature override, reverting it to inherit the default."""
+    denied = _require_admin()
+    if denied:
+        return denied
+    if content_type not in _CONTENT_TYPES:
+        return _error(404, "unknown_content_type",
+                      f"no such surface {content_type!r}; "
+                      f"expected one of {sorted(_CONTENT_TYPES)}")
+    _svc().levels.clear_feature(content_type)
+    from app.admin_auth import forget
+    forget(content_type)
+    log.warning("moderation level cleared by admin: %s reverted to default", content_type)
+    return jsonify({"content_type": content_type, "cleared": True}), 200
 
 
 @bp.post("/v1/admin/model/reload")

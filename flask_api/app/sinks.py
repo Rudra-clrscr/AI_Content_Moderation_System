@@ -132,3 +132,28 @@ class MemorySink:
 
     def emit(self, result: dict) -> None:
         self.results.append(result)
+
+
+class ChainedSink:
+    """Dispatches each result to multiple sinks (e.g. primary sink + SQLite audit log)."""
+
+    def __init__(self, *sinks: ResultSink):
+        self.sinks = [s for s in sinks if s is not None]
+
+    def emit(self, result: dict) -> None:
+        for s in self.sinks:
+            try:
+                s.emit(result)
+            except Exception:
+                log.exception("sink %s failed to emit moderation result", s)
+
+
+class AdminStoreSink:
+    """Records moderation results into the AdminStore SQLite audit log table."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def emit(self, result: dict) -> None:
+        if self.store and hasattr(self.store, "record_moderation_log"):
+            self.store.record_moderation_log(result)
