@@ -1,1 +1,0 @@
-Welcome to the Video Transcription Data Pipeline. This video demonstrates automated speech extraction and transcription using local AI models.
