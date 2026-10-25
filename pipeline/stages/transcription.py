@@ -80,9 +80,16 @@ class TranscriptionStage:
                 str(audio_p),
                 language=lang,
                 task=self.config.task,
+                beam_size=self.config.beam_size,
                 vad_filter=self.config.vad_filter,
                 word_timestamps=self.config.word_timestamps,
                 initial_prompt=self.config.initial_prompt,
+                condition_on_previous_text=self.config.condition_on_previous_text,
+                no_speech_threshold=self.config.no_speech_threshold,
+                compression_ratio_threshold=self.config.compression_ratio_threshold,
+                log_prob_threshold=self.config.log_prob_threshold,
+                hallucination_silence_threshold=self.config.hallucination_silence_threshold,
+                repetition_penalty=self.config.repetition_penalty,
             )
 
             detected_language = info.language
@@ -168,9 +175,19 @@ class TranscriptionStage:
 
         def run(task: str, language: Optional[str]):
             return self.model.transcribe(
-                str(audio_p), language=language, task=task,
-                vad_filter=self.config.vad_filter, word_timestamps=False,
+                str(audio_p),
+                language=language,
+                task=task,
+                beam_size=self.config.beam_size,
+                vad_filter=self.config.vad_filter,
+                word_timestamps=False,
                 initial_prompt=self.config.initial_prompt,
+                condition_on_previous_text=self.config.condition_on_previous_text,
+                no_speech_threshold=self.config.no_speech_threshold,
+                compression_ratio_threshold=self.config.compression_ratio_threshold,
+                log_prob_threshold=self.config.log_prob_threshold,
+                hallucination_silence_threshold=self.config.hallucination_silence_threshold,
+                repetition_penalty=self.config.repetition_penalty,
             )
 
         try:

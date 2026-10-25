@@ -13,7 +13,7 @@ from app.gate import Gate
 from app.levels import ModerationLevels
 from app.model import ModelRegistry, Scorer
 from app.pipeline import ModerationRequest, Pipeline
-from app.sinks import ResultSink, build_sink
+from app.sinks import AdminStoreSink, ChainedSink, ResultSink, build_sink
 
 log = logging.getLogger(__name__)
 
@@ -92,6 +92,15 @@ def create_app(
     from app.admin_auth import init_admin, restore_levels
     admin = init_admin(app, admin_store, mailer, mail_async)
     restore_levels(app.extensions["moderation"].levels, admin.store)
+
+    # Every decision is also written to the admin database's audit log - the table the
+    # dashboard's Moderation Logs card reads. It is chained on here rather than inside
+    # build_sink() because admin.store does not exist until init_admin() has run, and
+    # chaining (rather than replacing) keeps the primary sink emitting whether or not the
+    # audit write succeeds. An injected test sink is wrapped the same way, so tests that
+    # hold their own reference to it still see every result.
+    svc = app.extensions["moderation"]
+    svc.sink = ChainedSink(svc.sink, AdminStoreSink(admin.store))
 
     from app.system_store import SystemStore
     from app.admin_images import admin_images_bp

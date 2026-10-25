@@ -102,6 +102,9 @@ rules:
     is strictly prohibited.
   threat.property_sabotage: >-
     Threats of arson, sabotage, property damage, or violence are strictly prohibited.
+  threat.implied_coercion: >-
+    Coercive language, stalking, extortion, or implied threats against a person
+    or business are strictly prohibited.
   defamation.corporate_smear: >-
     Defamatory statements, unverified insolvency claims, and smear campaigns against
     businesses are prohibited.

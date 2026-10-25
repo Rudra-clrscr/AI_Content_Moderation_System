@@ -41,6 +41,11 @@ def gate():
     # Industrial processes that read like sabotage out of context.
     "The hydraulic press will smash your vehicles chassis panels into shape.",
     "Acid pickling removes scale; we pour acid in a controlled bath only.",
+    # Operational visit and routing language.
+    "Our team will visit your office next week to discuss the terms.",
+    "Please confirm the delivery address before dispatch.",
+    "Our drivers are trained to be careful on the highway.",
+    "Please make sure your staff know the gate timings.",
 ])
 def test_ordinary_b2b_writing_is_not_blocked(gate, text):
     result = gate.check(text)
@@ -58,6 +63,12 @@ def test_ordinary_b2b_writing_is_not_blocked(gate, text):
     ("We will smash your vehicles if the payment is not released.", "threat.property_sabotage"),
     ("I will pour acid on you if you come to the factory again.", "threat.property_sabotage"),
     ("They are circulating fake insolvency notices about our firm.", "defamation.corporate_smear"),
+    ("Someone will be visiting your office this week.", "threat.implied_coercion"),
+    ("Your delivery route is very predictable.", "threat.implied_coercion"),
+    ("Do not make me explain what happens next.", "threat.implied_coercion"),
+    ("I have photographs you would not want circulated.", "threat.implied_coercion"),
+    ("We found your residence easily enough.", "threat.implied_coercion"),
+    ("Be smart about this. Smart people stay healthy.", "threat.implied_coercion"),
 ])
 def test_the_rules_still_block_what_they_are_for(gate, text, rule):
     result = gate.check(text)

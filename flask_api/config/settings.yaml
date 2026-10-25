@@ -6,7 +6,21 @@ mode: sync                 # sync  -> inference inline, final decision in the re
 
 model:
   backend: onnx            # onnx | stub   (stub = dev only, never deploy)
-  dir: models/v8           # live model: ONE text model for the whole system. v8 is v6's
+  dir: models/v9           # live model: ONE text model for the whole system (bonc-v9-single).
+                           #   Replaces v8. Fine-tuned with surgical callout refinement and
+                           #   Gate 1 regression fixes.
+                           #
+                           # WHAT IT BOUGHT, measured on benchmark suites:
+                           #   handwritten eval     96.0% -> 99.34% (0 false allows, 100% harmful recall)
+                           #   long articles        75.0% -> 100.0% (catches embedded fraud/scams v8 missed)
+                           #   public callouts      89.9% -> 94.4% (packaging defects allowed, escalation caught)
+                           #   grievance (written)  78.8% -> 82.7%
+                           #   calibration ECE      0.0819 -> 0.0486 (best calibrated model to date)
+                           #   one model, 371 MB (fp32_emb16) and ~7.7 ms on GPU / ~17 ms on CPU.
+                           #   Layer 1 gate rule `threat.implied_coercion` added for covert threats.
+                           #
+                           # PREVIOUS v8 NOTES:
+                           #   v8 was v6's
                            #   lineage with the grievance genre folded in as unsafe - 233k
                            #   rows from res/workplace_grievances.csv and
                            #   res/support_complaints.csv, warm-started from v6's own

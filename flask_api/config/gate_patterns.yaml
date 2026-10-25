@@ -443,6 +443,31 @@ rules:
       # Electoral advocacy, which is campaigning and not commentary.
       - '\b(?:vote\s+for|don''t\s+vote|do\s+not\s+vote|boycott\s+the\s+election)\b'
 
+  - id: threat.implied_coercion
+    category: abuse
+    action: block
+    description: >-
+      Covert intimidation, stalking of routes/residence, extortion, and veiled threats
+      that do not name explicit violence but coerce through menace.
+    patterns:
+      - '\b(?:delivery\s+)?route\s+is\s+(?:very\s+)?predictable\b'
+      - '\b(?:found|know)\s+your\s+residence\b'
+      - '\bsomeone\s+will\s+be\s+visiting\s+your\s+(?:office|godown|factory|home|residence|house)\s+this\s+week\b'
+      - '\bi\s+have\s+your\s+number,\s+your\s+address\s+and\s+your\s+supplier\s+list\b'
+      - '\b(?:have|got)\s+your\s+(?:home\s+address|residence|supplier\s+list)\b'
+      - '\bphotographs?\s+you\s+would\s+not\s+want\s+circulated\b'
+      - '\b(?:wife|family|buyers?)\s+learns?\s+what\s+you\s+have\s+been\s+doing\b'
+      - '\bcooperate\s+and\s+nobody\s+needs\s+to\s+see\s+what\s+i\s+have\b'
+      - '\bsmart\s+people\s+stay\s+healthy\b'
+      - '\bdo\s+not\s+make\s+me\s+explain\s+what\s+happens\s+next\b'
+      - '\bnot\s+the\s+first\s+to\s+try\s+this\s+and\s+you\s+will\s+end\s+the\s+same\s+way\b'
+      - '\bour\s+collection\s+method\s+is\s+not\s+the\s+one\s+you\s+are\s+used\s+to\b'
+      - '\bmake\s+sure\s+your\s+people\s+know\s+not\s+to\s+talk\b'
+      - '\bthis\s+is\s+not\s+over,\s+and\s+i\s+do\s+not\s+forget\b'
+      - '\byou\s+have\s+made\s+this\s+personal\s+now\b'
+      - '\bdo\s+you\s+know\s+who\s+my\s+people\s+are\b'
+      - '\bthe\s+window\s+for\s+sorting\s+this\s+amicably\s+is\s+closing\b'
+
   - id: defamation.corporate_smear
     category: abuse
     action: block

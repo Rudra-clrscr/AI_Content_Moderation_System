@@ -561,6 +561,26 @@ def reload_model():
     return jsonify({"status": "reloaded", "previous_version": previous, "model_version": svc.models.version}), 200
 
 
+_transcription_pipelines = {}
+
+
+def _get_transcription_pipeline(model_size: str, device: str = "auto"):
+    from pipeline.config import PipelineConfig
+    from pipeline.orchestrator import VideoTranscriptionPipeline
+    key = (model_size, device)
+    if key not in _transcription_pipelines:
+        cfg = PipelineConfig(
+            model_size=model_size,
+            device=device,
+            output_formats=set(),
+            word_timestamps=True,
+            keep_extracted_audio=False,
+            condition_on_previous_text=False,
+        )
+        _transcription_pipelines[key] = VideoTranscriptionPipeline(config=cfg)
+    return _transcription_pipelines[key]
+
+
 @bp.post("/v1/media/transcribe")
 def transcribe_media_file():
     """Transcribes an uploaded video file using the offline Faster-Whisper pipeline.
@@ -598,14 +618,13 @@ def transcribe_media_file():
         tmp_path = Path(tmp.name)
 
     try:
-        config = PipelineConfig(
-            model_size="tiny",
-            device="auto",
-            output_formats={"txt", "srt", "vtt", "json"},
-            word_timestamps=True,
-            keep_extracted_audio=False,
-        )
-        pipeline = VideoTranscriptionPipeline(config=config)
+        model_size = "small"
+        try:
+            model_size = _svc().settings.video.config.model_size
+        except Exception:
+            pass
+
+        pipeline = _get_transcription_pipeline(model_size)
         result = pipeline.process(tmp_path)
 
         sink = pipeline.sink_stage
