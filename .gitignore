@@ -151,5 +151,25 @@ flask_api/models/grievance-v7/
 # approach is recorded in training/train_dualhead.py rather than deleted, because the failure
 # mode - two heads on one backbone pulling against each other - is worth not rediscovering.
 flask_api/models/v7/
+
+# Compiled bytecode. Ten of these were tracked until the video-moderation branch removed
+# them; the rule keeps them from coming back.
 __pycache__/
 *.py[cod]
+
+# Transcription output. pipeline/stages/sink.py defaults --output-dir to ./transcripts, so it
+# lands in transcripts/ when the CLI runs from the repo root and flask_api/transcripts/ when the
+# service transcribes an upload - 24 tmp*.{json,srt,txt,vtt} files were tracked that way, and 220
+# more were sitting untracked waiting to be swept into a commit. They are named after the temp
+# file the audio came from, so nothing reads them and no history of them is worth keeping.
+#
+# sample_test_video.* STAYS tracked: it is the transcript of sample_test_video.mp4, which is in
+# git and is the input docs/video_transcription_pipeline.md walks through, so the expected output
+# is worth having next to it. Hence transcripts/* rather than transcripts/ - a pattern cannot
+# re-include a file whose parent directory is excluded.
+transcripts/*
+!transcripts/sample_test_video.json
+!transcripts/sample_test_video.srt
+!transcripts/sample_test_video.txt
+!transcripts/sample_test_video.vtt
+flask_api/transcripts/
