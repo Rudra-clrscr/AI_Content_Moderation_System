@@ -200,7 +200,12 @@ class AdminStore:
         content = result.get("content") or ""
         content_preview = content[:250] + ("..." if len(content) > 250 else "")
 
-        user_id = result.get("user_id") or result.get("user") or result.get("author") or result.get("content_id") or "anonymous"
+        # No content_id fallback. A content id is not an author, and falling back to it made
+        # every row in the dashboard claim a user that was really the post's own id, shown
+        # twice over in the audit modal. Nothing populates user_id yet - ModerationRequest
+        # carries the field but no endpoint parses it from the request body - so this reads
+        # "anonymous", which is the true answer until that is wired.
+        user_id = result.get("user_id") or result.get("user") or result.get("author") or "anonymous"
         content_id = result.get("content_id")
         latency = result.get("latency_ms")
         total_ms = latency.get("total") if isinstance(latency, dict) else (latency if isinstance(latency, (int, float)) else None)

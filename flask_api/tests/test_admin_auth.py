@@ -382,7 +382,9 @@ def test_moderation_logs_records_and_filters_events(admin, make_settings, scorer
     # Find the logged event
     event = next((e for e in data["logs"] if e.get("content_id") == "alice_developer"), None)
     assert event is not None
-    assert event["user_id"] == "alice_developer"
+    # "alice_developer" is this event's content_id, and a content id is not an author -
+    # asserting it came back as user_id is what let the dashboard show one as the other.
+    assert event["user_id"] == "anonymous"
     assert event["content_type"] == "business_profile"
     assert event["decision"] == "allow"
     assert event["severity"] in ("low", "none")
@@ -398,9 +400,10 @@ def test_moderation_logs_records_and_filters_events(admin, make_settings, scorer
     filtered = admin.get("/v1/admin/moderation-logs?content_type=business_profile").get_json()
     assert any(e["content_id"] == "alice_developer" for e in filtered["logs"])
 
-    # Search by user
+    # Free-text search covers content_id as well as user_id, so the event is still found
+    # by this term - as its content_id, which is what it actually is.
     searched = admin.get("/v1/admin/moderation-logs?q=alice_developer").get_json()
-    assert any(e["user_id"] == "alice_developer" for e in searched["logs"])
+    assert any(e["content_id"] == "alice_developer" for e in searched["logs"])
 
     # Clear logs
     del_res = admin.delete("/v1/admin/moderation-logs", headers=HDR)

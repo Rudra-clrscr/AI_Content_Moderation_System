@@ -86,3 +86,27 @@ def test_clearing_empties_the_log(make_settings, scorer, sink):
     assert store.get_moderation_logs()["total"] == 3
     assert store.clear_moderation_logs() == 3
     assert store.get_moderation_logs()["total"] == 0
+
+
+def test_the_user_column_does_not_pass_off_the_content_id_as_an_author(make_settings, scorer, sink):
+    """A content id is not a user. Falling back to it made every row claim a false author."""
+    app = create_app(make_settings(), scorer=scorer, sink=sink)
+    client = app.test_client()
+    client.post("/v1/moderate", json={"content": "An ordinary sentence.",
+                                      "content_type": "article", "content_id": "post-42"})
+
+    row = _store(app).get_moderation_logs()["logs"][0]
+    assert row["content_id"] == "post-42"
+    assert row["user_id"] == "anonymous"
+    assert row["user_id"] != row["content_id"]
+
+
+def test_a_supplied_user_id_is_recorded(make_settings, scorer, sink):
+    """When something does supply an author, the log keeps it rather than overwriting it."""
+    app = create_app(make_settings(), scorer=scorer, sink=sink)
+    store = _store(app)
+    store.record_moderation_log({"request_id": "r-1", "decision": "allow",
+                                 "content_type": "article", "content_id": "post-7",
+                                 "user_id": "u-99", "content": "text"})
+    row = store.get_moderation_log_by_request_id("r-1")
+    assert row["user_id"] == "u-99"
