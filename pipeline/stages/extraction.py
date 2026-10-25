@@ -68,6 +68,8 @@ class AudioExtractionStage:
             self.ffmpeg_exe,
             "-hide_banner",
             "-loglevel", "error",
+            "-nostdin",
+            "-threads", str(min(4, os.cpu_count() or 4)),
             "-i", str(video_p),
             *(["-t", str(self.max_seconds)] if self.max_seconds else []),
             "-vn",                      # Disable video recording

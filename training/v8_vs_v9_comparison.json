@@ -1,0 +1,496 @@
+{
+  "eval_articles.csv": {
+    "v8": {
+      "n": 12,
+      "pos": 6,
+      "neg": 6,
+      "acc": 0.75,
+      "recall": 0.5,
+      "prec": 1.0,
+      "f1": 0.6667,
+      "false_allows": 3,
+      "false_rejects": 0,
+      "group_acc": {
+        "long_article": 1.0,
+        "long_article_harmful": 0.5
+      }
+    },
+    "v9": {
+      "n": 12,
+      "pos": 6,
+      "neg": 6,
+      "acc": 1.0,
+      "recall": 1.0,
+      "prec": 1.0,
+      "f1": 1.0,
+      "false_allows": 0,
+      "false_rejects": 0,
+      "group_acc": {
+        "long_article": 1.0,
+        "long_article_harmful": 1.0
+      }
+    }
+  },
+  "eval_b2b_negotiation.csv": {
+    "v8": {
+      "n": 39,
+      "pos": 0,
+      "neg": 39,
+      "acc": 0.9487,
+      "recall": 1.0,
+      "prec": 0.0,
+      "f1": 0.0,
+      "false_allows": 0,
+      "false_rejects": 2,
+      "group_acc": {
+        "pricing": 1.0,
+        "idiom": 0.9231,
+        "complaint": 1.0,
+        "awareness": 0.8333
+      }
+    },
+    "v9": {
+      "n": 39,
+      "pos": 0,
+      "neg": 39,
+      "acc": 0.9231,
+      "recall": 1.0,
+      "prec": 0.0,
+      "f1": 0.0,
+      "false_allows": 0,
+      "false_rejects": 3,
+      "group_acc": {
+        "pricing": 1.0,
+        "idiom": 0.9231,
+        "complaint": 1.0,
+        "awareness": 0.6667
+      }
+    }
+  },
+  "eval_dismissive.csv": {
+    "v8": {
+      "n": 43,
+      "pos": 15,
+      "neg": 28,
+      "acc": 1.0,
+      "recall": 1.0,
+      "prec": 1.0,
+      "f1": 1.0,
+      "false_allows": 0,
+      "false_rejects": 0,
+      "group_acc": {
+        "absurd_about_thing": 1.0,
+        "professional_criticism": 1.0,
+        "dismissive": 1.0,
+        "article": 1.0,
+        "hinglish_heldout": 1.0
+      }
+    },
+    "v9": {
+      "n": 43,
+      "pos": 15,
+      "neg": 28,
+      "acc": 1.0,
+      "recall": 1.0,
+      "prec": 1.0,
+      "f1": 1.0,
+      "false_allows": 0,
+      "false_rejects": 0,
+      "group_acc": {
+        "absurd_about_thing": 1.0,
+        "professional_criticism": 1.0,
+        "dismissive": 1.0,
+        "article": 1.0,
+        "hinglish_heldout": 1.0
+      }
+    }
+  },
+  "eval_grievance_handwritten.csv": {
+    "v8": {
+      "n": 52,
+      "pos": 26,
+      "neg": 26,
+      "acc": 0.7885,
+      "recall": 0.5769,
+      "prec": 1.0,
+      "f1": 0.7317,
+      "false_allows": 11,
+      "false_rejects": 0,
+      "group_acc": {
+        "default": 0.7885
+      }
+    },
+    "v9": {
+      "n": 52,
+      "pos": 26,
+      "neg": 26,
+      "acc": 0.8269,
+      "recall": 0.6538,
+      "prec": 1.0,
+      "f1": 0.7907,
+      "false_allows": 9,
+      "false_rejects": 0,
+      "group_acc": {
+        "default": 0.8269
+      }
+    }
+  },
+  "eval_grievance_handwritten_2.csv": {
+    "v8": {
+      "n": 38,
+      "pos": 18,
+      "neg": 20,
+      "acc": 0.7368,
+      "recall": 0.4444,
+      "prec": 1.0,
+      "f1": 0.6154,
+      "false_allows": 10,
+      "false_rejects": 0,
+      "group_acc": {
+        "default": 0.7368
+      }
+    },
+    "v9": {
+      "n": 38,
+      "pos": 18,
+      "neg": 20,
+      "acc": 0.7895,
+      "recall": 0.5556,
+      "prec": 1.0,
+      "f1": 0.7143,
+      "false_allows": 8,
+      "false_rejects": 0,
+      "group_acc": {
+        "default": 0.7895
+      }
+    }
+  },
+  "eval_grievance_workplace.csv": {
+    "v8": {
+      "n": 56,
+      "pos": 26,
+      "neg": 30,
+      "acc": 0.7679,
+      "recall": 0.5769,
+      "prec": 0.8824,
+      "f1": 0.6977,
+      "false_allows": 11,
+      "false_rejects": 2,
+      "group_acc": {
+        "default": 0.7679
+      }
+    },
+    "v9": {
+      "n": 56,
+      "pos": 26,
+      "neg": 30,
+      "acc": 0.7679,
+      "recall": 0.6538,
+      "prec": 0.8095,
+      "f1": 0.7234,
+      "false_allows": 9,
+      "false_rejects": 4,
+      "group_acc": {
+        "default": 0.7679
+      }
+    }
+  },
+  "eval_handwritten.csv": {
+    "v8": {
+      "n": 152,
+      "pos": 64,
+      "neg": 88,
+      "acc": 0.9605,
+      "recall": 0.9375,
+      "prec": 0.9677,
+      "f1": 0.9524,
+      "false_allows": 4,
+      "false_rejects": 2,
+      "group_acc": {
+        "listing": 1.0,
+        "profile": 1.0,
+        "article": 1.0,
+        "review": 0.8889,
+        "announcement": 1.0,
+        "job": 1.0,
+        "enquiry": 1.0,
+        "hard_negative": 0.9375,
+        "title": 1.0,
+        "hinglish": 0.9,
+        "multi": 1.0,
+        "everyday": 1.0,
+        "grammar": 1.0,
+        "article_personal": 1.0,
+        "mixed": 1.0,
+        "scam_income": 1.0,
+        "registration_fee": 1.0,
+        "phishing": 1.0,
+        "lottery": 1.0,
+        "counterfeit": 0.8,
+        "payment_trick": 1.0,
+        "threat": 1.0,
+        "abuse": 1.0,
+        "hate": 1.0,
+        "defamation": 1.0,
+        "adult": 1.0,
+        "illegal": 0.75,
+        "spam": 1.0,
+        "leet": 0.6667
+      }
+    },
+    "v9": {
+      "n": 152,
+      "pos": 64,
+      "neg": 88,
+      "acc": 0.9934,
+      "recall": 1.0,
+      "prec": 0.9846,
+      "f1": 0.9922,
+      "false_allows": 0,
+      "false_rejects": 1,
+      "group_acc": {
+        "listing": 1.0,
+        "profile": 1.0,
+        "article": 1.0,
+        "review": 0.8889,
+        "announcement": 1.0,
+        "job": 1.0,
+        "enquiry": 1.0,
+        "hard_negative": 1.0,
+        "title": 1.0,
+        "hinglish": 1.0,
+        "multi": 1.0,
+        "everyday": 1.0,
+        "grammar": 1.0,
+        "article_personal": 1.0,
+        "mixed": 1.0,
+        "scam_income": 1.0,
+        "registration_fee": 1.0,
+        "phishing": 1.0,
+        "lottery": 1.0,
+        "counterfeit": 1.0,
+        "payment_trick": 1.0,
+        "threat": 1.0,
+        "abuse": 1.0,
+        "hate": 1.0,
+        "defamation": 1.0,
+        "adult": 1.0,
+        "illegal": 1.0,
+        "spam": 1.0,
+        "leet": 1.0
+      }
+    }
+  },
+  "eval_handwritten_2.csv": {
+    "v8": {
+      "n": 55,
+      "pos": 22,
+      "neg": 33,
+      "acc": 0.9818,
+      "recall": 0.9545,
+      "prec": 1.0,
+      "f1": 0.9767,
+      "false_allows": 1,
+      "false_rejects": 0,
+      "group_acc": {
+        "payment_terms": 1.0,
+        "promo": 1.0,
+        "negation": 1.0,
+        "identity": 1.0,
+        "fragment": 1.0,
+        "everyday": 1.0,
+        "article": 1.0,
+        "listing": 1.0,
+        "review": 1.0,
+        "veiled_threat": 1.0,
+        "phishing": 1.0,
+        "leet": 0.6667,
+        "payment_trick": 1.0,
+        "scam_income": 1.0,
+        "registration_fee": 1.0,
+        "counterfeit": 1.0,
+        "abuse": 1.0,
+        "hate": 1.0,
+        "adult": 1.0,
+        "illegal": 1.0,
+        "mixed": 1.0
+      }
+    },
+    "v9": {
+      "n": 55,
+      "pos": 22,
+      "neg": 33,
+      "acc": 0.9818,
+      "recall": 0.9545,
+      "prec": 1.0,
+      "f1": 0.9767,
+      "false_allows": 1,
+      "false_rejects": 0,
+      "group_acc": {
+        "payment_terms": 1.0,
+        "promo": 1.0,
+        "negation": 1.0,
+        "identity": 1.0,
+        "fragment": 1.0,
+        "everyday": 1.0,
+        "article": 1.0,
+        "listing": 1.0,
+        "review": 1.0,
+        "veiled_threat": 1.0,
+        "phishing": 1.0,
+        "leet": 0.6667,
+        "payment_trick": 1.0,
+        "scam_income": 1.0,
+        "registration_fee": 1.0,
+        "counterfeit": 1.0,
+        "abuse": 1.0,
+        "hate": 1.0,
+        "adult": 1.0,
+        "illegal": 1.0,
+        "mixed": 1.0
+      }
+    }
+  },
+  "eval_implied_threats.csv": {
+    "v8": {
+      "n": 168,
+      "pos": 103,
+      "neg": 65,
+      "acc": 0.869,
+      "recall": 0.7961,
+      "prec": 0.988,
+      "f1": 0.8817,
+      "false_allows": 21,
+      "false_rejects": 1,
+      "group_acc": {
+        "implied_threat": 0.7961,
+        "firm_business_language": 0.9846
+      }
+    },
+    "v9": {
+      "n": 168,
+      "pos": 103,
+      "neg": 65,
+      "acc": 0.9167,
+      "recall": 0.8641,
+      "prec": 1.0,
+      "f1": 0.9271,
+      "false_allows": 14,
+      "false_rejects": 0,
+      "group_acc": {
+        "implied_threat": 0.8641,
+        "firm_business_language": 1.0
+      }
+    }
+  },
+  "eval_policy_categories.csv": {
+    "v8": {
+      "n": 62,
+      "pos": 32,
+      "neg": 30,
+      "acc": 0.8387,
+      "recall": 0.6875,
+      "prec": 1.0,
+      "f1": 0.8148,
+      "false_allows": 10,
+      "false_rejects": 0,
+      "group_acc": {
+        "violence": 0.75,
+        "threats": 1.0,
+        "nudity": 1.0,
+        "romance": 0.6667,
+        "gym": 0.8571,
+        "NGO": 0.6667,
+        "minors": 0.9091
+      }
+    },
+    "v9": {
+      "n": 62,
+      "pos": 32,
+      "neg": 30,
+      "acc": 0.8387,
+      "recall": 0.6875,
+      "prec": 1.0,
+      "f1": 0.8148,
+      "false_allows": 10,
+      "false_rejects": 0,
+      "group_acc": {
+        "violence": 0.875,
+        "threats": 1.0,
+        "nudity": 1.0,
+        "romance": 0.5556,
+        "gym": 0.8571,
+        "NGO": 0.6667,
+        "minors": 0.9091
+      }
+    }
+  },
+  "eval_public_callouts.csv": {
+    "v8": {
+      "n": 89,
+      "pos": 39,
+      "neg": 50,
+      "acc": 0.8989,
+      "recall": 0.8974,
+      "prec": 0.875,
+      "f1": 0.8861,
+      "false_allows": 4,
+      "false_rejects": 5,
+      "group_acc": {
+        "ordinary_complaint": 0.7857,
+        "proper_channel": 0.8,
+        "action_task": 1.0,
+        "contract_language": 1.0,
+        "technical_bias": 1.0,
+        "technical_partial": 1.0,
+        "professional_ordinary": 1.0,
+        "praise": 1.0,
+        "neutral_listing": 1.0,
+        "mild_venting": 0.6667,
+        "callout_warn_community": 0.8333,
+        "callout_demand_action": 1.0,
+        "callout_bias": 1.0,
+        "callout_unprofessional": 1.0,
+        "callout_escalation": 0.75,
+        "outcry": 0.8,
+        "callout_hinglish": 1.0,
+        "outcry_hinglish": 1.0,
+        "ordinary_complaint_hinglish": 1.0,
+        "neutral_hinglish": 1.0
+      }
+    },
+    "v9": {
+      "n": 89,
+      "pos": 39,
+      "neg": 50,
+      "acc": 0.9438,
+      "recall": 0.9744,
+      "prec": 0.9048,
+      "f1": 0.9383,
+      "false_allows": 1,
+      "false_rejects": 4,
+      "group_acc": {
+        "ordinary_complaint": 0.8571,
+        "proper_channel": 0.8,
+        "action_task": 1.0,
+        "contract_language": 1.0,
+        "technical_bias": 1.0,
+        "technical_partial": 1.0,
+        "professional_ordinary": 1.0,
+        "praise": 1.0,
+        "neutral_listing": 1.0,
+        "mild_venting": 0.6667,
+        "callout_warn_community": 1.0,
+        "callout_demand_action": 1.0,
+        "callout_bias": 1.0,
+        "callout_unprofessional": 1.0,
+        "callout_escalation": 1.0,
+        "outcry": 0.9,
+        "callout_hinglish": 1.0,
+        "outcry_hinglish": 1.0,
+        "ordinary_complaint_hinglish": 1.0,
+        "neutral_hinglish": 1.0
+      }
+    }
+  }
+}

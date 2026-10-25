@@ -1,5 +1,5 @@
 {
-  "version": "bonc-v8-single",
+  "version": "bonc-v9-single",
   "labels": [
     "safe",
     "unsafe"
@@ -19,7 +19,7 @@
     "reject_min": 0.5
   },
   "risk": "P(unsafe) after temperature scaling (baked into the graph): <= 0.5 allow, > 0.5 reject",
-  "temperature": 1.668741,
+  "temperature": 1.495281,
   "quantization": "fp32_emb16",
   "quantization_note": "Smallest candidate that agrees with FP32 on >= 99% of decisions AND is batch-invariant (needed to batch sentences/windows/word variants). fp32_emb16 = FP32 compute with only the word-embedding table stored as FP16. Dynamic INT8 drifts with batching; static INT8 loses accuracy on DeBERTa and is slower on CPU.",
   "quantization_report": {
@@ -27,50 +27,50 @@
       "agreement": 1.0,
       "max_abs_diff_vs_fp32": 0.0,
       "batch_max_abs_diff": 0.0,
-      "latency_ms_single": 12.777502500102855,
-      "latency_ms_batch40": 626.6035000153352,
+      "latency_ms_single": 18.106002499553142,
+      "latency_ms_batch40": 871.0813999932725,
       "size_mb": 568.082797,
-      "accuracy_handwritten": 0.9605263157894737
+      "accuracy_handwritten": 0.993421052631579
     },
     "fp32_emb16": {
       "agreement": 1.0,
-      "max_abs_diff_vs_fp32": 0.00042238831520080566,
+      "max_abs_diff_vs_fp32": 0.0001590251922607422,
       "batch_max_abs_diff": 0.0,
-      "latency_ms_single": 12.978609999845503,
-      "latency_ms_batch40": 626.7128000035882,
+      "latency_ms_single": 18.49768500032951,
+      "latency_ms_batch40": 943.3876000111923,
       "size_mb": 371.321401,
-      "accuracy_handwritten": 0.9605263157894737
+      "accuracy_handwritten": 0.993421052631579
     }
   },
   "preprocessing": "none: raw text -> tokenizer.json, truncated to max_length, no lowercasing",
   "training": "microsoft/deberta-v3-small fine-tuned on res/ (relabelled, see training/prepare_data.py) + synthetic_v4 (training/synth_data.py); binary safe/unsafe",
   "metrics": {
-    "temperature": 1.6687407254292974,
+    "temperature": 1.4952812819342853,
     "test": {
       "n": 107896,
-      "accuracy": 0.9967654037221028,
-      "precision": 0.9972165220748085,
-      "recall": 0.9956992737452834,
-      "f1": 0.9964573203536589,
-      "auc": 0.9999304299088024,
-      "ece": 0.0008732468740385154,
-      "false_allow": 212,
-      "false_reject": 137,
-      "false_allow_rate": 0.004300726254716598,
-      "false_reject_rate": 0.002337804170506126
+      "accuracy": 0.9966356491436198,
+      "precision": 0.9968723978959768,
+      "recall": 0.9957601330790765,
+      "f1": 0.9963159550607411,
+      "auc": 0.9999317405207141,
+      "ece": 0.0009727840524518428,
+      "false_allow": 209,
+      "false_reject": 154,
+      "false_allow_rate": 0.004239866920923439,
+      "false_reject_rate": 0.0026278966588171053
     },
     "handwritten": {
       "n": 152,
-      "accuracy": 0.9605263157894737,
-      "precision": 0.967741935483871,
-      "recall": 0.9375,
-      "f1": 0.9523809523809523,
-      "auc": 0.9932528409090909,
-      "ece": 0.03438697127536503,
-      "false_allow": 4,
-      "false_reject": 2,
-      "false_allow_rate": 0.0625,
-      "false_reject_rate": 0.022727272727272728
+      "accuracy": 0.993421052631579,
+      "precision": 0.9846153846153847,
+      "recall": 1.0,
+      "f1": 0.9922480620155039,
+      "auc": 0.9982244318181818,
+      "ece": 0.012470925557672192,
+      "false_allow": 0,
+      "false_reject": 1,
+      "false_allow_rate": 0.0,
+      "false_reject_rate": 0.011363636363636364
     },
     "eval_handwritten_2": {
       "n": 55,
@@ -79,7 +79,7 @@
       "recall": 0.9545454545454546,
       "f1": 0.9767441860465116,
       "auc": 1.0,
-      "ece": 0.01980588694357059,
+      "ece": 0.020120891268280417,
       "false_allow": 1,
       "false_reject": 0,
       "false_allow_rate": 0.045454545454545456,
@@ -92,7 +92,7 @@
       "recall": 1.0,
       "f1": 1.0,
       "auc": 1.0,
-      "ece": 0.003106745782979699,
+      "ece": 0.004111906210350436,
       "false_allow": 0,
       "false_reject": 0,
       "false_allow_rate": 0.0,
@@ -100,15 +100,15 @@
     },
     "eval_articles": {
       "n": 12,
-      "accuracy": 0.75,
+      "accuracy": 1.0,
       "precision": 1.0,
-      "recall": 0.5,
-      "f1": 0.6666666666666666,
-      "auc": 0.8333333333333334,
-      "ece": 0.24913005720009096,
-      "false_allow": 3,
+      "recall": 1.0,
+      "f1": 1.0,
+      "auc": 1.0,
+      "ece": 0.01810626902927955,
+      "false_allow": 0,
       "false_reject": 0,
-      "false_allow_rate": 0.5,
+      "false_allow_rate": 0.0,
       "false_reject_rate": 0.0
     }
   }
