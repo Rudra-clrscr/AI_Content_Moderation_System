@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import sqlite3
 import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS admin (
@@ -243,7 +246,9 @@ class AdminStore:
                     params["latency_ms"], params["raw_result"], params["created_at"], params["decided_at"]
                 ))
         except Exception:
-            pass
+            # The audit log must never fail a moderation decision, but a write that fails
+            # silently is a log that looks empty for no stated reason.
+            log.exception("moderation_log write failed request_id=%s", result.get("request_id"))
 
     def get_moderation_logs(self, *, decision: str | None = None, content_type: str | None = None,
                             severity: str | None = None, query: str | None = None,
