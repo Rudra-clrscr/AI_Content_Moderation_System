@@ -46,6 +46,12 @@ def gate():
     "Please confirm the delivery address before dispatch.",
     "Our drivers are trained to be careful on the highway.",
     "Please make sure your staff know the gate timings.",
+    "Written in the 5th century BC by Sun Tzu.",
+    "Artifact dated to 500 BC.",
+    "We supply BC grade pine plywood for construction formwork.",
+    "BC547 NPN bipolar junction transistor in stock.",
+    "MC4 branch connectors for 1000V solar PV arrays.",
+    "Looking for experienced CNC MC operator in Pune.",
 ])
 def test_ordinary_b2b_writing_is_not_blocked(gate, text):
     result = gate.check(text)
@@ -69,6 +75,14 @@ def test_ordinary_b2b_writing_is_not_blocked(gate, text):
     ("I have photographs you would not want circulated.", "threat.implied_coercion"),
     ("We found your residence easily enough.", "threat.implied_coercion"),
     ("Be smart about this. Smart people stay healthy.", "threat.implied_coercion"),
+    ("kya kar raha hai bc", "abuse.hi_acronyms"),
+    ("tu bada chutiya hai mc", "abuse.hi_blocklist"),
+    ("teri mkc", "abuse.hi_blocklist"),
+    ("sale bkl", "abuse.hi_blocklist"),
+    ("bsdk payment release kar", "abuse.hi_blocklist"),
+    ("mc bc drama band kar", "abuse.hi_acronyms"),
+    ("tmkc", "abuse.hi_blocklist"),
+    ("bc/mc dono ho tum", "abuse.hi_acronyms"),
 ])
 def test_the_rules_still_block_what_they_are_for(gate, text, rule):
     result = gate.check(text)
