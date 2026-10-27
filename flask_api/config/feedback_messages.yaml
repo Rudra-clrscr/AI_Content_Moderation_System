@@ -108,6 +108,8 @@ rules:
   defamation.corporate_smear: >-
     Defamatory statements, unverified insolvency claims, and smear campaigns against
     businesses are prohibited.
+  abuse.hi_acronyms: >-
+    Abusive Hinglish acronyms and vulgar slang are prohibited. Keep communication professional.
 
 # Instructions for text highlighted by the model.
 model:

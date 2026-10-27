@@ -186,6 +186,19 @@ rules:
       - kamini
       - bhadwa
       - chudai
+      - mkc
+      - tmkc
+      - bkl
+      - mkl
+      - bsdk
+      - bhosdk
+      - bkc
+      - tbkc
+      - maa ki choot
+      - teri maa ki choot
+      - behen ki choot
+      - bhen ke lode
+      - madar ke lode
 
   - id: abuse.hi_targeted
     category: abuse
@@ -477,3 +490,23 @@ rules:
       - '\brecover\s+your\s+money\s+before\s+they\s+shut\s+down\b'
       - '\b(?:toxic\s+recycled\s+hospital\s+waste|post\s+defamatory\s+videos|delivered\s+to\s+enforcement\s+directorate)\b'
       - '\bdefective\s+brake\s+cables\s+that\s+will\s+snap\b'
+
+  - id: abuse.hi_acronyms
+    category: abuse
+    action: block
+    kind: pattern
+    description: Hinglish abbreviated profanity and slang acronyms (bc, mc, mkc, bkl, bsdk, etc.)
+    patterns:
+      # Unambiguous abusive acronyms
+      - \b(?:mkc|tmkc|bkl|mkl|bsdk|bhosdk|bkc|tbkc|m\.k\.c|t\.m\.k\.c|b\.k\.l|m\.k\.l|b\.s\.d\.k)\b
+      # Slang combos (mc bc, bc/mc, etc.)
+      - \b(?:mc\s*[/,&+\s-]\s*bc|bc\s*[/,&+\s-]\s*mc|mcbc|bcmc)\b
+      # Targeted bc / mc with pronouns, vocatives, or common insult prefixes/suffixes
+      - \b(?:tu|tera|teri|tere|tum|tumhara|tumhari|tumhare|sale|saale|sali|saali|abey?|arre?|oye|ye|yeh|wo|woh|kameene?|harami|chutiye?|madarchod|bhenchod|lodu|ga?ndu)\s+(?:bc|mc)\b
+      - \b(?:bc|mc)\s+(?:tu|tera|teri|tere|tum|tumhara|tumhari|tumhare|sale|saale|sali|saali|abey?|arre?|oye|ye|yeh|wo|woh|kameene?|harami|chutiye?|madarchod|bhenchod|lodu|ga?ndu)\b
+      # Sentence-level exclamations / angry demands combined with bc / mc
+      - \b(?:bc|mc)\b[^.!?\n]{0,40}\b(?:fraud|chor|chutiya|bakwas|scam|loot|dhokha|chori|paisa|refund|maal|delivery|order|phone|call|product|item|bhej|send|kutta|kamina)\b
+      - \b(?:fraud|chor|chutiya|bakwas|scam|loot|dhokha|chori|paisa|refund|maal|delivery|order|phone|call|product|item|bhej|send|kutta|kamina|kya\s+kar\s+raha)\b[^.!?\n]{0,40}\b(?:bc|mc)\b
+      # Standalone single-word message or isolated exclamation
+      - ^\s*(?:bc|mc)\s*$
+      - (?<!\bcentury)(?<!\d)\s+(?:bc|mc)[!?.]{1,3}(?:\s|$)
