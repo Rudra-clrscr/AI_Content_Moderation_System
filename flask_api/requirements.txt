@@ -39,3 +39,9 @@ pillow>=10.0
 faster-whisper>=1.2.0
 av>=11.0.0,<14.0.0
 imageio-ffmpeg>=0.6.0
+
+# Excel export of the moderation audit log (app/log_export.py). It arrived transitively
+# through pandas; declared here because the dashboard's Export button needs it in its own
+# right and must not break if the data-science stack is ever dropped. Without it the Text and
+# Word exports still work and the Excel one reports what is missing.
+openpyxl>=3.1

@@ -25,7 +25,12 @@ def test_allow(client, sink):
     assert body["decision"] == "allow" and body["decided_by"] == "model"
     assert body["content_id"] == "42"
     assert set(body) == REQUIRED_KEYS
-    assert sink.results == [body]
+    # The recorded copy is the response plus the caller's address: the audit log needs it and
+    # the public body deliberately does not carry it (see api._emit and test_client_address).
+    recorded = sink.results[0]
+    client = recorded.pop("client")
+    assert (client["ip"], client["network"]) == ("127.0.0.1", "127.0.0.0/24")
+    assert recorded == body
 
 
 def test_revise_and_reject_by_score(make_settings, sink):

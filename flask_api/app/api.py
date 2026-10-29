@@ -5,9 +5,10 @@ import hmac
 import logging
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, request, send_from_directory
+from flask import Blueprint, current_app, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
+from app import client_address
 from app.gate import GateMatch, GateResult
 from app.media import MediaError, detect_kind, read_image
 from app.video import VideoFailed, VideoUnavailable
@@ -29,6 +30,57 @@ def _svc():
 
 def _error(status: int, code: str, message: str, **extra):
     return jsonify({"error": {"code": code, "message": message, **extra}}), status
+
+
+# The endpoints a member submits through. Listed rather than matched on a path prefix because
+# the admin screens are on this blueprint too, and an operator who blocks their own office
+# network must not thereby lock themselves out of the dashboard that would undo it.
+#
+# Built from bp.name rather than written out: Flask keys endpoints as "<blueprint>.<function>",
+# and a hardcoded prefix that does not match turns every check below into a silent no-op -
+# blocking that accepts every submission and reports nothing wrong.
+SUBMISSION_ENDPOINTS = {f"{bp.name}.{fn}" for fn in
+                        ("moderate", "moderate_media", "transcribe_media_file")}
+
+
+@bp.before_request
+def _resolve_client():
+    """Work out who is calling, and turn them away if an operator has refused them.
+
+    Done once per request rather than at each of the six places a result is recorded, so a new
+    endpoint cannot quietly start writing audit rows with no address in them.
+    """
+    svc = current_app.extensions["moderation"]
+    g.client = client_address.from_request(request, svc.settings.trust_proxy_hops)
+    if request.endpoint not in SUBMISSION_ENDPOINTS:
+        return None
+    try:
+        hit = current_app.extensions["admin"].store.blocked_entry(
+            g.client.get("ip"), g.client.get("network"))
+    except Exception:
+        # The blocklist is a moderation convenience, not an authentication boundary. If it
+        # cannot be read, submissions carry on and the failure is in the log, because the
+        # alternative is the whole service going down with the admin database.
+        log.exception("could not read the blocklist")
+        return None
+    if hit:
+        # 403 and a flat sentence. Naming the address or the scope would tell someone probing
+        # it exactly how wide the block is and which address to come back from.
+        return _error(403, "client_blocked",
+                      "submissions from this connection are not being accepted.")
+    return None
+
+
+def _emit(result: dict) -> dict:
+    """Record a decision, with the address it came from attached.
+
+    Stamped onto the copy the SINK gets and not onto the response: it is the caller's own
+    address, so returning it tells them nothing they did not know, and it would become part of
+    the public API's shape for the sake of an audit column.
+    """
+    svc = current_app.extensions["moderation"]
+    svc.sink.emit({**result, "client": getattr(g, "client", None) or {}})
+    return result
 
 
 @bp.errorhandler(HTTPException)
@@ -75,7 +127,7 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
     if not policy.enabled:
         # Nothing runs - not the model, not the gate. Published and recorded as unchecked.
         result = {**svc.pipeline.not_moderated_result(req), "moderation": policy.as_dict()}
-        svc.sink.emit(result)
+        _emit(result)
         return jsonify({**result, **(extra or {})}), 200
 
     # An explicit override wins over the feature's level. The only caller that passes one is
@@ -98,7 +150,7 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
     gate, gate_ms = pipeline.run_gate(req)
     if gate.blocked:
         result = stamp(pipeline.gate_only_result(req, gate, gate_ms))
-        svc.sink.emit(result)
+        _emit(result)
         return jsonify({**result, **(extra or {})}), 200
 
     if svc.settings.mode == "async":
@@ -125,7 +177,7 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
         log.exception("inference failed for request %s", req.request_id)
         return _error(500, "inference_failed", "model inference failed", request_id=req.request_id)
     result = stamp(result)
-    svc.sink.emit(result)
+    _emit(result)
     return jsonify({**result, **(extra or {})}), 200
 
 
@@ -363,7 +415,7 @@ def _moderate_video(svc, data: bytes, filename: str, content_type: ContentType,
         if gate.blocked:
             policy = svc.levels.for_type(content_type.value)
             result = {**svc.pipeline.gate_only_result(source, gate, gate_ms), "moderation": policy.as_dict()}
-            svc.sink.emit(result)
+            _emit(result)
             return jsonify({**result, "media": block}), 200
     limit = svc.settings.pdf.max_chars
     if len(speech.text) > limit:
@@ -427,7 +479,7 @@ def _allowed_without_text(filename: str, content_type: ContentType, content_id: 
     gate, gate_ms = svc.pipeline.run_gate(req)
     result = svc.pipeline.gate_only_result(req, gate, gate_ms) if gate.blocked else \
         svc.pipeline._build(req, Decision.ALLOW, Stage.MODEL, gate, None, gate_ms, gate_ms, [], [], None, None, [])
-    svc.sink.emit(result)
+    _emit(result)
     return result
 
 
