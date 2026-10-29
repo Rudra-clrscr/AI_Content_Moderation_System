@@ -293,16 +293,44 @@ def test_ready_says_whether_pictures_are_actually_being_looked_at(make_settings,
     assert client.get("/ready").get_json()["visual"]["provider"] == "FakeProvider"
 
 
-# ---- the shipped policy file -------------------------------------------------------
+# ---- the policy file ---------------------------------------------------------------
 # These need no model bundle, so they run anywhere. The policy is the part of this feature
 # that is in git and the part most likely to be edited by hand.
+#
+# TWO FILES, TWO SETS OF INVARIANTS, and conflating them cost a day. visual_policy.yaml is
+# LIVE: the dashboard writes it, and four rules - abuses, animal, firework, religion - were
+# added there by an admin, not by us. visual_policy.default.yaml is what BONC SHIPS, restored
+# by "Restore default", and the only one whose contents the team chooses.
+#
+# So an editorial judgement - whether a category has a hand-written readable name, whether the
+# allowing phrasings outnumber the refusing ones - is asserted against the DEFAULT. Asserted
+# against the live file it fails on an admin doing their job, days later, naming neither them
+# nor what they did: `abuses` was reported here and nowhere else, and reading it as a problem
+# with the shipped policy is the wrong end entirely.
+#
+# What must hold however the dashboard is driven is asserted against the LIVE file, and it is
+# a different and weaker claim: not that every category is well named, but that none of them
+# can reach an author as a raw slug.
 
 def shipped_policy():
+    """The policy as BONC ships it - the one whose contents are the team's to choose."""
     import yaml
 
     from app.config import PROJECT_ROOT
 
-    raw = yaml.safe_load((PROJECT_ROOT / "config" / "visual_policy.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load(
+        (PROJECT_ROOT / "config" / "visual_policy.default.yaml").read_text(encoding="utf-8"))
+    return raw["labels"]
+
+
+def live_policy():
+    """The policy in force, including whatever an admin has added through the dashboard."""
+    import yaml
+
+    from app.config import PROJECT_ROOT
+
+    raw = yaml.safe_load(
+        (PROJECT_ROOT / "config" / "visual_policy.yaml").read_text(encoding="utf-8"))
     return raw["labels"]
 
 
@@ -321,7 +349,13 @@ def test_every_label_has_prompts():
 
 def test_there_are_safe_labels_to_be_judged_against():
     """Scores are a softmax over every prompt, so the safe list is not decoration: with a thin
-    one an ordinary product photo has nothing to be safe as, and its unsafe score rises."""
+    one an ordinary product photo has nothing to be safe as, and its unsafe score rises.
+
+    The SHIPPED policy, because an admin adding a refusing rule legitimately tips this and
+    cannot be asked to write safe phrasings to pay for it. The live file's margin is reported
+    to them instead, on the policy screen and in the reply to every save - see
+    admin_policy._prompt_balance.
+    """
     labels = shipped_policy()
     safe = [n for n, s in labels.items() if not s.get("unsafe")]
     assert safe, "no safe labels"
@@ -332,22 +366,47 @@ def test_there_are_safe_labels_to_be_judged_against():
         "cover at least as much ground, or ordinary pictures start scoring unsafe")
 
 
-def test_every_visual_category_has_a_readable_name():
-    """feedback.py falls back to the raw category when it is not in the map, so a new label
-    reaches the author as "our community policies on physique_display". It fails nowhere."""
+def _curated_names() -> dict:
     import yaml
 
     from app.config import PROJECT_ROOT
 
     raw = yaml.safe_load(
         (PROJECT_ROOT / "config" / "feedback_messages.yaml").read_text(encoding="utf-8"))
-    named = raw.get("categories") or {}
+    return raw.get("categories") or {}
+
+
+def test_every_shipped_visual_category_has_a_hand_written_name():
+    """A curated name is better than any derived one - `minors` reads as "pictures of
+    children", which no amount of string work gets to - so every category WE ship has one."""
+    named = _curated_names()
     for name, spec in shipped_policy().items():
         if spec.get("unsafe"):
             category = spec["category"]
             assert category in named, (
-                f"visual label {name!r} emits category {category!r}, which has no readable name "
-                "in feedback_messages.yaml - the author would be shown the raw string")
+                f"shipped visual label {name!r} emits category {category!r}, which has no "
+                "readable name in feedback_messages.yaml - add one under `categories:`")
+
+
+def test_no_live_category_can_reach_an_author_as_a_slug():
+    """The guarantee that has to survive the dashboard.
+
+    An admin creates a rule and the category comes from what they typed - the editor's box
+    used to default to the rule name, which is how `abuses` appeared beside the `abuse` that
+    already meant the same thing. A curated name cannot be required of them, so the weaker
+    claim is enforced instead: whatever they typed, Feedback.category_name turns it into
+    something an author can read, and never a bare slug.
+    """
+    from app.feedback import Feedback
+
+    fb = Feedback(categories=_curated_names())
+    for name, spec in live_policy().items():
+        if not spec.get("unsafe"):
+            continue
+        shown = fb.category_name(spec["category"])
+        assert shown, f"live label {name!r} renders no category name at all"
+        assert "_" not in shown, (
+            f"live label {name!r} would tell the author {shown!r} - a raw slug, not English")
 
 
 def test_every_per_label_bar_is_a_probability():

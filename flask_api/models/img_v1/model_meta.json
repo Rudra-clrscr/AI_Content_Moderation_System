@@ -12,8 +12,9 @@
     "prompts.npz"
   ],
   "policy_file": "visual_policy.yaml",
-  "policy_digest": "fcb24cf36a2da6ed",
+  "policy_digest": "7711e0ab7555698d",
   "labels": {
+    "abuses": "unsafe: abuse",
     "animal": "safe",
     "charity": "unsafe: charity_solicitation",
     "firework": "unsafe: parties",
@@ -31,6 +32,7 @@
     "wedding": "unsafe: wedding_content"
   },
   "prompt_counts": {
+    "abuses": 2,
     "animal": 3,
     "charity": 4,
     "firework": 3,
@@ -43,7 +45,7 @@
     "romantic": 5,
     "safe": 82,
     "sexual": 4,
-    "unrest": 10,
+    "unrest": 11,
     "weapon": 7,
     "wedding": 11
   },

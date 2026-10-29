@@ -44,6 +44,53 @@ def _err(status: int, code: str, message: str, **extra):
     return resp
 
 
+def _resync_exemplars(touched: set[int]) -> dict | None:
+    """Rewrite exemplars.npz when a change moved a marked picture's direction or category.
+
+    An exemplar's direction - "refuse things like this" vs "allow things like this" - IS the
+    image's `action` column, and its `category` is what decides whether a withdrawn category
+    silences it. But only the two endpoints that MARK exemplars re-exported the file, so every
+    other path that writes those two columns left the live check matching against the old rule:
+    an admin who flipped a marked picture to ALLOW in the grid and saved got a card relabelled
+    "Live rule: allowing lookalikes" while uploads that looked like it went on being refused,
+    with nothing anywhere to say why. The card was not lying about the database - it was
+    reading the column that had changed, next to a file that had not.
+
+    Returns the new exemplar state, or None when nothing marked was touched - the ordinary
+    case of saving a batch of Train checkboxes, which must not pay for an npz write and a
+    reload of the live matcher.
+    """
+    if not touched:
+        return None
+    from app.admin_policy import _export_exemplars, _paths
+    try:
+        _, _, model_dir = _paths()
+        return _export_exemplars(model_dir)
+    except Exception:
+        # The database write already happened and is correct. Failing the request would tell
+        # the admin their change did not land when it did, so this is reported, not raised -
+        # and the message below says the live rule is the part that did not move.
+        log.exception("could not re-export exemplars after changing %d image(s)", len(touched))
+        return {"error": "the change was saved, but the live lookalike rules could not be "
+                         "refreshed - re-apply the mark on that picture, or restart the API"}
+
+
+def _note_exemplars(msg: str, ex: dict | None) -> str:
+    """Append what happened to the live lookalike rules, if anything did.
+
+    Worth saying out loud on all three paths. Every other control in the grid describes what
+    the NEXT RETRAIN should learn, so an admin who changes one and is told "saved" reasonably
+    waits for a retrain. This is the one that is already in force, and the sentence is how
+    they find that out instead of waiting forty minutes to discover it.
+    """
+    if not ex:
+        return msg
+    if ex.get("error"):
+        return msg + " " + ex["error"]
+    return (f"{msg} Live lookalike rules updated: {ex['refusing']} refusing, "
+            f"{ex['allowing']} allowing.")
+
+
 # ---- Categories ---------------------------------------------------------------------
 
 @admin_images_bp.get("/v1/admin/images/categories")
@@ -94,9 +141,13 @@ def update_category(name: str):
         if act not in ("allow", "block"):
             return _err(400, "invalid_action", "Action must be 'allow' or 'block'.")
         count = store.set_category_policy(name, act)
+        # Marked pictures in this category just changed direction with everything else.
+        ex = _resync_exemplars(store.exemplar_ids(category=name))
         return jsonify({
-            "message": f"Set all {count} images in '{name}' to {act.upper()}.",
+            "message": _note_exemplars(
+                f"Set all {count} images in '{name}' to {act.upper()}.", ex),
             "category": store.get_category(name),
+            "exemplars": ex,
         })
 
     try:
@@ -319,14 +370,25 @@ def batch_update_images():
         act = str(body["bulk_action"]).lower()
         cat = str(body["category"]).lower()
         count = store.set_category_policy(cat, act)
-        return jsonify({"success": True, "updated": count, "message": f"Set category '{cat}' to {act.upper()}."})
+        ex = _resync_exemplars(store.exemplar_ids(category=cat))
+        return jsonify({"success": True, "updated": count, "exemplars": ex,
+                        "message": _note_exemplars(
+                            f"Set category '{cat}' to {act.upper()}.", ex)})
 
     updates = body.get("updates") or []
     if not isinstance(updates, list):
         return _err(400, "invalid_updates", "'updates' must be an array of image modifications.")
 
     count = store.batch_update_images(updates)
-    return jsonify({"success": True, "updated": count, "message": f"Saved changes for {count} images."})
+
+    # Only `action` and `category` reach the live check; `is_selected` is next retrain's
+    # business and deliberately does not trigger a reload.
+    moved = {int(u["id"]) for u in updates
+             if isinstance(u, dict) and u.get("id")
+             and ("action" in u or "category" in u)}
+    ex = _resync_exemplars(moved & store.exemplar_ids())
+    return jsonify({"success": True, "updated": count, "exemplars": ex,
+                    "message": _note_exemplars(f"Saved changes for {count} images.", ex)})
 
 
 # ---- Training & Presets -------------------------------------------------------------

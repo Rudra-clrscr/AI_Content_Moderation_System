@@ -791,6 +791,21 @@ class SystemStore:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def exemplar_ids(self, category: str | None = None) -> set[int]:
+        """Ids currently marked as exemplars, optionally only within one category.
+
+        The callers that rewrite `action` or `category` in bulk need to know whether the live
+        exemplars.npz has just gone stale, and asking list_exemplars would drag every
+        embedding blob across to answer a question about ids.
+        """
+        sql = "SELECT id FROM image_policy WHERE is_exemplar = 1"
+        params: list[Any] = []
+        if category and category.strip().lower() != "all":
+            sql += " AND category = ?"
+            params.append(category.strip().lower())
+        with self._tx() as db:
+            return {int(r["id"]) for r in db.execute(sql, params).fetchall()}
+
     def save_embedding(self, image_id: int, embedding_bytes: bytes) -> None:
         with self._tx() as db:
             db.execute("UPDATE image_policy SET embedding = ? WHERE id = ?", (embedding_bytes, image_id))

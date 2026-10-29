@@ -454,6 +454,68 @@
     }
 
     // ===================================================================================
+    // SHARED: THE CONTRADICTION DIALOG
+    //
+    // Used by the policy view AND the images view, which is why it lives out here. It was
+    // declared inside policyView, so both of its callers on the images screen - the teach
+    // buttons on a card, and an upload whose description contradicts a rule - threw
+    // ReferenceError from inside an async click handler. Nothing catches that: the card sat
+    // on "Applying…" forever, no message, no dialog, and the refusal the server had correctly
+    // declined to make looked like a UI that had simply stopped.
+    //
+    // Both servers raise these deliberately - see admin_policy.set_exemplars and
+    // admin_images.upload_image, which check BEFORE applying anything precisely so the admin
+    // can be asked. The question was being asked and could never be shown.
+    //
+    // Takes both conflict shapes: {phrasing, other_label, other_verdict, this_verdict} from
+    // the policy rules, and {filename, written_rule, written_verdict, you_chose} from a
+    // marked picture.
+    // ===================================================================================
+    function conflictModal(err, onResolve) {
+      const rows = (err.conflicts || []);
+      // The two shapes resolve differently, and saying the wrong one is worse than saying
+      // nothing: a picture conflict removes no wording from anything, it decides whether the
+      // mark overrides the written rule or is simply not made.
+      const aboutPictures = rows.some((c) => c.written_rule || c.filename);
+      const back = document.createElement("div");
+      back.className = "backdrop";
+      back.innerHTML = `
+        <div class="modal img-modal-wide" role="alertdialog" aria-modal="true" aria-labelledby="cf-title">
+          <div class="modal-head"><h2 id="cf-title">These rules contradict each other</h2>
+            <button class="btn-link" id="cf-x" aria-label="Close" type="button">✕</button></div>
+          <div class="modal-body">
+            <p class="hint" style="margin-top:0;">${esc(err.message || "")}</p>
+            <table class="pol-try-table"><tbody>
+              ${rows.map((c) => `<tr>
+                <td>“${esc(c.phrasing || c.filename || "")}”</td>
+                <td><span class="pol-tag ${c.other_verdict === "allow" ? "allow" : "block"}">
+                  ${esc(c.other_verdict || c.written_verdict || "")} in ${esc(c.other_label || c.written_rule || "")}</span></td>
+                <td><span class="pol-tag ${(c.this_verdict || c.you_chose) === "allow" ? "allow" : "block"}">
+                  you chose ${esc(c.this_verdict || c.you_chose || "")}</span></td>
+              </tr>`).join("")}
+            </tbody></table>
+            <p class="hint">${aboutPictures
+              ? `Marked pictures are checked before the written rules, so keeping the mark
+                 overrides the rule for anything that looks like this picture. Keeping the rule
+                 leaves the picture unmarked and the rule untouched.`
+              : `Whichever you keep, the wording is removed from the rules holding the other
+                 verdict. A rule left with no wordings at all is deleted.`}</p>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-outline" id="cf-cancel" type="button">Leave both as they are</button>
+            <button class="btn btn-outline adm-danger" id="cf-refuse" type="button">Refuse these</button>
+            <button class="btn btn-primary" id="cf-allow" type="button" style="background:#15803d; border-color:#15803d;">Allow these</button>
+          </div>
+        </div>`;
+      document.body.appendChild(back);
+      const close = () => back.remove();
+      back.querySelector("#cf-x").addEventListener("click", close);
+      back.querySelector("#cf-cancel").addEventListener("click", close);
+      back.querySelector("#cf-refuse").addEventListener("click", () => { close(); onResolve("refuse"); });
+      back.querySelector("#cf-allow").addEventListener("click", () => { close(); onResolve("allow"); });
+    }
+
+    // ===================================================================================
     // IMAGE POLICY RULES VIEW
     //
     // The visual check scores a picture against WRITTEN PHRASINGS, not trained classes, so a
@@ -467,8 +529,15 @@
     function policyView() {
       let labels = {};
       let live = [];
+      // The categories that have a readable name for the author. Offered in the editor so the
+      // field is a choice rather than a blank that silently becomes the rule name.
+      let namedCats = {};
+      // Refusing phrasings against allowing ones, for the whole file. Shown standing rather
+      // than only after a save: it is a property of the policy, and a negative margin that
+      // arrived four rules ago still decides how every ordinary photograph scores today.
+      let balance = {};
 
-      function render(msg = "", ok = false) {
+      function render(msg = "", ok = false, note = "") {
         const names = Object.keys(labels).sort();
         const unsafe = names.filter((n) => labels[n] && labels[n].unsafe);
         const safe = names.filter((n) => !(labels[n] && labels[n].unsafe));
@@ -482,11 +551,15 @@
                       title="Restore the policy exactly as it shipped">↺ Restore default</button>
             </div>
           </div>
-          <div class="adm-msg ${msg ? (ok ? "ok" : "err") : ""}" id="pol-msg" role="status" aria-live="polite">${esc(msg)}</div>
+          <div class="adm-msg ${msg ? (ok ? "ok" : "err") : ""}" id="pol-msg" role="status" aria-live="polite">${esc(msg)}${note || ""}</div>
           <p class="hint" style="margin:10px 0 4px;">
             <b>Refusing</b> rules block a picture that matches them. <b>Allowed</b> rules are what
             the refusing ones are judged against - every policy needs at least one.
+            ${balance.safe_prompts === undefined ? "" :
+              `<br><b>${balance.unsafe_prompts}</b> refusing phrasings against
+               <b>${balance.safe_prompts}</b> allowing ones.`}
           </p>
+          ${balance.warning ? `<div class="adm-msg err" style="font-weight:400;">${esc(balance.warning)}</div>` : ""}
           <div class="pol-list">
             ${unsafe.map((n) => ruleRow(n, true)).join("") || `<p class="hint">No refusing rules.</p>`}
           </div>
@@ -513,6 +586,18 @@
           b.addEventListener("click", () => removeRule(b.dataset.del)));
         back_root().querySelectorAll("[data-toggle]").forEach((b) =>
           b.addEventListener("click", () => toggleRule(b.dataset.toggle)));
+        // Re-point a just-saved rule at the category that already existed. The rule is sent
+        // back whole because PUT replaces the entry - sending the category alone would drop
+        // the phrasings the admin just wrote.
+        back_root().querySelectorAll("[data-reuse-cat]").forEach((b) =>
+          b.addEventListener("click", () => {
+            const nm = b.dataset.reuseRule, cat = b.dataset.reuseCat;
+            const e = labels[nm];
+            if (!e) return load(`“${nm}” is no longer in the policy.`, false);
+            const entry = { unsafe: !!e.unsafe, prompts: e.prompts || [], category: cat };
+            if (e.reject_min !== undefined) entry.reject_min = e.reject_min;
+            save(nm, entry, `“${nm}” → ${cat}`);
+          }));
       }
 
       /** The mount root, so the handlers above find only this view's buttons. */
@@ -538,12 +623,37 @@
           </div>`;
       }
 
-      async function load(msg = "", ok = false) {
+      // WHAT THE SAVE DID THAT IS NOT ON THE SCREEN. A rule is live the moment it is applied,
+      // but two of its effects live elsewhere: the name the author is told comes from
+      // feedback_messages.yaml, and the refusing/allowing phrasing balance decides how every
+      // ORDINARY photograph scores. Both were decided here and reported nowhere, so the only
+      // thing that ever caught a missing category name was a unit test days later.
+      function consequenceNote(c) {
+        if (!c) return "";
+        const bits = [];
+        if (c.author_sees) {
+          bits.push(`Authors refused by this rule are told: <b>“…policies on ${esc(c.author_sees)}”</b>`
+                    + (c.category_curated ? "." : ` — ${esc(c.naming_hint || "")}`));
+        }
+        if (c.similar_categories) {
+          // Offer the fix as a click, not as a sentence telling them to go and retype it.
+          bits.push("Existing categories that may be the same thing: "
+            + Object.keys(c.similar_categories).map((k) =>
+                `<b>${esc(k)}</b> (${esc(c.similar_categories[k])})`).join(", ")
+            + ` — <button class="btn-teach allow" type="button" data-reuse-cat="${esc(Object.keys(c.similar_categories)[0])}" data-reuse-rule="${esc(c.label || "")}">Use “${esc(Object.keys(c.similar_categories)[0])}” instead</button>`);
+        }
+        if (c.warning) bits.push(esc(c.warning));
+        return bits.length ? `<ul class="pol-consq"><li>${bits.join("</li><li>")}</li></ul>` : "";
+      }
+
+      async function load(msg = "", ok = false, note = "") {
         try {
           const res = await call("GET", "/v1/admin/policy/labels");
           labels = res.labels || {};
           live = res.live_labels || [];
-          render(msg, ok);
+          namedCats = res.named_categories || {};
+          balance = res.balance || {};
+          render(msg, ok, note);
         } catch (err) {
           frame("Image Policy Rules", "", `<div class="adm-msg err">${esc(err.message)}</div>
             <button class="btn btn-outline" id="pol-back" type="button">← Back</button>`);
@@ -558,8 +668,9 @@
           call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(name)}`,
                resolve ? { ...entry, resolve } : entry);
         try {
-          await apply();
-          await load(`${what} applied. The model is using it now.`, true);
+          const res = await apply();
+          await load(`${what} applied. The model is using it now.`, true,
+                     consequenceNote(res && res.consequences));
         } catch (err) {
           // A CONFLICT IS A QUESTION, NOT A FAILURE. The server answers 409 with the clashing
           // rules precisely so the admin can be asked which verdict stands, and this path -
@@ -621,42 +732,6 @@
        *  with write order quietly deciding. Resolving one way REMOVES the wording from the
        *  rules holding the other verdict, so the consequence is spelled out before the click.
        */
-      function conflictModal(err, onResolve) {
-        const rows = (err.conflicts || []);
-        const back = document.createElement("div");
-        back.className = "backdrop";
-        back.innerHTML = `
-          <div class="modal img-modal-wide" role="alertdialog" aria-modal="true" aria-labelledby="cf-title">
-            <div class="modal-head"><h2 id="cf-title">These rules contradict each other</h2>
-              <button class="btn-link" id="cf-x" aria-label="Close" type="button">✕</button></div>
-            <div class="modal-body">
-              <p class="hint" style="margin-top:0;">${esc(err.message || "")}</p>
-              <table class="pol-try-table"><tbody>
-                ${rows.map((c) => `<tr>
-                  <td>“${esc(c.phrasing || c.filename || "")}”</td>
-                  <td><span class="pol-tag ${c.other_verdict === "allow" ? "allow" : "block"}">
-                    ${esc(c.other_verdict || c.written_verdict || "")} in ${esc(c.other_label || c.written_rule || "")}</span></td>
-                  <td><span class="pol-tag ${(c.this_verdict || c.you_chose) === "allow" ? "allow" : "block"}">
-                    you chose ${esc(c.this_verdict || c.you_chose || "")}</span></td>
-                </tr>`).join("")}
-              </tbody></table>
-              <p class="hint">Whichever you keep, the wording is removed from the rules holding
-                the other verdict. A rule left with no wordings at all is deleted.</p>
-            </div>
-            <div class="modal-foot">
-              <button class="btn btn-outline" id="cf-cancel" type="button">Leave both as they are</button>
-              <button class="btn btn-outline adm-danger" id="cf-refuse" type="button">Refuse these</button>
-              <button class="btn btn-primary" id="cf-allow" type="button" style="background:#15803d; border-color:#15803d;">Allow these</button>
-            </div>
-          </div>`;
-        document.body.appendChild(back);
-        const close = () => back.remove();
-        back.querySelector("#cf-x").addEventListener("click", close);
-        back.querySelector("#cf-cancel").addEventListener("click", close);
-        back.querySelector("#cf-refuse").addEventListener("click", () => { close(); onResolve("refuse"); });
-        back.querySelector("#cf-allow").addEventListener("click", () => { close(); onResolve("allow"); });
-      }
-
       function ruleModal(name) {
         const e = (name && labels[name]) || { unsafe: true, prompts: [], category: "" };
         const back = document.createElement("div");
@@ -692,7 +767,17 @@
               <div class="field">
                 <label for="pol-cat">Reported category</label>
                 <input class="input" id="pol-cat" value="${esc(e.category || "")}"
-                       placeholder="e.g. weapons - defaults to the rule name">
+                       list="pol-cat-options" autocomplete="off"
+                       placeholder="e.g. weapons - start typing to reuse one">
+                <datalist id="pol-cat-options">
+                  ${Object.keys(namedCats).sort().map((c) =>
+                      `<option value="${esc(c)}">${esc(namedCats[c])}</option>`).join("")}
+                </datalist>
+                <p class="hint">This is what the author is TOLD: "...breaks our community
+                  policies on <b>${esc(namedCats[(e.category || "").trim()] || "…")}</b>".
+                  Reuse one of the listed categories where it fits - a new one has no readable
+                  name yet, so the author is shown the category itself until somebody adds one
+                  under <code>categories:</code> in config/feedback_messages.yaml.</p>
               </div>
               <div class="field">
                 <label for="pol-min">Confidence needed to refuse</label>
@@ -777,10 +862,11 @@
                           category: q("pol-cat").value.trim() || nm,
                           reject_min: q("pol-min").value.trim() };
           const apply = async (resolve) => {
-            await call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(nm)}`,
-                       resolve ? { ...entry, resolve } : entry);
+            const res = await call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(nm)}`,
+                                   resolve ? { ...entry, resolve } : entry);
             close();
-            await load(`“${nm}” applied. The model is using it now.`, true);
+            await load(`“${nm}” applied. The model is using it now.`, true,
+                       consequenceNote(res && res.consequences));
           };
           try {
             await apply();
@@ -1140,6 +1226,12 @@
           const isSelected = pending && pending.is_selected !== undefined ? pending.is_selected : img.is_selected;
           const action = pending && pending.action !== undefined ? pending.action : img.action;
           const isAllow = action === "allow";
+          // The teach row below is about the LIVE rule, which is the SAVED action - a pending
+          // flip is a note about the next retrain and has not reached the live check. Reading
+          // `isAllow` there made a card with an unsaved flip announce "Live rule: allowing
+          // lookalikes" for a picture still being refused, and offer to switch away from a
+          // direction that was never in force.
+          const liveAllow = img.action === "allow";
           const isSensitive = isSensitiveImage(img);
           const isBlurred = isImageBlurred(img);
 
@@ -1192,11 +1284,14 @@
                 <span class="teach-lbl">${img.is_exemplar
                     ? (isWithdrawn(img.category)
                         ? `Paused: <b>${esc(img.category)}</b> is withdrawn from the model, so this mark is not being applied`
-                        : `Live rule: <b>${isAllow ? "allowing" : "refusing"}</b> lookalikes`)
+                        : `Live rule: <b>${liveAllow ? "allowing" : "refusing"}</b> lookalikes`)
                     : "Use as a live example:"}</span>
                 <span class="teach-acts">
                   ${img.is_exemplar
-                    ? `<button class="btn-teach clear" type="button" data-teach="clear" data-id="${img.id}">Stop</button>`
+                    ? `<button class="btn-teach ${liveAllow ? "block" : "allow"}" type="button"
+                          data-teach="${liveAllow ? "block" : "allow"}" data-id="${img.id}"
+                          title="${liveAllow ? "Refuse pictures that look like this instead" : "Allow pictures that look like this instead"}">Switch to ${liveAllow ? "refusing" : "allowing"}</button>
+                       <button class="btn-teach clear" type="button" data-teach="clear" data-id="${img.id}">Stop</button>`
                     : `<button class="btn-teach block" type="button" data-teach="block" data-id="${img.id}"
                           title="Refuse pictures that look like this, from the next upload">Refuse like this</button>
                        <button class="btn-teach allow" type="button" data-teach="allow" data-id="${img.id}"
@@ -1262,11 +1357,23 @@
               // checked first, so going ahead would override the admin's own rule with
               // nothing in the policy file to show for it - worth a question, not a warning.
               if (err.code === "exemplar_conflict" && err.detail) {
-                conflictModal(err.detail, async (verdict) => {
-                  try { await apply(verdict); }
-                  catch (e2) { say(e2.message); loadImages(); }
-                });
-                return;
+                try {
+                  conflictModal(err.detail, async (verdict) => {
+                    try { await apply(verdict); }
+                    catch (e2) { say(e2.message); loadImages(); }
+                  });
+                  return;
+                } catch (dialogErr) {
+                  // THE ROW MUST NEVER BE LEFT ON "Applying…". It was: conflictModal lived in
+                  // another view's scope, so this line threw ReferenceError inside an async
+                  // click handler, nothing caught it, and the card showed a spinner for ever
+                  // with no dialog and no message. The scope is fixed above; this is here so
+                  // the next thing to throw costs a visible error instead of a dead card.
+                  console.error("conflict dialog failed", dialogErr);
+                  say(err.message || "That mark contradicts a written rule.");
+                  loadImages();
+                  return;
+                }
               }
               say(err.message);
               loadImages();
