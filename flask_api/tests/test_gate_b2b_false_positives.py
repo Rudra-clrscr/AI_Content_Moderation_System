@@ -52,6 +52,28 @@ def gate():
     "BC547 NPN bipolar junction transistor in stock.",
     "MC4 branch connectors for 1000V solar PV arrays.",
     "Looking for experienced CNC MC operator in Pune.",
+    # BKC IS BANDRA KURLA COMPLEX. It was on the unconditional blocklist, so a Mumbai
+    # address - on a platform whose members bank there - was refused as abuse.
+    "Our registered office is in BKC, Mumbai.",
+    "Office 701, BKC Annexe, Mumbai 400051.",
+    # BC IS BRITISH COLUMBIA and MC is a master of ceremonies, far more often here than
+    # either is an insult. The proximity rule used to pair them with `order`, `delivery`,
+    # `send`, `call`, `product`, `refund`, `fraud` and `scam` - the ordinary vocabulary of
+    # this platform - so routine logistics and events copy was refused.
+    "We ship to Vancouver, BC.",
+    "We deliver across BC and Alberta, please send the order by Friday.",
+    "Our head office is in Victoria BC. Call us for a quote.",
+    "Our MC will call you before the product launch.",
+    "Booking an MC for the awards ceremony, please send a quote.",
+    "Attach your business card (BC) with the order.",
+    "Marginal cost (MC) per item is below the order threshold.",
+    "This supplier is a fraud, BC based company though.",
+    "Our BC office will send the invoice.",
+    # The dating sense, which the original guards did cover - pinned so they stay covered.
+    "The artefact dates to 300 BC.",
+    "Pottery from the 4th century BC.",
+    # ...and the one they did not: the guards were only `century` and a digit.
+    "Roman coins from the era BC.",
 ])
 def test_ordinary_b2b_writing_is_not_blocked(gate, text):
     result = gate.check(text)
@@ -83,6 +105,17 @@ def test_ordinary_b2b_writing_is_not_blocked(gate, text):
     ("mc bc drama band kar", "abuse.hi_acronyms"),
     ("tmkc", "abuse.hi_blocklist"),
     ("bc/mc dono ho tum", "abuse.hi_acronyms"),
+    # THE FORM THE RULE IS NAMED FOR, and the one it used to miss. Its pattern required
+    # whitespace BEFORE the acronym, so a message that was only "bc!" did not match - while
+    # "We ship to Vancouver, BC." did.
+    ("bc!", "abuse.hi_acronyms"),
+    ("mc?", "abuse.hi_acronyms"),
+    ("bc", "abuse.hi_acronyms"),
+    ("paisa wapas de bc", "abuse.hi_acronyms"),
+    # bkc still blocks where something abusive is standing next to it, which is the whole
+    # difference between the insult and the postcode.
+    ("sale bkc", "abuse.hi_acronyms"),
+    ("teri bkc nikal yaha se", "abuse.hi_acronyms"),
 ])
 def test_the_rules_still_block_what_they_are_for(gate, text, rule):
     result = gate.check(text)

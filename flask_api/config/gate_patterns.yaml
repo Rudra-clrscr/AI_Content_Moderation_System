@@ -192,7 +192,11 @@ rules:
       - mkl
       - bsdk
       - bhosdk
-      - bkc
+      # `bkc` is NOT here: it is Bandra Kurla Complex, the Mumbai financial district, so
+      # "Office 701, BKC Annexe, Mumbai 400051" was refused as abuse on a platform whose
+      # members bank there. It is caught in abuse.hi_acronyms instead, where a pronoun or a
+      # vocative has to be standing next to it. `tbkc` keeps its place: nothing is
+      # abbreviated tbkc except the insult.
       - tbkc
       - maa ki choot
       - teri maa ki choot
@@ -498,15 +502,34 @@ rules:
     description: Hinglish abbreviated profanity and slang acronyms (bc, mc, mkc, bkl, bsdk, etc.)
     patterns:
       # Unambiguous abusive acronyms
-      - \b(?:mkc|tmkc|bkl|mkl|bsdk|bhosdk|bkc|tbkc|m\.k\.c|t\.m\.k\.c|b\.k\.l|m\.k\.l|b\.s\.d\.k)\b
+      - \b(?:mkc|tmkc|bkl|mkl|bsdk|bhosdk|tbkc|m\.k\.c|t\.m\.k\.c|b\.k\.l|m\.k\.l|b\.s\.d\.k)\b
       # Slang combos (mc bc, bc/mc, etc.)
       - \b(?:mc\s*[/,&+\s-]\s*bc|bc\s*[/,&+\s-]\s*mc|mcbc|bcmc)\b
       # Targeted bc / mc with pronouns, vocatives, or common insult prefixes/suffixes
       - \b(?:tu|tera|teri|tere|tum|tumhara|tumhari|tumhare|sale|saale|sali|saali|abey?|arre?|oye|ye|yeh|wo|woh|kameene?|harami|chutiye?|madarchod|bhenchod|lodu|ga?ndu)\s+(?:bc|mc)\b
       - \b(?:bc|mc)\s+(?:tu|tera|teri|tere|tum|tumhara|tumhari|tumhare|sale|saale|sali|saali|abey?|arre?|oye|ye|yeh|wo|woh|kameene?|harami|chutiye?|madarchod|bhenchod|lodu|ga?ndu)\b
-      # Sentence-level exclamations / angry demands combined with bc / mc
-      - \b(?:bc|mc)\b[^.!?\n]{0,40}\b(?:fraud|chor|chutiya|bakwas|scam|loot|dhokha|chori|paisa|refund|maal|delivery|order|phone|call|product|item|bhej|send|kutta|kamina)\b
-      - \b(?:fraud|chor|chutiya|bakwas|scam|loot|dhokha|chori|paisa|refund|maal|delivery|order|phone|call|product|item|bhej|send|kutta|kamina|kya\s+kar\s+raha)\b[^.!?\n]{0,40}\b(?:bc|mc)\b
-      # Standalone single-word message or isolated exclamation
+      # `bkc` only where something abusive is standing next to it - see the note above.
+      - \b(?:tu|tera|teri|tere|tum|sale|saale|sali|saali|abey?|oye|kameene?|harami|chutiye?|madarchod|bhenchod|lodu|ga?ndu)\s+bkc\b
+      - \bbkc\s+(?:tu|tera|teri|tere|tum|sale|saale|sali|saali|abey?|oye|kameene?|harami|chutiye?|madarchod|bhenchod|lodu|ga?ndu)\b
+      # Angry demands combined with bc / mc. HINGLISH COMPANIONS ONLY. This list used to
+      # carry fraud, scam, refund, delivery, order, phone, call, product, item and send,
+      # which are the ordinary vocabulary of this platform - so "We deliver across BC and
+      # Alberta, please send the order by Friday" and "Our MC will call you before the
+      # product launch" were both refused as abuse. Here BC is British Columbia and MC is a
+      # master of ceremonies far more often than either is an insult; what is never
+      # ambiguous is the Hinglish standing next to it.
+      - \b(?:bc|mc)\b[^.!?\n]{0,40}\b(?:chor|chutiya|bakwas|dhokha|chori|paisa|maal|bhej|kutta|kamina|nikal|wapas|band\s+kar)\b
+      - \b(?:chor|chutiya|bakwas|dhokha|chori|paisa|maal|bhej|kutta|kamina|nikal|wapas|band\s+kar|kya\s+kar\s+raha)\b[^.!?\n]{0,40}\b(?:bc|mc)\b
+      # Standalone message, or an exclamation anywhere.
+      #
+      # The second rule used to be `(?<!\bcentury)(?<!\d)\s+(?:bc|mc)[!?.]{1,3}` and did the
+      # opposite of its name. It required whitespace BEFORE the acronym, so a message that
+      # was just "bc!" - the likeliest way this arrives - did not match, while "We ship to
+      # Vancouver, BC." did: a full stop counted as the punctuation and the comma as the
+      # preceding character. Its two guards only ever covered "300 BC." and "4th century BC."
+      #
+      # So: no leading-whitespace requirement, and `.` is gone. A sentence ending "BC." is
+      # overwhelmingly the abbreviation; an exclamation or question mark after a bare `bc`
+      # is not. Abuse written with a full stop is still caught by the rules above.
       - ^\s*(?:bc|mc)\s*$
-      - (?<!\bcentury)(?<!\d)\s+(?:bc|mc)[!?.]{1,3}(?:\s|$)
+      - \b(?:bc|mc)\s*[!?]{1,3}
