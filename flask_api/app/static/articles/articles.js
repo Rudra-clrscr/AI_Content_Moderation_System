@@ -330,6 +330,9 @@
   const KB = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
   const STATE_LABEL = { new: ["att-warn", "not checked"], checking: ["att-checking", "checking…"],
                         ok: ["att-ok", "ok"], unchecked: ["att-warn", "not inspected"],
+                        // Between the two: some of the file was checked and some was not, and
+                        // collapsing that into either one says something untrue.
+                        partial: ["att-partial", "partly checked"],
                         bad: ["att-bad", "blocked"] };
 
   function renderAttachments() {
@@ -365,11 +368,23 @@
           a.state = "unchecked";
           a.detail = "moderation is switched off, so this wasn't checked";
         } else if (media.text_found === true && media.text_readable === false) {
-          // There is writing here that OCR could not read, and the deployment publishes those
-          // anyway (media.allow_unreadable_image). Nothing in it has been checked, so it must
-          // not get a tick - this is what let a Devanagari threat through looking clean.
-          a.state = "unchecked";
-          a.detail = "there is writing here the moderator couldn't read";
+          // THERE IS WRITING HERE THAT OCR COULD NOT READ. Still never a tick: that is what
+          // let a Devanagari threat through looking clean, and the words really are unknown.
+          //
+          // But "not inspected" stopped being true. The comment that used to sit here said
+          // "nothing in it has been checked", and when this was written that was right. The
+          // picture is classified now, and it is precisely BECAUSE it was looked at and
+          // cleared that the upload was published at all rather than refused - so reporting
+          // the whole file as uninspected understates what is known and reads to the author
+          // as a failure they are supposed to fix by uploading it again. Which it is not:
+          // a clearer photograph would not change this unless the WRITING got sharper.
+          if (media.visual_content_checked === true) {
+            a.state = "partial";
+            a.detail = "the picture was checked and cleared — the writing in it couldn't be read";
+          } else {
+            a.state = "unchecked";
+            a.detail = "there is writing here the moderator couldn't read";
+          }
         } else if (media.visual_content_checked === false && media.text_found === false) {
           // Allowed, but nothing in it could actually be read. Say so rather than showing a tick.
           a.state = "unchecked";

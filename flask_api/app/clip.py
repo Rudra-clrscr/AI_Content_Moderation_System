@@ -180,6 +180,17 @@ class VisualResult:
 
     @property
     def unsafe(self) -> bool:
+        """The best-matching label is an unsafe one - at ANY confidence.
+
+        NOT "this picture is a problem", and not a verdict: no bar is applied, so a blank
+        white image whose top label is `unrest` at 0.07 answers True, as do 9.5% of the
+        pictures filed under `safe`. Whether to ACT is VisualCheck.decides_reject, which
+        weighs the exemplars, the probe and each label's own measured bar.
+
+        Reading this as a verdict silently disabled the unreadable-writing rescue in
+        app/api.py for about one picture in ten; `refused_by` below is the only other caller
+        and reaches it only once decides_reject has already said yes.
+        """
         return self.checked and self.category != ""
 
     def as_dict(self) -> dict:
@@ -453,6 +464,24 @@ class VisualCheck:
             log.info("VisualCheck loaded %d exemplars (%d refuse, %d allow)",
                      len(self._exemplars[1]), n_block, len(self._exemplars[1]) - n_block)
             return True
+
+    def policy_category(self, name: str) -> str:
+        """The policy category a label or dataset folder reports under, or "" if none.
+
+        Two vocabularies meet here and they are nearly but not quite the same. The policy
+        emits categories meant to be READ - `physique_display`, `minors`, `violence_or_unrest`
+        - while an exemplar refusal carries the category of the picture an admin marked, which
+        is the dataset folder it was filed under: `physique`, `minor`, `unrest`, and also
+        `toy`, `cloud`, `safe`, which name no policy at all.
+
+        Nothing translated between them, so an exemplar refusal reported the folder name and
+        the author was told "...community policies on physique" - or, for a marked picture out
+        of the allowed set, "...community policies on safe". The folder names ARE the label
+        names, so the policy's own label -> category map is the translation, and `safe` and
+        `toy` correctly come back empty rather than being published as policies.
+        """
+        self._load()
+        return self._categories.get(str(name or "").strip().lower(), "")
 
     def match_exemplars(self, embed) -> tuple[float, float, dict | None]:
         """(best refuse similarity, best allow similarity, the refusing exemplar).

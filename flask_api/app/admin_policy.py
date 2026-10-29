@@ -472,7 +472,23 @@ def list_labels():
         "live_labels": live,
         "in_sync": sorted((doc.get("labels") or {}).keys()) == live,
         "default_available": default.exists(),
+        # The categories that HAVE a readable name, so the editor can offer them instead of
+        # letting the field default to the rule name. That default is how `abuses` was minted
+        # next to the `abuse` that already meant the same thing, and nothing on the screen
+        # said the two were different or that one of them had no name for the author.
+        "named_categories": _named_categories(),
+        "balance": _prompt_balance(doc),
     })
+
+
+def _feedback():
+    """The live author-facing wording, loaded from config/feedback_messages.yaml at startup."""
+    return current_app.extensions["moderation"].pipeline.feedback
+
+
+def _named_categories() -> dict:
+    """{category: readable name} from config/feedback_messages.yaml, for the rule editor."""
+    return dict(_feedback().categories or {})
 
 
 # ---- write -----------------------------------------------------------------------------
@@ -536,7 +552,10 @@ def upsert_label(name: str):
         return _err(500, "policy_build_failed", msg)
     return jsonify({"status": "updated" if existed else "created", "label": key,
                     "entry": entry, "live_labels": sorted(set(
-                        current_app.extensions["moderation"].settings.visual._labels))})
+                        current_app.extensions["moderation"].settings.visual._labels)),
+                    # What this save means for the author and for the rest of the policy -
+                    # both of which are decided here and reported nowhere else.
+                    "consequences": _consequences(doc, key, _feedback())})
 
 
 @admin_policy_bp.delete("/v1/admin/policy/labels/<name>")
@@ -790,7 +809,118 @@ def add_phrasing(label: str, phrasing: str, unsafe: bool = True,
     doc["labels"][key] = entry
     ok, msg = _apply(policy, doc, model_dir)
     return {"added": bool(ok), "label": key, "created_rule": not existed,
-            "phrasings": len(prompts), "error": None if ok else msg}
+            "phrasings": len(prompts), "error": None if ok else msg,
+            "consequences": _consequences(doc, key, _feedback()) if ok else None}
+
+
+def _near_categories(category: str, named: dict) -> dict:
+    """Curated categories that look like the same idea as `category`, {slug: readable name}.
+
+    Deliberately crude - singular/plural and separator differences only. The job is to catch a
+    category being minted next to one that already exists, and anything cleverer would start
+    offering `violence_or_unrest` for `unrest` and teaching admins to click past the question.
+    """
+    def key(c: str) -> str:
+        c = re.sub(r"[^a-z0-9]+", "", str(c).lower())
+        if c.endswith("ies"):          # parties -> party
+            return c[:-3] + "y"
+        if c.endswith("s") and not c.endswith("ss"):   # abuses -> abuse, weapons -> weapon
+            return c[:-1]
+        return c
+
+    k = key(category)
+    if not k:
+        return {}
+    return {c: n for c, n in named.items() if c != category and key(c) == k}
+
+
+def _prompt_balance(doc: dict) -> dict:
+    """How many refusing phrasings the policy holds against how many allowing ones.
+
+    A property of the whole file, not of any one rule, and the least visible thing about it.
+    Scores are a softmax over every phrasing, so the allowing list is what the refusing ones
+    are measured against - the policy file says so in as many words - and adding refusing
+    wordings without adding allowing ones raises the unsafe score of every ORDINARY
+    photograph. The shipped policy sits at 82 against 81, a margin that one new rule erases,
+    and four rules have been added here since. It surfaces as "the checker started refusing
+    catalogues", weeks after the save that caused it, which is why this is reported on the
+    screen that shows the policy and not only in the reply to a save.
+    """
+    labels = doc.get("labels") or {}
+    safe_n = sum(len((e or {}).get("prompts") or [])
+                 for e in labels.values() if not (e or {}).get("unsafe"))
+    unsafe_n = sum(len((e or {}).get("prompts") or [])
+                   for e in labels.values() if (e or {}).get("unsafe"))
+    out = {"safe_prompts": safe_n, "unsafe_prompts": unsafe_n,
+           "safe_margin": safe_n - unsafe_n}
+    if safe_n < unsafe_n:
+        out["warning"] = (
+            f"There are now {unsafe_n} refusing phrasings against {safe_n} allowing ones. Every "
+            "score is a softmax over all of them, so the allowing list is what the refusing "
+            "ones are measured against, and with fewer of them ordinary photographs score "
+            "higher as unsafe. Worth knowing rather than acting on blindly: the refusals you "
+            "actually see are decided first by each rule's own bar and by the probe, and this "
+            "total only decides the ones they leave over. Measured at 88 against 85, adding "
+            "twelve allowing phrasings moved the evaluation by four fewer wrong refusals and "
+            "eight fewer correct ones - so measure with scripts/eval_clip_images.py before and "
+            "after rather than adding wordings until the number goes green.")
+    return out
+
+
+def _consequences(doc: dict, label: str, fb) -> dict:
+    """What a saved rule means for the author and for the rest of the policy.
+
+    THE STEP THAT WAS MISSING. Creating a rule here writes config/visual_policy.yaml and
+    rebuilds prompts.npz, and it is live from that moment. But the NAME the author is told is
+    in a different file - config/feedback_messages.yaml - that nothing in this flow touches, so
+    a new category arrives with no readable name and the refusal reads "It appears to break
+    BONC's community policies on abuses". Three of the four rules admins have added here were
+    noticed and hand-named later; `abuses` was not, and the only thing that ever reported it
+    was a unit test, days afterwards, with nothing connecting it to the action that caused it.
+
+    So the save says what it did. `author_sees` is the exact phrase that will be published,
+    and `category_curated` is false when it is the derived fallback rather than a chosen name -
+    which is the admin's cue either to reuse an existing category or to ask for a real name.
+
+    `safe_prompts` / `unsafe_prompts` are here for the other invisible consequence. Scores are
+    a softmax over every phrasing in the file, so the safe list is what the unsafe ones are
+    judged against: adding unsafe wordings without adding safe ones raises the unsafe score of
+    every ordinary photograph, and the shipped policy sits at 82 against 81 - a margin one rule
+    erases. It arrives as "the checker started refusing catalogues", long after the save.
+    """
+    labels = doc.get("labels") or {}
+    entry = labels.get(label) or {}
+    out = _prompt_balance(doc)
+    out["label"] = label
+    if not entry.get("unsafe"):
+        return out
+    category = str(entry.get("category") or label)
+    curated = bool((fb.categories or {}).get(category))
+    out["author_sees"] = fb.category_name(category)
+    out["category"] = category
+    out["category_curated"] = curated
+    if not curated:
+        # DID YOU MEAN THE ONE THAT ALREADY EXISTS? `abuses` was minted beside the `abuse`
+        # that already meant "abusive language", because the editor's category box defaulted
+        # to the rule name and nothing compared the two. A slug-level near-match is not proof
+        # of a mistake - `minor` and `minors` are genuinely one idea, `parties` and `party`
+        # too - but it is exactly the moment to ask, and the only moment anyone can answer.
+        near = _near_categories(category, fb.categories or {})
+        if near:
+            out["similar_categories"] = near
+            out["naming_hint"] = (
+                f"The category {category!r} is new and has no readable name, so an author "
+                f"refused by this rule is told \"...policies on {out['author_sees']}\". "
+                + "Did you mean " + ", ".join(f"{k!r} ({v})" for k, v in near.items())
+                + "? Reusing it gives the author the written name; keeping this one needs a "
+                  "name added under `categories:` in config/feedback_messages.yaml.")
+            return out
+        out["naming_hint"] = (
+            f"No readable name is set for the category {category!r}, so an author refused by "
+            f"this rule is told \"...policies on {out['author_sees']}\". Point the rule at an "
+            "existing category, or add a name under `categories:` in "
+            "config/feedback_messages.yaml (it is read at startup).")
+    return out
 
 
 def _rows_by_id(store, ids: list[int]) -> list[dict]:

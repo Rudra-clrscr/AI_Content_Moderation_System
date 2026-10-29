@@ -100,6 +100,27 @@ class Feedback:
             nouns=raw.get("nouns") or {},
         )
 
+    def category_name(self, category: str) -> str:
+        """The readable name for a policy category, curated or failing that derived.
+
+        The curated map is still the right answer and still what the shipped labels are
+        tested for: `minors` reads as "pictures of children", which no amount of string
+        work gets to. But the map cannot be complete, because it is not the only thing
+        that names a category any more. An admin adds a visual rule in the dashboard and
+        the category comes from what they typed; an exemplar refusal is filed under the
+        picture's own dataset category (`physique`, `child_products`), which were never in
+        this map at all. Falling back to the raw string published the slug: "It appears to
+        break BONC's community policies on physique_display".
+
+        So an unmapped category is tidied into something an author can read rather than
+        passed through. It is a worse name than a curated one and a far better one than a
+        slug, and it holds for categories that did not exist when this file was written.
+        """
+        known = self.categories.get(category)
+        if known:
+            return known
+        return str(category or "").replace("_", " ").replace("-", " ").strip() or "content"
+
     def rule_issues(self, gate: GateResult, actions: tuple[str, ...]) -> list[Issue]:
         return [Issue(s, e, "rule", self.rule_messages.get(m.rule_id, "Edit this part of your post."),
                       m.category, m.rule_id)
@@ -120,11 +141,16 @@ class Feedback:
 
         # REJECT: name the policy areas; highlight only if configured to.
         blocking = [m for m in gate.matches if m.action == "block"]
-        names = list(dict.fromkeys(self.categories.get(m.category, m.category) for m in blocking))
+        # A BLANK CATEGORY MEANS "DO NOT NAME ONE", and reaching message_generic is the only
+        # way to say that. An exemplar refusal whose marked picture sits in a folder that names
+        # no policy - `toy`, `cloud`, the allowed set - has no area to publish: naming the
+        # best-matching label instead is how a cloud came to be refused "on weapons".
+        named = [m for m in blocking if str(m.category or "").strip()]
+        names = list(dict.fromkeys(self.category_name(m.category) for m in named))
         message = fmt(self.reject_message, categories=_join(names)) if names else fmt(self.reject_message_generic)
         issues = (self.rule_issues(gate, ("block", "revise")) + model_issues) if self.highlight_on_reject else []
         return {"title": fmt(self.reject_title), "message": message, **common,
-                "categories": list(dict.fromkeys(m.category for m in blocking)),
+                "categories": list(dict.fromkeys(m.category for m in named)),
                 "issues": [i.as_dict() for i in sorted(issues, key=lambda i: (i.start, i.end))]}
 
 

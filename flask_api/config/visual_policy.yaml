@@ -85,6 +85,7 @@ labels:
       - a photo of a crowd throwing stones
       - a photo of a police baton charge on a crowd
       - a photo of a street barricade with protesters
+      - a photo of abusive language
 
   revealing:
     unsafe: true
@@ -482,6 +483,7 @@ labels:
       - a photo of a sports crowd cheering in a stadium
       - a photo of a parade with a marching band
       - a photo of a concert audience
+
   animal:
     unsafe: false
     prompts:
@@ -500,3 +502,9 @@ labels:
       - a photo of diwali
       - a photo of firecrackers
       - a photo of rocket show
+  abuses:
+    unsafe: true
+    category: abuse
+    prompts:
+      - a photo of poster containing abusive language
+      - a poster with indian abuses

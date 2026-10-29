@@ -152,6 +152,10 @@ textarea.input { resize: vertical; min-height: 96px; }
 .att-ok       { background: #e3f5ea; color: #1f8f4e; }
 .att-bad      { background: #fdecec; color: #c0322b; }
 .att-warn     { background: #fff1d6; color: #b26a00; }
+/* Between ok and not-inspected: part of the file was checked and part was not. Blue rather
+   than another amber, because the author is not being asked to do anything about it - the
+   picture passed, and only the writing is unknown. */
+.att-partial  { background: #e0edfb; color: #1d4ed8; }
 .att-remove { border: 0; background: none; color: #6b7280; cursor: pointer; font-size: 16px; line-height: 1; }
 .att-remove:hover { color: #c0322b; }
 .btn-xs { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid var(--line-strong, #cbd5e1); background: #fff; color: var(--heading, #0f172a); cursor: pointer; line-height: 1.4; text-decoration: none; }
@@ -840,6 +844,13 @@ textarea.input { resize: vertical; min-height: 96px; }
 /* The export format sits in a toolbar of buttons, so it is sized to them rather than to the
    full-width selects in the filter row below it. */
 .logs-export-fmt { width: auto; min-width: 136px; padding: 7px 10px; font-size: 13px; }
+
+/* What a saved rule does that is not visible on the rule list: the name the author is
+   told, and the refusing/allowing phrasing balance. Inside the status message, so it reads
+   as part of the confirmation rather than as a separate warning to dismiss. */
+.pol-consq { margin: 8px 0 0; padding: 0 0 0 18px; font-weight: 400; line-height: 1.5; }
+.pol-consq li { margin: 4px 0; }
+.pol-consq code { font-size: 12px; }
 
 .pol-row-main { min-width: 0; }
 .pol-row-main b { font-size: 14px; }

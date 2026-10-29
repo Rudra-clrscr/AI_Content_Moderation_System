@@ -300,8 +300,17 @@ def moderate_media():
             # refusing on that alone was turning away 13% of real listings over logos, number
             # plates and watermarks. The record still says checked: false - this is a narrower
             # claim ("we looked at it, we could not read it"), never a clean result.
-            seen_and_clear = (media.allow_unreadable_image_when_seen and looked.checked
-                              and not looked.unsafe)
+            #
+            # "CLEARED" IS THE TEST THAT ALREADY RAN. decides_reject said no three lines above
+            # - that IS "we looked at it and it is fine". The extra `not looked.unsafe` that
+            # used to stand beside this re-derived a far stricter one: VisualResult.unsafe is
+            # true whenever the BEST-MATCHING label happens to be an unsafe one, at ANY
+            # confidence, so it fires on a blank white image (top label `unrest` at 0.07) and,
+            # measured over the 3,496 stored pictures, on 9.5% of the ones filed under `safe`.
+            # The rescue was therefore switched off for about one picture in ten - the very
+            # listings it was written for - and they were refused with a message blaming their
+            # writing, which was not what had stopped them.
+            seen_and_clear = media.allow_unreadable_image_when_seen and looked.checked
             if not (media.allow_unreadable_image or seen_and_clear):
                 return _error(422, "media_unreadable",
                               "there is writing in this image that could not be read, so it "
@@ -464,10 +473,26 @@ def _visual_reject(filename: str, looked, content_type: ContentType,
     # refused, and the one an operator would chase first.
     category = getattr(looked, "category", "")
     if cause == "exemplar":
-        category = (getattr(looked, "exemplar_match", None) or {}).get("category") or category
+        # The marked picture's category is its DATASET folder - `physique`, `minor`, `unrest`,
+        # and also `toy`, `cloud` and `safe` - which is a different vocabulary from the one the
+        # policy publishes. Untranslated it reached the author verbatim: "...community policies
+        # on physique" where the policy would have said "personal physique photos", and for a
+        # mark on a picture from the allowed set, "...on safe". The folder names ARE the
+        # policy's label names, so the policy's own label -> category map is the translation.
+        #
+        # A folder that names no policy leaves this BLANK on purpose, and the author gets the
+        # generic wording. The alternative is the best-matching label's category - which is
+        # the very thing the note above this was written about, a cloud refused by a rainbow
+        # exemplar and reported "on weapons".
+        marked = (getattr(looked, "exemplar_match", None) or {}).get("category") or ""
+        try:
+            category = svc.settings.visual.policy_category(marked)
+        except Exception:
+            log.exception("could not translate exemplar category %r", marked)
+            category = ""
     match = GateMatch(rule_id=rule_id, category=category, action="block", spans=())
     result = svc.pipeline.gate_only_result(req, GateResult((match,)), 0.0)
-    svc.sink.emit(result)
+    _emit(result)
     return jsonify({**result, **extra}), 200
 
 
