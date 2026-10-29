@@ -2,7 +2,7 @@
 # regenerated exactly by `python training/synth_data.py --seed 4`, so none of it belongs in git.
 res/
 
-# Superseded model bundles. Only the live bundle (models/v9) and the triage filter are tracked;
+# Superseded model bundles. Only the live bundle (models/v9-ver3) and the triage filter are tracked;
 # v1, v3 and v4 are kept on the machines that need them for rollback or comparison. Their objects
 # are still in this repo's LFS history from earlier commits — removing them from tracking does
 # not reclaim that storage, which would need a history rewrite.
@@ -15,6 +15,12 @@ res/
 flask_api/models/v5/
 flask_api/models/v6/
 flask_api/models/v8/
+# v9 was the live bundle until v9-ver3 replaced it. Dropped from tracking for the same reason
+# as the rest: its 371 MB object stays in LFS history, but every fresh clone stops pulling a
+# second one alongside the live model. Rolling back is this directory (still on the machines
+# that have it) plus `dir: models/v9` in settings.yaml - the line it was changed from.
+flask_api/models/v9/
+flask_api/models/v9-ver2/
 flask_api/models/v1/
 flask_api/models/v3/
 flask_api/models/v4/
