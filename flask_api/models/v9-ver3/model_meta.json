@@ -1,5 +1,5 @@
 {
-  "version": "bonc-v9-single",
+  "version": "bonc-v9-ver3",
   "labels": [
     "safe",
     "unsafe"
@@ -19,7 +19,7 @@
     "reject_min": 0.5
   },
   "risk": "P(unsafe) after temperature scaling (baked into the graph): <= 0.5 allow, > 0.5 reject",
-  "temperature": 1.495281,
+  "temperature": 1.456159,
   "quantization": "fp32_emb16",
   "quantization_note": "Smallest candidate that agrees with FP32 on >= 99% of decisions AND is batch-invariant (needed to batch sentences/windows/word variants). fp32_emb16 = FP32 compute with only the word-embedding table stored as FP16. Dynamic INT8 drifts with batching; static INT8 loses accuracy on DeBERTa and is slower on CPU.",
   "quantization_report": {
@@ -27,17 +27,17 @@
       "agreement": 1.0,
       "max_abs_diff_vs_fp32": 0.0,
       "batch_max_abs_diff": 0.0,
-      "latency_ms_single": 18.106002499553142,
-      "latency_ms_batch40": 871.0813999932725,
+      "latency_ms_single": 18.850482500056387,
+      "latency_ms_batch40": 1117.477300009341,
       "size_mb": 568.082797,
       "accuracy_handwritten": 0.993421052631579
     },
     "fp32_emb16": {
       "agreement": 1.0,
-      "max_abs_diff_vs_fp32": 0.0001590251922607422,
+      "max_abs_diff_vs_fp32": 0.00032633543014526367,
       "batch_max_abs_diff": 0.0,
-      "latency_ms_single": 18.49768500032951,
-      "latency_ms_batch40": 943.3876000111923,
+      "latency_ms_single": 18.937842499872204,
+      "latency_ms_batch40": 1131.0866999992868,
       "size_mb": 371.321401,
       "accuracy_handwritten": 0.993421052631579
     }
@@ -45,19 +45,19 @@
   "preprocessing": "none: raw text -> tokenizer.json, truncated to max_length, no lowercasing",
   "training": "microsoft/deberta-v3-small fine-tuned on res/ (relabelled, see training/prepare_data.py) + synthetic_v4 (training/synth_data.py); binary safe/unsafe",
   "metrics": {
-    "temperature": 1.4952812819342853,
+    "temperature": 1.4561590874833148,
     "test": {
       "n": 107896,
-      "accuracy": 0.9966356491436198,
-      "precision": 0.9968723978959768,
-      "recall": 0.9957601330790765,
-      "f1": 0.9963159550607411,
-      "auc": 0.9999317405207141,
-      "ece": 0.0009727840524518428,
-      "false_allow": 209,
-      "false_reject": 154,
-      "false_allow_rate": 0.004239866920923439,
-      "false_reject_rate": 0.0026278966588171053
+      "accuracy": 0.99645955364425,
+      "precision": 0.9956627482772599,
+      "recall": 0.996591877307583,
+      "f1": 0.9961270961331792,
+      "auc": 0.9999341514442902,
+      "ece": 0.0014182709976715774,
+      "false_allow": 168,
+      "false_reject": 214,
+      "false_allow_rate": 0.003408122692416927,
+      "false_reject_rate": 0.0036517524999146785
     },
     "handwritten": {
       "n": 152,
@@ -65,8 +65,8 @@
       "precision": 0.9846153846153847,
       "recall": 1.0,
       "f1": 0.9922480620155039,
-      "auc": 0.9982244318181818,
-      "ece": 0.012470925557672192,
+      "auc": 0.9984019886363636,
+      "ece": 0.014126932257663857,
       "false_allow": 0,
       "false_reject": 1,
       "false_allow_rate": 0.0,
@@ -79,7 +79,7 @@
       "recall": 0.9545454545454546,
       "f1": 0.9767441860465116,
       "auc": 1.0,
-      "ece": 0.020120891268280417,
+      "ece": 0.020614516498012974,
       "false_allow": 1,
       "false_reject": 0,
       "false_allow_rate": 0.045454545454545456,
@@ -92,7 +92,7 @@
       "recall": 1.0,
       "f1": 1.0,
       "auc": 1.0,
-      "ece": 0.004111906210350436,
+      "ece": 0.009627240125176517,
       "false_allow": 0,
       "false_reject": 0,
       "false_allow_rate": 0.0,
@@ -105,7 +105,7 @@
       "recall": 1.0,
       "f1": 1.0,
       "auc": 1.0,
-      "ece": 0.01810626902927955,
+      "ece": 0.005767287220805883,
       "false_allow": 0,
       "false_reject": 0,
       "false_allow_rate": 0.0,

@@ -6,11 +6,29 @@ mode: sync                 # sync  -> inference inline, final decision in the re
 
 model:
   backend: onnx            # onnx | stub   (stub = dev only, never deploy)
-  dir: models/v9           # live model: ONE text model for the whole system (bonc-v9-single).
-                           #   Replaces v8. Fine-tuned with surgical callout refinement and
-                           #   Gate 1 regression fixes.
+  dir: models/v9-ver3      # live model: ONE text model for the whole system (bonc-v9-ver3).
+                           #   Replaces v9. A targeted refinement pass over v9-ver2 aimed at
+                           #   the false ALLOWS v9 still had - staccato support delays, veiled
+                           #   threats, counterfeit packaging with fake holograms, leetspeak
+                           #   OTP phishing - with explicit hard negatives written for the
+                           #   Gate 1 regressions that chasing them caused: macro labour
+                           #   commentary, balanced employer reviews, legitimate OEM component
+                           #   listings and security advisories that say "never share an OTP".
+                           #   training/generate_v9_ver3_refinement.py, 2,649 rows.
                            #
-                           # WHAT IT BOUGHT, measured on benchmark suites:
+                           # WHAT IT COSTS, and it is a TRADE rather than a win - measured on
+                           # the same 107,896-row test split both models report:
+                           #   false allows    209 -> 168   (-41, the point of the exercise)
+                           #   false rejects   154 -> 214   (+60, what it was paid for)
+                           #   accuracy    0.99664 -> 0.99646
+                           #   f1          0.99632 -> 0.99613
+                           #   handwritten  0.9934 -> 0.9934 (unchanged, 152 rows)
+                           # Fewer harmful posts published, more ordinary ones refused. That
+                           # is the right direction only if a wrongly refused member is
+                           # cheaper than a published scam; it is reversible by putting this
+                           # line back to models/v9 and restarting.
+                           #
+                           # PREVIOUS v9 NOTES - WHAT IT BOUGHT over v8, measured on benchmark suites:
                            #   handwritten eval     96.0% -> 99.34% (0 false allows, 100% harmful recall)
                            #   long articles        75.0% -> 100.0% (catches embedded fraud/scams v8 missed)
                            #   public callouts      89.9% -> 94.4% (packaging defects allowed, escalation caught)
