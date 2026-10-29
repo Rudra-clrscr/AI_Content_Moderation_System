@@ -684,12 +684,7 @@ def _get_transcription_pipeline(model_size: str, device: str = "auto"):
             output_formats=set(),
             word_timestamps=True,
             keep_extracted_audio=False,
-            beam_size=5,
-            condition_on_previous_text=True,
-            no_speech_threshold=0.85,
-            compression_ratio_threshold=2.8,
-            repetition_penalty=1.1,
-            no_repeat_ngram_size=3,
+            condition_on_previous_text=False,
         )
         _transcription_pipelines[key] = VideoTranscriptionPipeline(config=cfg)
     return _transcription_pipelines[key]
