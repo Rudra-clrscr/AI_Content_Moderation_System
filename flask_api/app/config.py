@@ -81,6 +81,16 @@ class Settings:
     celery_result_backend: str = "redis://localhost:6379/1"
     celery_queue: str = "moderation"
     admin_token: str | None = None
+    # HOW MANY PROXIES SIT IN FRONT OF THIS SERVICE. 0 means none, and the caller's address is
+    # the socket's - the only value that cannot be forged. Above 0, that many hops are stripped
+    # from the right of X-Forwarded-For and the next one is the caller.
+    #
+    # It defaults to 0 deliberately. X-Forwarded-For is a request header like any other: with
+    # nothing in front overwriting it, anyone can set it to whatever they like, which here
+    # would mean hiding their own address from the audit log AND getting a stranger's address
+    # blocked by sending it. A wrong number is worse than none, so it is stated rather than
+    # sniffed.
+    trust_proxy_hops: int = 0
     db_server: str | None = None
     db_name: str | None = None
     db_user: str | None = None
@@ -178,6 +188,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         celery_result_backend=env("CELERY_RESULT_BACKEND", celery.get("result_backend", "redis://localhost:6379/1")),
         celery_queue=celery.get("queue", "moderation"),
         admin_token=env("ADMIN_TOKEN") or None,
+        trust_proxy_hops=max(0, int(env("TRUST_PROXY_HOPS", raw.get("trust_proxy_hops", 0)) or 0)),
         db_server=env("DB_SERVER"),
         db_name=env("DB_NAME"),
         db_user=env("DB_USER"),

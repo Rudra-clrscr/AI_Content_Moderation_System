@@ -45,6 +45,11 @@ RESEND_COOLDOWN = 60         # seconds between codes for one email
 SESSION_IDLE = 30 * 60       # log out after 30 minutes of no activity
 MIN_PASSWORD = 10
 CSRF_HEADER = ("X-Requested-With", "bonc-admin")
+# A log export is built whole in memory before it is sent, so this is the cap that keeps an
+# operator who has cleared nothing from discovering the limit as a dead server. At the widest
+# columns a row is a few hundred bytes, so this is tens of MB in the worst case; the file says
+# when it bit, and the filters on the screen are how you get the rest.
+MAX_EXPORT_ROWS = 50_000
 
 # One value per content type the pipeline knows, so no surface is forgotten.
 ALL_SURFACES = [c.value for c in ContentType]
@@ -469,6 +474,68 @@ def get_moderation_logs():
     return jsonify(logs_data), 200
 
 
+@admin_bp.get("/v1/admin/moderation-logs/export")
+def export_moderation_logs():
+    """Download the moderation log as text, Word or Excel.
+
+    Takes the SAME filter arguments as the list endpoint and applies them through the same
+    builder, because the button sits on a filtered screen and "export" there can only sensibly
+    mean "what I am looking at". It is not paginated, though: the screen shows fifteen rows and
+    nobody wants fifteen rows in a spreadsheet, so this walks the whole matching set up to a
+    cap and the file records both numbers about itself.
+    """
+    denied = check_admin()
+    if denied:
+        return denied
+    from app.log_export import MEDIA_TYPES, render
+
+    fmt = (request.args.get("format") or "txt").strip().lower()
+    if fmt in ("excel", "xls"):
+        fmt = "xlsx"
+    if fmt in ("word", "docx"):
+        fmt = "doc"
+    if fmt not in MEDIA_TYPES:
+        return _err(400, "bad_format",
+                    f"format must be one of: {', '.join(sorted(MEDIA_TYPES))}.")
+
+    a: Admin = current_app.extensions["admin"]
+    filters = {"decision": request.args.get("decision"),
+               "content_type": request.args.get("content_type"),
+               "severity": request.args.get("severity"),
+               "query": request.args.get("q")}
+    try:
+        cap = min(MAX_EXPORT_ROWS, max(1, int(request.args.get("max_rows", MAX_EXPORT_ROWS))))
+    except (TypeError, ValueError):
+        cap = MAX_EXPORT_ROWS
+
+    total = a.store.count_moderation_logs(**filters)
+    rows = a.store.export_moderation_logs(limit=cap, **filters)
+
+    try:
+        data, media_type, name = render(
+            fmt, rows, a.store.EXPORT_COLUMNS, total,
+            truncated=total > len(rows),
+            # Reported as the admin set them on screen, not as the query names them.
+            filters={"decision": filters["decision"], "surface": filters["content_type"],
+                     "severity": filters["severity"], "search": filters["query"]})
+    except ImportError:
+        # Only the workbook has a dependency, and it is declared. Say which format is missing
+        # rather than failing the button, because the other two still work.
+        log.exception("the Excel export could not be built")
+        return _err(503, "export_unavailable",
+                    "Excel export needs the openpyxl package on the server "
+                    "(pip install openpyxl). Text and Word exports still work.")
+
+    resp = current_app.response_class(data, mimetype=media_type)
+    resp.headers["Content-Disposition"] = f'attachment; filename="{name}"'
+    resp.headers["Content-Length"] = str(len(data))
+    # An audit export is a point-in-time copy of a table that is still being written to.
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["X-Export-Rows"] = str(len(rows))
+    resp.headers["X-Export-Total"] = str(total)
+    return resp
+
+
 @admin_bp.get("/v1/admin/moderation-logs/<request_id>")
 def get_moderation_log_detail(request_id: str):
     denied = check_admin()
@@ -479,6 +546,84 @@ def get_moderation_log_detail(request_id: str):
     if not item:
         return _err(404, "not_found", f"No moderation log found for request {request_id}")
     return jsonify(item), 200
+
+
+# ---- blocked addresses ----------------------------------------------------------------
+# WHAT THIS IS AND IS NOT. Blocking an address stops casual repetition from one connection -
+# the same person posting the same thing eight times - and that is worth having. It is not an
+# identity control: a mobile connection changes address by switching to cellular, and a VPN
+# changes it by clicking. That is also why it cuts the other way, and why the scope matters:
+# a /24 can be one household or one office behind a single NAT, so refusing a network can
+# refuse people who did nothing. The screen says which scope is being used, and the log keeps
+# the reason, because the person undoing this months later will not be the one who did it.
+
+@admin_bp.get("/v1/admin/blocked-clients")
+def list_blocked_clients():
+    denied = check_admin()
+    if denied:
+        return denied
+    a: Admin = current_app.extensions["admin"]
+    return jsonify({"blocked": a.store.list_blocked_clients()}), 200
+
+
+@admin_bp.post("/v1/admin/blocked-clients")
+def add_blocked_client():
+    denied = check_admin()
+    if denied:
+        return denied
+    body = request.get_json(silent=True) or {}
+    value = str(body.get("value", "")).strip()
+    scope = str(body.get("scope", "ip")).strip().lower()
+    if not value:
+        return _err(400, "missing_value", "Give the address to block.")
+    if scope not in ("ip", "network"):
+        return _err(400, "bad_scope", "scope must be 'ip' or 'network'.")
+
+    # Validated here so a typo becomes a message rather than a row that silently blocks
+    # nothing and is never noticed. A network is stored in the same normal form the resolver
+    # produces, or the two would never compare equal.
+    from app import client_address
+    if scope == "ip":
+        if not client_address.network_of(value):
+            return _err(400, "bad_address", f"{value!r} is not an IP address.")
+    else:
+        net = client_address.network_of(value.split("/")[0])
+        if not net:
+            return _err(400, "bad_address", f"{value!r} is not an address or network.")
+        value = net
+
+    # REFUSING YOUR OWN CONNECTION IS A LOCKOUT, and the screen that would undo it is behind
+    # the block you just made. Caught here rather than explained in a tooltip nobody reads.
+    me = client_address.from_request(
+        request, current_app.extensions["moderation"].settings.trust_proxy_hops)
+    if value in (me.get("ip"), me.get("network")):
+        return _err(409, "would_block_self",
+                    f"That is your own connection ({me.get('ip')}). Blocking it would stop "
+                    "your own submissions; the dashboard would still work, but check the "
+                    "address before going ahead.")
+
+    a: Admin = current_app.extensions["admin"]
+    # A script authenticating with X-Admin-Token has no session row, so this records nothing
+    # rather than failing - the block is still the right thing to make.
+    who = _session_admin()
+    row = a.store.block_client(value, scope, reason=str(body.get("reason", "")).strip(),
+                               created_by=who["email"] if who else "")
+    log.info("admin blocked %s %s", scope, value)
+    return jsonify({"blocked": row,
+                    "message": f"Blocked {scope} {value}."}), 201
+
+
+@admin_bp.delete("/v1/admin/blocked-clients/<path:value>")
+def remove_blocked_client(value: str):
+    denied = check_admin()
+    if denied:
+        return denied
+    a: Admin = current_app.extensions["admin"]
+    n = a.store.unblock_client(value, request.args.get("scope"))
+    if not n:
+        return _err(404, "not_blocked", f"{value!r} is not blocked.")
+    log.info("admin unblocked %s", value)
+    return jsonify({"unblocked": True, "count": n, "message": f"Unblocked {value}."}), 200
 
 
 @admin_bp.delete("/v1/admin/moderation-logs")

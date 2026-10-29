@@ -814,6 +814,33 @@ textarea.input { resize: vertical; min-height: 96px; }
 .pol-list { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
 .pol-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px;
   background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+/* Device address over the network it belongs to: two facts about one caller, so they read as
+   one cell rather than as two columns competing for the same narrow space. Each line is
+   labelled - stacked bare, "127.0.0.1" over "127.0.0.0/24" reads as one number printed twice.
+   The label column is fixed so the addresses align down the table and can be compared by eye,
+   which is how you notice the same device across a run of rows. */
+.log-addr { white-space: nowrap; font-size: 12px; line-height: 1.45; }
+.log-addr-line { display: flex; align-items: baseline; gap: 6px; }
+.log-addr-tag {
+  flex: 0 0 48px; font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--muted);
+}
+.log-addr-val { font-family: ui-monospace, Consolas, monospace; color: #334155; }
+.log-addr-val.muted { color: var(--muted); font-size: 11px; }
+.log-addr-none { color: var(--muted); font-style: italic; }
+/* Not an error - a developer's machine looks like this - but in production it means the
+   proxy's address is being recorded instead of the author's, so it is worth catching the eye
+   rather than blending into a column of ordinary numbers. */
+.log-addr-kind {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  color: #92400e; background: #fef3c7; border: 1px solid #fde68a;
+  border-radius: 4px; padding: 0 4px; cursor: help;
+}
+
+/* The export format sits in a toolbar of buttons, so it is sized to them rather than to the
+   full-width selects in the filter row below it. */
+.logs-export-fmt { width: auto; min-width: 136px; padding: 7px 10px; font-size: 13px; }
+
 .pol-row-main { min-width: 0; }
 .pol-row-main b { font-size: 14px; }
 .pol-row-acts { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }

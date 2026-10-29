@@ -155,6 +155,48 @@
     throw err;
   }
 
+  /** GET a file and hand it to the browser as a download, keeping failures on the page.
+   *
+   * Not `window.location = url`: that works - the session cookie goes with it - but an expired
+   * session or a server error would navigate the admin away from the dashboard and show them
+   * raw JSON, with whatever they were doing lost. Fetching it means a failure is an ordinary
+   * error in the view that asked for it, the same as every other call here.
+   */
+  async function download(url, fallbackName) {
+    const res = await fetch(url, {
+      credentials: "same-origin",
+      headers: { "X-Requested-With": "bonc-admin" },
+    });
+    if (!res.ok) {
+      let data = {};
+      try { data = await res.json(); } catch { /* a failure need not be JSON */ }
+      if (res.status === 401) throw new SessionExpired("Your session has ended. Please log in again.");
+      const err = new Error(data.message || (data.error && data.error.message)
+                            || `The download failed (${res.status}).`);
+      err.code = data.error || `http_${res.status}`;
+      err.status = res.status;
+      throw err;
+    }
+    // The server names the file - it knows the format and the timestamp - so the header is
+    // read rather than the name being rebuilt here and drifting from it.
+    const disp = res.headers.get("Content-Disposition") || "";
+    const m = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(disp);
+    const name = (m ? decodeURIComponent(m[1]) : "") || fallbackName;
+
+    const blob = await res.blob();
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoked on a later tick: Chrome aborts a download whose object URL is released in the
+    // same turn as the click that started it.
+    setTimeout(() => URL.revokeObjectURL(href), 10000);
+    return { name, rows: res.headers.get("X-Export-Rows"), total: res.headers.get("X-Export-Total") };
+  }
+
   function mount(root) {
     let email = "";            // kept only while the forgot-password steps are on screen
     let resetToken = "";
@@ -2119,12 +2161,19 @@
       let filter = { decision: "", surface: "", severity: "", q: "", page: 1, limit: 15 };
       let logsData = { logs: [], total: 0, stats: { total: 0, allow: 0, revise: 0, reject: 0 } };
 
+      /** The filters as query parameters, without the pagination. Shared so Export cannot
+       *  drift from the table it sits under. */
+      function filterParams() {
+        const qp = new URLSearchParams();
+        if (filter.decision) qp.set("decision", filter.decision);
+        if (filter.surface) qp.set("content_type", filter.surface);
+        if (filter.severity) qp.set("severity", filter.severity);
+        if (filter.q) qp.set("q", filter.q);
+        return qp;
+      }
+
       async function loadLogs() {
-        const queryParams = new URLSearchParams();
-        if (filter.decision) queryParams.set("decision", filter.decision);
-        if (filter.surface) queryParams.set("content_type", filter.surface);
-        if (filter.severity) queryParams.set("severity", filter.severity);
-        if (filter.q) queryParams.set("q", filter.q);
+        const queryParams = filterParams();
         queryParams.set("limit", filter.limit);
         queryParams.set("offset", (filter.page - 1) * filter.limit);
 
@@ -2137,6 +2186,35 @@
         }
       }
 
+      /** "" for an ordinary public address, or a word for one that is not routable.
+       *
+       *  Worth marking, because an address that is not public means one of two things and
+       *  both matter. On a developer's machine it is just localhost. In production it means
+       *  the recorded address is the PROXY's, not the author's - every row the same, blocking
+       *  the wrong thing - which is `trust_proxy_hops` left at 0 behind nginx. Unlabelled,
+       *  that configuration mistake looks like a column of ordinary data.
+       *
+       *  Display only: nothing is decided from it, so a rough reading beats parsing IPv6
+       *  properly in the browser. The server does the real work in app/client_address.py.
+       */
+      function addressKind(ip) {
+        const v = String(ip || "");
+        if (v === "::1" || v.startsWith("127.")) return "loopback";
+        if (v.startsWith("10.") || v.startsWith("192.168.") || v.startsWith("169.254.")) return "private";
+        if (/^172\.(1[6-9]|2\d|3[01])\./.test(v)) return "private";
+        if (/^f[cd][0-9a-f]{2}:/i.test(v) || /^fe80:/i.test(v)) return "private";
+        return "";
+      }
+
+      const KIND_NOTE = {
+        loopback: "Loopback - the request came from this machine. In production this means the "
+                + "proxy's address is being recorded instead of the author's: set "
+                + "trust_proxy_hops to the number of proxies in front of the service.",
+        private: "A private network address, not reachable from the internet. Either an "
+               + "internal caller, or a proxy in front of the service whose hops are not "
+               + "configured - see trust_proxy_hops.",
+      };
+
       function formatTime(isoOrTs) {
         if (!isoOrTs) return "—";
         try {
@@ -2148,7 +2226,75 @@
         }
       }
 
-      function render(msg = "") {
+      // `ok` because this view only ever had bad news to report. A finished download is the
+      // first good news on the screen, and showing it in the red error box reads as a failure.
+      /** Ask which scope before refusing an address, and say what each one costs.
+       *
+       *  Not a confirm(): the choice between one device and its whole network is the entire
+       *  decision here, and the difference between them is a household and a building. A
+       *  yes/no box would have to pick one silently.
+       */
+      function blockModal(ip, net) {
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        back.innerHTML = `
+          <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="blk-title">
+            <div class="modal-head"><h2 id="blk-title">Stop submissions from this address</h2>
+              <button class="btn-link" id="blk-x" aria-label="Close" type="button">✕</button></div>
+            <div class="modal-body">
+              <div id="blk-msg" class="adm-msg" role="status"></div>
+              <div class="field">
+                <label><input type="radio" name="blk-scope" value="ip" checked>
+                  Just this device — <code>${esc(ip)}</code></label>
+                <p class="hint">Stops this one address. A phone switching to mobile data, or
+                  anyone on a VPN, gets a new one immediately.</p>
+              </div>
+              ${net ? `<div class="field">
+                <label><input type="radio" name="blk-scope" value="network">
+                  The whole network — <code>${esc(net)}</code></label>
+                <p class="hint">Catches the addresses next door, which is what a home
+                  connection moves to when it reconnects. It can also be one office or one
+                  building behind a single connection, so it may stop people who did nothing.</p>
+              </div>` : ""}
+              <div class="field">
+                <label for="blk-reason">Reason</label>
+                <input class="input" id="blk-reason" autocomplete="off"
+                       placeholder="e.g. repeated listings for the same scam">
+                <p class="hint">Kept with the block. Whoever lifts this in six months will not
+                  be whoever made it.</p>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-outline" id="blk-cancel" type="button">Cancel</button>
+              <button class="btn btn-primary adm-danger" id="blk-go" type="button">Block</button>
+            </div>
+          </div>`;
+        document.body.appendChild(back);
+        const close = () => back.remove();
+        back.querySelector("#blk-x").addEventListener("click", close);
+        back.querySelector("#blk-cancel").addEventListener("click", close);
+        back.querySelector("#blk-go").addEventListener("click", async () => {
+          const scope = back.querySelector('input[name="blk-scope"]:checked').value;
+          const value = scope === "network" ? net : ip;
+          const foot = back.querySelector(".modal-foot");
+          foot.innerHTML = `<button class="btn btn-primary" disabled><span class="spinner"></span> Blocking…</button>`;
+          try {
+            const res = await call("POST", "/v1/admin/blocked-clients",
+                                   { value, scope, reason: back.querySelector("#blk-reason").value.trim() });
+            close();
+            render(res.message || `Blocked ${value}.`, true);
+          } catch (e) {
+            if (e instanceof SessionExpired) { close(); return sessionEnded(e); }
+            const m = back.querySelector("#blk-msg");
+            m.className = "adm-msg err";
+            m.textContent = e.message;
+            foot.innerHTML = `<button class="btn btn-outline" id="blk-cancel2" type="button">Cancel</button>`;
+            back.querySelector("#blk-cancel2").addEventListener("click", close);
+          }
+        });
+      }
+
+      function render(msg = "", ok = false) {
         const total = logsData.total || 0;
         const totalPages = Math.max(1, Math.ceil(total / filter.limit));
         const curPage = Math.min(filter.page, totalPages);
@@ -2160,12 +2306,23 @@
             <div class="img-top-bar">
               <button class="btn btn-outline" id="logs-back-btn" type="button">← Back to Dashboard</button>
               <div style="display:flex; align-items:center; gap:8px;">
+                <!-- EXPORTS WHAT IS ON SCREEN, not the page of it. The filters above go with
+                     the request and the file records them, so a download can be acted on
+                     later; the fifteen-row pagination deliberately does not. -->
+                <select class="select logs-export-fmt" id="logs-export-fmt"
+                        aria-label="Export format">
+                  <option value="xlsx">Excel (.xlsx)</option>
+                  <option value="doc">Word (.doc)</option>
+                  <option value="txt">Text (.txt)</option>
+                </select>
+                <button class="btn btn-outline" id="logs-export-btn" type="button"
+                        title="Download the logs matching the filters above">⭳ Export</button>
                 <button class="btn btn-outline" id="logs-refresh-btn" type="button">↺ Refresh</button>
                 <button class="btn btn-outline" id="logs-clear-btn" type="button" style="color:var(--danger);" title="Clear audit logs">🗑️ Clear logs</button>
               </div>
             </div>
 
-            ${msg ? `<div class="adm-msg err" role="alert">${esc(msg)}</div>` : ""}
+            ${msg ? `<div class="adm-msg ${ok ? "ok" : "err"}" role="${ok ? "status" : "alert"}">${esc(msg)}</div>` : ""}
 
             <div class="logs-stats-bar">
               <div class="logs-stat-box">
@@ -2227,6 +2384,7 @@
                     <th>Severity</th>
                     <th>Risk Score</th>
                     <th>Decided By</th>
+                    <th title="The device that submitted, and the network block it belongs to">Address</th>
                     <th>Content Preview</th>
                     <th>Action</th>
                   </tr>
@@ -2246,8 +2404,38 @@
                       <td><span class="badge-sev ${esc(sev)}">${esc(sev)}</span></td>
                       <td><span class="score-pill ${scoreClass}">${esc(score)}</span></td>
                       <td style="font-size:12px; font-family:monospace; color:#475569;">${esc(row.decided_by || "—")}</td>
+                      <!-- SAY WHICH IS WHICH. Two addresses stacked unlabelled read as one
+                           number printed twice. They are different things and are used for
+                           different jobs: the device is what you quote in a report, the
+                           network is what you refuse when the next submission arrives from
+                           the address next door. Rows written before this column existed have
+                           neither, and say so rather than showing an empty cell that reads as
+                           "no address". -->
+                      <td class="log-addr">${(() => {
+                          if (!row.client_ip) {
+                            return `<span class="log-addr-none" title="This event predates address recording">not recorded</span>`;
+                          }
+                          const kind = addressKind(row.client_ip);
+                          return `
+                            <div class="log-addr-line">
+                              <span class="log-addr-tag">Device</span>
+                              <span class="log-addr-val">${esc(row.client_ip)}</span>
+                              ${kind ? `<span class="log-addr-kind" title="${esc(KIND_NOTE[kind])}">${esc(kind)}</span>` : ""}
+                            </div>
+                            ${row.client_network ? `
+                            <div class="log-addr-line">
+                              <span class="log-addr-tag">Network</span>
+                              <span class="log-addr-val muted">${esc(row.client_network)}</span>
+                            </div>` : ""}`;
+                        })()}</td>
                       <td><div class="log-preview-text" title="${esc(row.content_preview || "")}">${esc(row.content_preview || "—")}</div></td>
-                      <td><button class="btn btn-outline log-inspect-btn" type="button" data-id="${esc(row.request_id)}" style="padding:4px 8px; font-size:12px;">Inspect</button></td>
+                      <td style="white-space:nowrap;">
+                        <button class="btn btn-outline log-inspect-btn" type="button" data-id="${esc(row.request_id)}" style="padding:4px 8px; font-size:12px;">Inspect</button>
+                        ${row.client_ip ? `<button class="btn btn-outline log-block-btn" type="button"
+                              data-ip="${esc(row.client_ip)}" data-net="${esc(row.client_network || "")}"
+                              style="padding:4px 8px; font-size:12px; color:var(--danger);"
+                              title="Stop submissions from this address">Block</button>` : ""}
+                      </td>
                     </tr>`;
                   }).join("") || `<tr><td colspan="9" style="text-align:center; padding:32px; color:var(--muted);">No moderation logs found matching the filter criteria.</td></tr>`}
                 </tbody>
@@ -2266,6 +2454,34 @@
 
         $("logs-back-btn").addEventListener("click", () => signedIn(currentAdmin, false));
         $("logs-refresh-btn").addEventListener("click", () => loadLogs());
+        root.querySelectorAll(".log-block-btn").forEach((b) =>
+          b.addEventListener("click", () => blockModal(b.dataset.ip, b.dataset.net)));
+        $("logs-export-btn").addEventListener("click", async () => {
+          const btn = $("logs-export-btn");
+          const fmt = $("logs-export-fmt").value;
+          const was = btn.innerHTML;
+          btn.disabled = true;
+          btn.innerHTML = `<span class="spinner dark"></span> Preparing…`;
+          try {
+            // The SAME parameters loadLogs sends, minus the pagination: the file is the
+            // filtered set, not the page of it.
+            const qp = filterParams();
+            qp.set("format", fmt);
+            const got = await download(`/v1/admin/moderation-logs/export?${qp.toString()}`,
+                                       `moderation-logs.${fmt}`);
+            const n = Number(got.rows), all = Number(got.total);
+            render(n < all
+              ? `Downloaded ${got.name} — the first ${n.toLocaleString()} of `
+                + `${all.toLocaleString()} matching rows. Narrow the filters for the rest.`
+              : `Downloaded ${got.name} — ${n.toLocaleString()} rows.`, true);
+          } catch (e) {
+            if (e instanceof SessionExpired) return sessionEnded(e);
+            render("Export failed: " + e.message);
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = was;
+          }
+        });
         $("logs-clear-btn").addEventListener("click", async () => {
           if (!confirm("Are you sure you want to clear all moderation audit logs? This cannot be undone.")) return;
           try {
