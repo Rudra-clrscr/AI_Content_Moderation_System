@@ -12,6 +12,20 @@ res/
 # rollback - including the grievance.enabled: true path that settings.yaml documents against
 # models/v6 - is a local copy plus one line in settings.yaml, and `git log` still has the commits
 # they were tracked in.
+#
+# "STAY ON THE MACHINES THAT ALREADY HAVE THEM" IS NOT WHAT HAPPENS, and the sentence above
+# has been read that way twice. Dropping a bundle DELETES it from every machine that pulls the
+# commit, including the one that made the change: the files are still tracked at that point, so
+# checkout removes them, and a .gitignore entry only stops them being added back. models/v9
+# went this way the moment its own deploy was merged and pulled.
+#
+# It is recoverable, because the object is still in LFS history. From a commit that had it:
+#
+#     git checkout <commit-before-the-drop> -- flask_api/models/v9/
+#     git rm -r --cached flask_api/models/v9/      # keep it on disk, out of the index
+#
+# Verify the restore is the model and not a 130-byte pointer before trusting it. If you want a
+# rollback that does not depend on this repo, copy the directory somewhere outside it first.
 flask_api/models/v5/
 flask_api/models/v6/
 flask_api/models/v8/
