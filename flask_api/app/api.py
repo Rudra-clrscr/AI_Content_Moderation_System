@@ -605,8 +605,16 @@ def set_moderation_level(content_type: str):
     if unknown:
         return _error(400, "invalid_request", f"unknown fields {sorted(unknown)}; "
                                               f"expected any of {sorted(known)}")
+    # A SURFACE THAT DOES NOT EXIST IS A 404, not a 400: the difference is "there is no such
+    # page" against "that value is wrong", and an admin who typed `articles` needs the first.
+    # Checked before set_feature so the two cases keep distinct codes.
+    levels = _svc().levels
+    if content_type not in levels.known_surfaces():
+        return _error(404, "no_such_surface",
+                      f"no such surface {content_type!r}; expected one of "
+                      f"{', '.join(sorted(levels.known_surfaces()))}")
     try:
-        policy = _svc().levels.set_feature(
+        policy = levels.set_feature(
             content_type, enabled=body.get("enabled"), level=body.get("level"),
             reject_min=body.get("reject_min"), allow_max=body.get("allow_max"))
     except (ValueError, TypeError) as exc:
@@ -615,6 +623,30 @@ def set_moderation_level(content_type: str):
     remember(content_type, body)           # saved, so a restart keeps it
     log.warning("moderation level changed by admin: %s -> %s", content_type, policy.as_dict())
     return jsonify({"content_type": content_type, **policy.as_dict()}), 200
+
+
+@bp.delete("/v1/admin/moderation-levels/<content_type>")
+def clear_moderation_level(content_type: str):
+    """Drop one surface's override so it follows the default again.
+
+    Not the same as setting it back to whatever the default happens to be: that freezes a copy
+    which stops tracking a later change to the default. An admin undoing an experiment means
+    "follow the default", and until this existed the only way to express it was to guess the
+    default's current value and type it in.
+    """
+    denied = _require_admin()
+    if denied:
+        return denied
+    try:
+        cleared = _svc().levels.clear_feature(content_type)
+    except ValueError as exc:
+        return _error(404, "no_such_surface", str(exc))
+    from app.admin_auth import forget
+    forget(content_type)                   # so a restart does not bring it back
+    log.warning("moderation level cleared by admin: %s", content_type)
+    return jsonify({"content_type": content_type, "cleared": True,
+                    "had_override": cleared,
+                    **_svc().levels.for_type(content_type).as_dict()}), 200
 
 
 @bp.post("/v1/admin/model/reload")
