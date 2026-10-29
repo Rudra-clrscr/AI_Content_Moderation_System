@@ -164,3 +164,60 @@ def test_a_blocklist_that_cannot_be_read_does_not_take_the_service_down(client, 
     monkeypatch.setattr(store, "blocked_entry",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db gone")))
     assert post(client).status_code == 200
+
+
+# ---- noticing the one configuration mistake that matters -----------------------------
+# A proxy goes in front and trust_proxy_hops is left at 0. Nothing fails: every audit row
+# just records the proxy instead of the author, the log fills with one address, and it is
+# noticed when somebody tries to block a member and refuses the whole site.
+
+def test_a_forwarded_request_with_no_configured_proxy_is_reported(client, caplog):
+    import app.api as api
+    api._FORWARDED_WARNED = False
+    with caplog.at_level("WARNING"):
+        post(client, **{"X-Forwarded-For": "203.0.113.9"})
+    said = [r for r in caplog.records if "trust_proxy_hops" in str(r.msg)]
+    assert said, "a proxy in front with hops at 0 must be reported"
+    # The message has to name the header it saw and the address it is recording instead,
+    # or it is a warning the reader cannot act on.
+    assert "203.0.113.9" in said[0].getMessage()
+    assert "203.0.113.7" in said[0].getMessage()
+
+
+def test_it_is_said_once_and_not_on_every_request(client, caplog):
+    """This runs on every request; an operator who has read it does not need it again."""
+    import app.api as api
+    api._FORWARDED_WARNED = False
+    with caplog.at_level("WARNING"):
+        for _ in range(4):
+            post(client, **{"X-Forwarded-For": "203.0.113.9"})
+    said = [r for r in caplog.records if "trust_proxy_hops" in str(r.msg)]
+    assert len(said) == 1
+
+
+def test_nothing_is_said_when_no_proxy_is_involved(client, caplog):
+    """The ordinary case. A warning on every direct request is noise that trains people to
+    ignore the one that matters."""
+    import app.api as api
+    api._FORWARDED_WARNED = False
+    with caplog.at_level("WARNING"):
+        post(client)
+    assert not [r for r in caplog.records if "trust_proxy_hops" in str(r.msg)]
+
+
+def test_nothing_is_said_when_the_proxy_is_configured(make_settings, tmp_path, caplog):
+    """hops set and a header arriving is the normal deployment, not a mistake."""
+    import app.api as api
+    from app.admin_store import AdminStore
+
+    settings = make_settings(result_sink="log", trust_proxy_hops=1)
+    store = AdminStore(path=tmp_path / "proxy.db")
+    c = create_app(settings, admin_store=store).test_client()
+    api._FORWARDED_WARNED = False
+    with caplog.at_level("WARNING"):
+        c.post("/v1/moderate", json={"content": "hello there", "content_type": "article"},
+               environ_base={"REMOTE_ADDR": "10.0.0.5"},
+               headers={"X-Forwarded-For": "203.0.113.9"})
+    assert not [r for r in caplog.records if "trust_proxy_hops" in str(r.msg)]
+    rows = store.get_moderation_logs(limit=1)["logs"]
+    assert rows[0]["client_ip"] == "203.0.113.9", "the author, not the proxy"
