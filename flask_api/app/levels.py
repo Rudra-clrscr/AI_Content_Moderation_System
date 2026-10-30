@@ -108,6 +108,16 @@ class ModerationLevels:
 
     # ---- reading ---------------------------------------------------------------------
 
+    @staticmethod
+    def known_surfaces() -> set[str]:
+        """The surfaces the pipeline actually judges.
+
+        Imported here rather than at module scope because app.pipeline imports this module;
+        the call is on admin paths and a file load, not on the request path.
+        """
+        from app.pipeline import ContentType
+        return {c.value for c in ContentType}
+
     def for_type(self, content_type: str) -> FeaturePolicy:
         return self._features.get(str(content_type), self._default)
 
@@ -132,6 +142,19 @@ class ModerationLevels:
                     level: str | None = None, reject_min: float | None = None,
                     allow_max: float | None = None) -> FeaturePolicy:
         """Change one surface. Returns the resulting policy; raises ValueError if invalid."""
+        # A TYPO MUST NOT LOOK SAVED. from_yaml has refused unknown surfaces since it was
+        # written - its comment spells out why: `articles` (the plural) sits in the table
+        # being consulted by nothing, because for_type is only ever called with a real
+        # ContentType, and /ready then reports it as a feature whose moderation is off.
+        #
+        # This path had no such check, so the dashboard could do over HTTP exactly what the
+        # file loader refuses from disk: PUT .../moderation-levels/articles answered 200, the
+        # screen showed the level saved, and every article went on being moderated at whatever
+        # it was before. The admin has no way to tell that from it having worked.
+        ct = str(content_type)
+        if ct not in self.known_surfaces():
+            raise ValueError(f"no such surface {ct!r}; expected one of "
+                             f"{', '.join(sorted(self.known_surfaces()))}")
         with self._lock:
             current = self._features.get(content_type, self._default)
             now_enabled = current.enabled if enabled is None else bool(enabled)
@@ -161,11 +184,27 @@ class ModerationLevels:
             self._features = {**self._features, content_type: policy}
             return policy
 
-    def clear_feature(self, content_type: str) -> None:
-        """Remove a per-feature override so it reverts to inheriting the default."""
+    def clear_feature(self, content_type: str) -> bool:
+        """Remove a per-feature override so it reverts to inheriting the default.
+
+        Not the same as setting it back to whatever the default currently is: that freezes a
+        copy which stops tracking a later change to the default. An admin undoing an
+        experiment means "follow the default", and this is the only way to say it.
+
+        True if an override was removed, False if there was none. Raises ValueError for a
+        surface that does not exist, so a typo is reported rather than answered cheerfully -
+        this used to return None either way, which made DELETE .../moderation-levels/articles
+        a 200 saying it had cleared something that was never there.
+        """
+        ct = str(content_type)
+        if ct not in self.known_surfaces():
+            raise ValueError(f"no such surface {ct!r}; expected one of "
+                             f"{', '.join(sorted(self.known_surfaces()))}")
         with self._lock:
-            if str(content_type) in self._features:
-                self._features = {k: v for k, v in self._features.items() if k != str(content_type)}
+            if ct not in self._features:
+                return False
+            self._features = {k: v for k, v in self._features.items() if k != ct}
+            return True
 
     # ---- loading ---------------------------------------------------------------------
 
