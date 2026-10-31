@@ -16,6 +16,38 @@ start because `media.video.enabled` is true.
 
 ---
 
+## This box is not empty
+
+An AI search service is already deployed on the target host, so **nothing here deletes or
+overwrites anything that is not ours.** Run the read-only survey first and read it:
+
+```bash
+bash deploy/preflight.sh      # writes nothing, installs nothing, starts nothing
+```
+
+The ways a second Python/ML service quietly breaks the first are all in that output: the same
+TCP port, the same systemd unit name, the same install directory, the same `/etc/gitconfig`,
+the same GPU. None of them announce themselves at install time — they show up as the *other*
+service failing.
+
+What `install.sh` now refuses rather than overwrites:
+
+| | behaviour |
+|---|---|
+| **Port 8000** | checked first; the script **exits** if anything is listening. `uvicorn`, `gunicorn` and `flask run` all default to 8000, so this is the likely clash. Re-run with `PORT=8010 GUNICORN_BIND=127.0.0.1:8010`. |
+| **`/etc/gitconfig`** | untouched. `git lfs install` runs for the service user only, never `--system`. |
+| **`$APP_DIR` ownership** | `chown` on the directory itself, never `-R`, and it **refuses** if the directory belongs to another user. |
+| **`bonc-api.service`** | if a unit of that name exists and differs, it is left alone and you are told to diff it. |
+| **Microsoft apt repo** | skipped entirely if the driver is already present; the keyring and sources file are never rewritten if they exist. |
+| **`$APP_DIR`** | refuses to run against `/`, `/opt`, `/srv`, `/usr`, `/etc`, `/var`, `/home`, `/root`. |
+
+What it *does* change outside `$APP_DIR`, deliberately: apt packages (`git-lfs`, `ffmpeg`,
+`libgl1`, `tmux`, `unixodbc`…), one systemd unit, and optionally Microsoft's apt source. Those
+are additive, but they are shared — if the search service pins a system library, check
+`preflight.sh` output before installing.
+
+---
+
 ## The failure to design against
 
 Miss the image-model step and **nothing tells you**. Measured on a host with
@@ -41,6 +73,76 @@ So the rule for this deployment is: **never conclude it worked from `status: "re
 
 That reads both models and exits non-zero if either is absent. `bonc-api.service` runs it as
 `ExecStartPre`, so a host missing the image model refuses to start rather than serving blind.
+
+---
+
+## The measured host (vmi3527693, Contabo, surveyed 2026-10-31)
+
+Ubuntu 24.04.5, **4 cores, 7.8 GB RAM, no swap**, 80 GB free, no GPU, Python 3.12.3.
+It is a shared staging box, not a dedicated ML server — it already runs
+`bonc-search-ai-staging`, `bonc-brochureiq-staging`, `bonc-video-api`, `bonc-video-sfu`,
+`fastapi`, `fastapi-staging`, nginx and coturn.
+
+```
+Mem:  7.8Gi total   4.7Gi used   3.1Gi available   Swap: 0B
+existing gunicorn RSS:  2.55 + 1.26 + 1.04 + 0.30  =  5.15 GB
+```
+
+| configuration | needs | left of 3.1 GB | |
+|---|---|---|---|
+| text model only | 0.81 GB | +2.29 | ok |
+| **both models, `VIDEO_CHECK=0`** | **1.47 GB** | **+1.63** | **ok — the chosen configuration** |
+| both models + Whisper | 2.47 GB | +0.63 | tight |
+| both models, 2 workers | 2.94 GB | +0.16 | will OOM |
+
+**One worker, video off.** Two workers do not fit, and neither does Whisper alongside both
+models. There is **no swap**, so there is no soft landing: a global out-of-memory event is
+resolved by the kernel killing whichever process scores worst, and that score tracks RSS —
+which on this box is the **2.5 GB AI search**. Deploying carelessly here does not degrade
+this service, it kills that one.
+
+`bonc-api.service` therefore sets `MemoryHigh=1536M`, `MemoryMax=2G` and
+`OOMScoreAdjust=500`: this service is throttled first, hard-capped second, and volunteered
+to the OOM killer ahead of everything that was here before it.
+
+### Video moderation is off, deliberately
+
+Only the text and image models are wanted for now, which is also the only configuration that
+fits. `VIDEO_CHECK=0` is set **in the systemd unit**, not left to `.env`, because forgetting it
+is expensive: `wsgi.py` warms Whisper in a background thread on startup, which downloads the
+model on first run and costs ~1 GB resident — taking the total to 2.47 GB against 3.1 GB
+available.
+
+It also means `ffmpeg` is **not installed**. It exists only so faster-whisper can decode
+audio, and adding a large system package to a box that is not ours, for a feature that never
+runs, is the kind of thing this deploy is trying to avoid. `apt-get install -y ffmpeg` if video
+is ever turned on.
+
+**One consequence to decide on.** With video off, an uploaded video follows
+`media.allow_unchecked_video`, which is `true` in `settings.yaml` — so **videos publish** with
+`checked: false` rather than being refused. That is the pre-existing behaviour and it is
+recorded honestly in the result, but on a moderation service it is worth a deliberate choice.
+Set `allow_unchecked_video: false` and an uploaded video is turned away with "video cannot be
+checked by this service" and told to attach a still or a PDF instead.
+
+### What this host already answers
+
+| | |
+|---|---|
+| ports 8000–8003 | **all taken** by existing gunicorn masters — use **8004** |
+| nginx on 80/443 | present, so **`trust_proxy_hops: 1`** is required, not optional |
+| ODBC Driver 18 | **already installed** — the Microsoft apt step is skipped entirely |
+| git-lfs | **not installed** — `install.sh` adds it (needed for the text model) |
+| `/opt/bonc` | free; `/opt` holds `bonc-Video`, `bonc-video`, a release dir and `microsoft` |
+| `bonc-api.service` | name is free |
+| GPU | none — CPU-only, which is what `requirements.txt` pins |
+
+With 4 cores shared across eight services, `OMP_NUM_THREADS=2` rather than 4.
+
+**The honest recommendation:** both models fit, but with ~1.6 GB of headroom on a box whose
+other tenants fluctuate. If image moderation matters in production, this wants its own
+instance or more RAM. Adding 2–4 GB of swap would not make it fast — ONNX inference that
+swaps is unusable — but it would turn a kill into a slowdown, which is the better failure.
 
 ---
 

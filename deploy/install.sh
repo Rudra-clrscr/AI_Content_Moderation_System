@@ -32,9 +32,35 @@ apt-get update -qq
 apt-get install -y --no-install-recommends \
     "${PY}" "${PY}-venv" "${PY}-dev" build-essential \
     git git-lfs ca-certificates curl gnupg tmux \
-    ffmpeg          `# faster-whisper decodes audio through it; media.video.enabled is true` \
     libgl1 libglib2.0-0   `# Pillow/opencv runtime for the image path on a headless box`
-git lfs install --system
+# NOT `git lfs install --system`: that rewrites /etc/gitconfig, which is shared with every
+# other repository and user on this box - including the AI search service already deployed
+# here. The filters are installed for the service user only, and again inside the repository
+# itself, which is all `git lfs pull` needs.
+sudo -u "$APP_USER" git lfs install --skip-repo 2>/dev/null || true
+
+# ffmpeg is deliberately NOT in that list. faster-whisper decodes audio through it, and video
+# moderation is off on this host (VIDEO_CHECK=0 in the unit), so installing it would add a
+# large system package to a box that is not ours for a feature that never runs. If video is
+# turned on later: apt-get install -y ffmpeg
+#
+# ---- 1a. do not take a port something else is already serving on --------------------
+# The AI search service on this box is the likely occupant of 8000: it is the default for
+# uvicorn, gunicorn and `flask run` alike. Two services cannot bind the same port, and the
+# loser is whichever restarts second - so this is checked before anything is installed rather
+# than discovered when the search goes down.
+PORT="${PORT:-8000}"
+if ss -ltn "sport = :$PORT" 2>/dev/null | grep -q LISTEN; then
+    echo
+    echo "PORT $PORT IS ALREADY IN USE on this host:"
+    ss -ltnp "sport = :$PORT" 2>/dev/null | sed 's/^/    /'
+    echo
+    echo "Pick a free one and re-run, e.g.:"
+    echo "    PORT=8010 GUNICORN_BIND=127.0.0.1:8010 bash deploy/install.sh"
+    echo "Set the same GUNICORN_BIND in $APP_DIR/flask_api/.env so the service keeps it."
+    exit 1
+fi
+echo "  port $PORT is free"
 
 # ---- 1b. ODBC driver for the SQL Server sink ----------------------------------------
 # settings.yaml has `result_sink: sql`, which writes every decision to SQL Server through
@@ -49,23 +75,54 @@ git lfs install --system
 # meant to write to SQL Server at all.
 if [ "${INSTALL_MSSQL_DRIVER:-1}" = "1" ]; then
     say "ODBC driver for SQL Server"
-    install -d -m 0755 /usr/share/keyrings
-    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-        | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
-    . /etc/os-release
-    echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] \
+    if odbcinst -q -d 2>/dev/null | grep -q "ODBC Driver 18"; then
+        echo "  already installed - leaving apt sources alone"
+    else
+        install -d -m 0755 /usr/share/keyrings
+        # Both of these are left alone if they already exist: adding a repository is the one
+        # step here that changes apt for every package on the box, and the search service
+        # shares that apt.
+        [ -f /usr/share/keyrings/microsoft-prod.gpg ] || \
+            curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+            | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+        . /etc/os-release
+        if [ -f /etc/apt/sources.list.d/mssql-release.list ]; then
+            echo "  microsoft apt source already present - not rewriting it"
+        else
+            echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] \
 https://packages.microsoft.com/ubuntu/${VERSION_ID}/prod ${VERSION_CODENAME} main" \
-        > /etc/apt/sources.list.d/mssql-release.list
-    apt-get update -qq
-    ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc
-    odbcinst -q -d | tr -d '[]' | sed 's/^/  registered driver: /'
+                > /etc/apt/sources.list.d/mssql-release.list
+        fi
+        apt-get update -qq
+        ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc
+    fi
+    odbcinst -q -d 2>/dev/null | tr -d '[]' | sed 's/^/  registered driver: /'
 fi
 
 # ---- 2. user and checkout -----------------------------------------------------------
 say "service user and directories"
+
+# THIS BOX IS NOT EMPTY. An AI search service is already deployed on it, so every step below
+# refuses rather than overwrites. Nothing outside $APP_DIR is modified except the apt package
+# set, the systemd unit, and (optionally) Microsoft's apt repository - each called out where
+# it happens.
+case "$APP_DIR" in
+    /|/usr|/etc|/var|/opt|/srv|/home|/root) echo "refusing to operate on $APP_DIR"; exit 1 ;;
+esac
+
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin "$APP_USER"
 mkdir -p "$APP_DIR"
-chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+
+# chown only what is ours. A recursive chown on a directory somebody else populated is how a
+# working service stops being able to read its own files, and it cannot be undone from here
+# because the previous ownership is already gone.
+owner="$(stat -c '%U' "$APP_DIR")"
+if [ "$owner" != "$APP_USER" ] && [ "$owner" != "root" ]; then
+    echo "  $APP_DIR is owned by '$owner', not $APP_USER - refusing to chown it."
+    echo "  Point APP_DIR somewhere else, or hand it over deliberately."
+    exit 1
+fi
+chown "$APP_USER:$APP_USER" "$APP_DIR"      # the directory itself, not -R
 
 if [ ! -d "$APP_DIR/.git" ]; then
     echo "No checkout at $APP_DIR. Clone it first, as $APP_USER:"
@@ -115,9 +172,16 @@ if [ ! -f "$APP_DIR/flask_api/.env" ]; then
 else
     chown "$APP_USER:$APP_USER" "$APP_DIR/flask_api/.env"
     chmod 600 "$APP_DIR/flask_api/.env"
-    install -m 644 "$APP_DIR/deploy/bonc-api.service" /etc/systemd/system/bonc-api.service
-    systemctl daemon-reload
-    systemctl enable bonc-api
+    unit=/etc/systemd/system/bonc-api.service
+    if [ -e "$unit" ] && ! cmp -s "$APP_DIR/deploy/bonc-api.service" "$unit"; then
+        echo "  $unit already exists and differs from ours."
+        echo "  Left untouched. Compare and copy it yourself if it is meant to be replaced:"
+        echo "      diff $unit $APP_DIR/deploy/bonc-api.service"
+    else
+        install -m 644 "$APP_DIR/deploy/bonc-api.service" "$unit"
+        systemctl daemon-reload
+        systemctl enable bonc-api
+    fi
     echo "  systemctl restart bonc-api    # when you are ready"
 fi
 
