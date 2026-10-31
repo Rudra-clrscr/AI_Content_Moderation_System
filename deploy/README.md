@@ -16,6 +16,38 @@ start because `media.video.enabled` is true.
 
 ---
 
+## This box is not empty
+
+An AI search service is already deployed on the target host, so **nothing here deletes or
+overwrites anything that is not ours.** Run the read-only survey first and read it:
+
+```bash
+bash deploy/preflight.sh      # writes nothing, installs nothing, starts nothing
+```
+
+The ways a second Python/ML service quietly breaks the first are all in that output: the same
+TCP port, the same systemd unit name, the same install directory, the same `/etc/gitconfig`,
+the same GPU. None of them announce themselves at install time — they show up as the *other*
+service failing.
+
+What `install.sh` now refuses rather than overwrites:
+
+| | behaviour |
+|---|---|
+| **Port 8000** | checked first; the script **exits** if anything is listening. `uvicorn`, `gunicorn` and `flask run` all default to 8000, so this is the likely clash. Re-run with `PORT=8010 GUNICORN_BIND=127.0.0.1:8010`. |
+| **`/etc/gitconfig`** | untouched. `git lfs install` runs for the service user only, never `--system`. |
+| **`$APP_DIR` ownership** | `chown` on the directory itself, never `-R`, and it **refuses** if the directory belongs to another user. |
+| **`bonc-api.service`** | if a unit of that name exists and differs, it is left alone and you are told to diff it. |
+| **Microsoft apt repo** | skipped entirely if the driver is already present; the keyring and sources file are never rewritten if they exist. |
+| **`$APP_DIR`** | refuses to run against `/`, `/opt`, `/srv`, `/usr`, `/etc`, `/var`, `/home`, `/root`. |
+
+What it *does* change outside `$APP_DIR`, deliberately: apt packages (`git-lfs`, `ffmpeg`,
+`libgl1`, `tmux`, `unixodbc`…), one systemd unit, and optionally Microsoft's apt source. Those
+are additive, but they are shared — if the search service pins a system library, check
+`preflight.sh` output before installing.
+
+---
+
 ## The failure to design against
 
 Miss the image-model step and **nothing tells you**. Measured on a host with
