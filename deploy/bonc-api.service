@@ -53,6 +53,16 @@ RestrictSUIDSGID=true
 # inference starves them. media.visual.intra_op_threads in settings.yaml covers the image side.
 Environment=OMP_NUM_THREADS=2
 
+# VIDEO MODERATION IS OFF on this host, and it is set here rather than left to .env because
+# forgetting it is expensive: wsgi.py warms Whisper in a background thread on startup, which
+# downloads the model on first run and costs about another 1 GB resident. Both models plus
+# Whisper is 2.47 GB against 3.1 GB available, which is where this box stops fitting.
+#
+# A video upload then follows media.allow_unchecked_video, which is `true` in settings.yaml -
+# so videos PUBLISH with checked: false rather than being refused. Set it to false if an
+# unwatched video should be turned away instead; the author is told to attach a still or a PDF.
+Environment=VIDEO_CHECK=0
+
 # ---- MEMORY: THIS SERVICE MUST DIE BEFORE ANYTHING ELSE DOES ----------------------------
 # Measured on the target host: 7.8 GB total, 4.7 GB already used by the services that were
 # there first, 3.1 GB available, and NO SWAP. Both models are 1.24 GB resident plus about

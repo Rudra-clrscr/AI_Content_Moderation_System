@@ -91,7 +91,7 @@ existing gunicorn RSS:  2.55 + 1.26 + 1.04 + 0.30  =  5.15 GB
 | configuration | needs | left of 3.1 GB | |
 |---|---|---|---|
 | text model only | 0.81 GB | +2.29 | ok |
-| **both models, `VIDEO_CHECK=0`** | **1.47 GB** | **+1.63** | **ok — this is the one** |
+| **both models, `VIDEO_CHECK=0`** | **1.47 GB** | **+1.63** | **ok — the chosen configuration** |
 | both models + Whisper | 2.47 GB | +0.63 | tight |
 | both models, 2 workers | 2.94 GB | +0.16 | will OOM |
 
@@ -104,6 +104,26 @@ this service, it kills that one.
 `bonc-api.service` therefore sets `MemoryHigh=1536M`, `MemoryMax=2G` and
 `OOMScoreAdjust=500`: this service is throttled first, hard-capped second, and volunteered
 to the OOM killer ahead of everything that was here before it.
+
+### Video moderation is off, deliberately
+
+Only the text and image models are wanted for now, which is also the only configuration that
+fits. `VIDEO_CHECK=0` is set **in the systemd unit**, not left to `.env`, because forgetting it
+is expensive: `wsgi.py` warms Whisper in a background thread on startup, which downloads the
+model on first run and costs ~1 GB resident — taking the total to 2.47 GB against 3.1 GB
+available.
+
+It also means `ffmpeg` is **not installed**. It exists only so faster-whisper can decode
+audio, and adding a large system package to a box that is not ours, for a feature that never
+runs, is the kind of thing this deploy is trying to avoid. `apt-get install -y ffmpeg` if video
+is ever turned on.
+
+**One consequence to decide on.** With video off, an uploaded video follows
+`media.allow_unchecked_video`, which is `true` in `settings.yaml` — so **videos publish** with
+`checked: false` rather than being refused. That is the pre-existing behaviour and it is
+recorded honestly in the result, but on a moderation service it is worth a deliberate choice.
+Set `allow_unchecked_video: false` and an uploaded video is turned away with "video cannot be
+checked by this service" and told to attach a still or a PDF instead.
 
 ### What this host already answers
 
