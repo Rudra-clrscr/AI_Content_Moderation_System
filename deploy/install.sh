@@ -39,10 +39,9 @@ apt-get install -y --no-install-recommends \
 # itself, which is all `git lfs pull` needs.
 sudo -u "$APP_USER" git lfs install --skip-repo 2>/dev/null || true
 
-# ffmpeg is deliberately NOT in that list. faster-whisper decodes audio through it, and video
-# moderation is off on this host (VIDEO_CHECK=0 in the unit), so installing it would add a
-# large system package to a box that is not ours for a feature that never runs. If video is
-# turned on later: apt-get install -y ffmpeg
+# No ffmpeg: it was only ever needed so faster-whisper could decode audio, and the
+# transcription path has been removed from the repository. One less system package on a box
+# that is not ours.
 #
 # ---- 1a. do not take a port something else is already serving on --------------------
 # The AI search service on this box is the likely occupant of 8000: it is the default for

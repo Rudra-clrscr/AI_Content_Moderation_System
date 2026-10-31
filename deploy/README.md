@@ -10,9 +10,12 @@ the whole reason this document exists.
 | `models/v9-ver3` | scores text | **git LFS** — comes with the clone | 371 MB |
 | `models/img_v1` | scores pictures | **fetched on the host** — only 4 small files are in git | 352 MB |
 
-Two supporting pieces are also not in git: the Devanagari OCR model
-(`scripts/fetch_ocr_langs.py devanagari`) and Whisper `small`, which downloads itself on first
-start because `media.video.enabled` is true.
+One supporting piece is also not in git: the Devanagari OCR model
+(`scripts/fetch_ocr_langs.py devanagari`).
+
+Video is not checked at all — the audio-transcription path and its Whisper dependency were
+removed from the repository, so there is nothing to download, size around or switch off. An
+uploaded video is decided by `media.allow_unchecked_video` in `settings.yaml`.
 
 ---
 
@@ -41,7 +44,7 @@ What `install.sh` now refuses rather than overwrites:
 | **Microsoft apt repo** | skipped entirely if the driver is already present; the keyring and sources file are never rewritten if they exist. |
 | **`$APP_DIR`** | refuses to run against `/`, `/opt`, `/srv`, `/usr`, `/etc`, `/var`, `/home`, `/root`. |
 
-What it *does* change outside `$APP_DIR`, deliberately: apt packages (`git-lfs`, `ffmpeg`,
+What it *does* change outside `$APP_DIR`, deliberately: apt packages (`git-lfs`,
 `libgl1`, `tmux`, `unixodbc`…), one systemd unit, and optionally Microsoft's apt source. Those
 are additive, but they are shared — if the search service pins a system library, check
 `preflight.sh` output before installing.
@@ -91,12 +94,10 @@ existing gunicorn RSS:  2.55 + 1.26 + 1.04 + 0.30  =  5.15 GB
 | configuration | needs | left of 3.1 GB | |
 |---|---|---|---|
 | text model only | 0.81 GB | +2.29 | ok |
-| **both models, `VIDEO_CHECK=0`** | **1.47 GB** | **+1.63** | **ok — the chosen configuration** |
-| both models + Whisper | 2.47 GB | +0.63 | tight |
+| **both models** | **1.47 GB** | **+1.63** | **ok — the chosen configuration** |
 | both models, 2 workers | 2.94 GB | +0.16 | will OOM |
 
-**One worker, video off.** Two workers do not fit, and neither does Whisper alongside both
-models. There is **no swap**, so there is no soft landing: a global out-of-memory event is
+**One worker.** Two workers do not fit. There is **no swap**, so there is no soft landing: a global out-of-memory event is
 resolved by the kernel killing whichever process scores worst, and that score tracks RSS —
 which on this box is the **2.5 GB AI search**. Deploying carelessly here does not degrade
 this service, it kills that one.
@@ -105,25 +106,17 @@ this service, it kills that one.
 `OOMScoreAdjust=500`: this service is throttled first, hard-capped second, and volunteered
 to the OOM killer ahead of everything that was here before it.
 
-### Video moderation is off, deliberately
+### Video is not checked
 
-Only the text and image models are wanted for now, which is also the only configuration that
-fits. `VIDEO_CHECK=0` is set **in the systemd unit**, not left to `.env`, because forgetting it
-is expensive: `wsgi.py` warms Whisper in a background thread on startup, which downloads the
-model on first run and costs ~1 GB resident — taking the total to 2.47 GB against 3.1 GB
-available.
+The audio-transcription path was removed from the repository along with `faster-whisper`, `av`
+and `imageio-ffmpeg`, so there is no Whisper model to download and no `ffmpeg` to install —
+which is one less system package on a box that is not ours.
 
-It also means `ffmpeg` is **not installed**. It exists only so faster-whisper can decode
-audio, and adding a large system package to a box that is not ours, for a feature that never
-runs, is the kind of thing this deploy is trying to avoid. `apt-get install -y ffmpeg` if video
-is ever turned on.
-
-**One consequence to decide on.** With video off, an uploaded video follows
-`media.allow_unchecked_video`, which is `true` in `settings.yaml` — so **videos publish** with
-`checked: false` rather than being refused. That is the pre-existing behaviour and it is
-recorded honestly in the result, but on a moderation service it is worth a deliberate choice.
-Set `allow_unchecked_video: false` and an uploaded video is turned away with "video cannot be
-checked by this service" and told to attach a still or a PDF instead.
+An uploaded video is decided by `media.allow_unchecked_video` in `settings.yaml`, the rule that
+predated the audio check. The shipped value is **`true`**, so **videos publish** and record
+`checked: false` — nothing reads the allow as "we looked at it". Set it to `false` and a video
+is turned away with "video cannot be checked by this service", and the author told to attach a
+still or a PDF instead. Worth choosing deliberately rather than inheriting.
 
 ### What this host already answers
 
@@ -159,11 +152,9 @@ image model models/img_v1     661 MB
 per worker                   ~1.24 GB   before Python, Flask and request buffers
 ```
 
-Whisper `small` is roughly another 1 GB on top, in whichever worker takes a video.
-
 | Contabo plan | workers | note |
 |---|---|---|
-| 4 GB | 1 | tight with video on; consider `VIDEO_CHECK=0` |
+| 4 GB | 1 | tight |
 | 8 GB | 2–3 | comfortable |
 | 16 GB | 6 | |
 
@@ -203,7 +194,7 @@ while SQL Server receives nothing. Skip it with `INSTALL_MSSQL_DRIVER=0`, and se
 
 `install.sh` is idempotent — re-run it after a `git pull` to pick up a new model or new
 dependencies. It installs system packages (including **git-lfs**, without which the text model
-is a 130-byte pointer, and **ffmpeg**, which faster-whisper decodes audio through), creates the
+is a 130-byte pointer), creates the
 venv, pulls LFS, fetches the image and OCR models, and verifies both models before installing
 the unit.
 
