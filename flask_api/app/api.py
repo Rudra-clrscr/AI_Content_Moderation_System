@@ -42,6 +42,37 @@ SUBMISSION_ENDPOINTS = {f"{bp.name}.{fn}" for fn in
                         ("moderate", "moderate_media", "transcribe_media_file")}
 
 
+_FORWARDED_WARNED = False
+
+
+def _warn_once_about_forwarded(hops: int, client: dict) -> None:
+    """Say so when requests arrive forwarded but nothing is configured to trust them.
+
+    This is the shape of the one configuration mistake that matters here: a proxy is put in
+    front and `trust_proxy_hops` is left at 0, so every audit row records the proxy's address
+    instead of the author's. Nothing fails - the log just quietly fills with one address, and
+    it is noticed when somebody tries to block a member and refuses the whole site.
+
+    Only the hops=0 direction is worth a warning. A header arriving with hops already set is
+    the normal case, and a header that never arrives while hops is set resolves to the socket
+    address anyway, which is the conservative answer rather than a wrong one.
+
+    Once per process, because this runs on every request and an operator who has read it once
+    does not need it on the next hundred thousand.
+    """
+    global _FORWARDED_WARNED
+    if _FORWARDED_WARNED or hops > 0 or not client.get("forwarded"):
+        return
+    _FORWARDED_WARNED = True
+    log.warning(
+        "requests are arriving with X-Forwarded-For (%s) but trust_proxy_hops is 0, so the "
+        "address recorded for every decision is %s - the proxy, not the author. Set "
+        "trust_proxy_hops in config/settings.yaml (or TRUST_PROXY_HOPS) to the number of "
+        "proxies in front of this service. Left as it is, the moderation log attributes "
+        "everything to one address and blocking it refuses everybody.",
+        client.get("forwarded"), client.get("ip") or "?")
+
+
 @bp.before_request
 def _resolve_client():
     """Work out who is calling, and turn them away if an operator has refused them.
@@ -51,6 +82,7 @@ def _resolve_client():
     """
     svc = current_app.extensions["moderation"]
     g.client = client_address.from_request(request, svc.settings.trust_proxy_hops)
+    _warn_once_about_forwarded(svc.settings.trust_proxy_hops, g.client)
     if request.endpoint not in SUBMISSION_ENDPOINTS:
         return None
     try:

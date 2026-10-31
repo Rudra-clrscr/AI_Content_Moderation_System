@@ -514,6 +514,32 @@ word_scan:                 # word-by-word analysis (see app/targeted.py WordScan
 
 demo_page: false           # true (or DEMO_PAGE=1) serves the browser demo at /demo
 
+trust_proxy_hops: 0        # HOW MANY PROXIES SIT IN FRONT OF THIS SERVICE (or TRUST_PROXY_HOPS).
+                           # 0 means none, and a caller's address is the socket's - the only
+                           # value that cannot be forged. Above 0, that many hops are stripped
+                           # from the RIGHT of X-Forwarded-For and the next entry is the caller,
+                           # because each proxy appends the address it heard from: the
+                           # right-hand end is what your own infrastructure observed and the
+                           # left-hand end is whatever the client typed.
+                           #
+                           # It is 0 here because nothing is in front today - wsgi.py is served
+                           # directly by waitress or gunicorn. SET IT THE DAY THAT CHANGES. With
+                           # nginx, IIS or Cloudflare in front and this left at 0, every audit
+                           # row records the proxy instead of the author, the whole moderation
+                           # log says one address, and blocking it refuses everybody.
+                           #
+                           # It is not sniffed, because a wrong guess is worse than none:
+                           # X-Forwarded-For is an ordinary request header, so with nothing
+                           # overwriting it the caller writes it themselves. Trusting it by
+                           # default would let an author keep their own address out of the audit
+                           # log and - with a Block button on that row - name a stranger's to be
+                           # refused instead. app/client_address.py does the resolving;
+                           # tests/test_client_address.py pins both directions of that attack.
+                           #
+                           # The service warns on startup-ish (once, in the log) if requests
+                           # arrive carrying X-Forwarded-For while this is 0, which is the
+                           # shape of exactly that mistake.
+
 result_sink: sql           # sql -> write to SQL Server (failures are logged, never fail the request)
                            # log -> JSON log lines only (dev / tests)
 
