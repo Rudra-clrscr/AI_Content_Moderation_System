@@ -1,0 +1,59 @@
+# BONC moderation API, as a systemd service on a Contabo VPS (Debian/Ubuntu).
+#
+#   sudo cp deploy/bonc-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now bonc-api
+#   journalctl -u bonc-api -f
+#
+# Paths assume the checkout is at /opt/bonc with the venv at /opt/bonc/.venv. Change User,
+# Group and the three paths if it lives elsewhere.
+
+[Unit]
+Description=BONC content moderation API
+Documentation=file:///opt/bonc/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=bonc
+Group=bonc
+WorkingDirectory=/opt/bonc/flask_api
+
+# Secrets (ADMIN_TOKEN, DB_*) live here, not in this unit file: systemd units are
+# world-readable and `systemctl show` prints Environment= lines back to any user.
+EnvironmentFile=/opt/bonc/flask_api/.env
+
+ExecStart=/opt/bonc/.venv/bin/gunicorn -c /opt/bonc/deploy/gunicorn.conf.py wsgi:app
+
+# BOTH MODELS OR NOTHING. Without this the service starts happily with the image model
+# missing - /ready still says "ready", and every picture publishes unexamined. See
+# scripts/check_deploy.py for why that is the failure worth blocking on.
+ExecStartPre=/opt/bonc/.venv/bin/python /opt/bonc/flask_api/scripts/check_deploy.py
+
+Restart=on-failure
+RestartSec=10
+# Loading 1.24 GB of ONNX from a cold VPS disk, plus the Whisper warm-up, is not quick.
+TimeoutStartSec=600
+TimeoutStopSec=90
+
+# Hardening. The service writes only to data/ (SQLite) and reads models/ and config/.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/bonc/flask_api/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+# onnxruntime spawns its own pool; left unbounded it opens one thread per core per session and
+# they fight each other. media.visual.intra_op_threads in settings.yaml covers the image side.
+Environment=OMP_NUM_THREADS=4
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bonc-api
+
+[Install]
+WantedBy=multi-user.target
