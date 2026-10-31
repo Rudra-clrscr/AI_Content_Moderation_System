@@ -48,8 +48,28 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 
 # onnxruntime spawns its own pool; left unbounded it opens one thread per core per session and
-# they fight each other. media.visual.intra_op_threads in settings.yaml covers the image side.
-Environment=OMP_NUM_THREADS=4
+# they fight each other. Two, not four: the measured host has 4 cores already shared with
+# nginx, coturn, a dotnet service and four other gunicorn masters, so taking every core for
+# inference starves them. media.visual.intra_op_threads in settings.yaml covers the image side.
+Environment=OMP_NUM_THREADS=2
+
+# ---- MEMORY: THIS SERVICE MUST DIE BEFORE ANYTHING ELSE DOES ----------------------------
+# Measured on the target host: 7.8 GB total, 4.7 GB already used by the services that were
+# there first, 3.1 GB available, and NO SWAP. Both models are 1.24 GB resident plus about
+# 0.25 GB of Python and gunicorn, so one worker fits in roughly 1.5 GB with headroom to
+# spare - but only just, and only at one worker.
+#
+# With no swap, a global out-of-memory event is resolved by the kernel killing whichever
+# process scores worst, and that score tracks RSS. The largest process on this box is the
+# 2.5 GB gunicorn belonging to the AI search. Without the three lines below, the first time
+# anything spikes, the kernel's answer would be to kill the SEARCH to make room for us.
+#
+#   MemoryHigh   reclaim pressure starts here - the service is throttled, not killed
+#   MemoryMax    hard ceiling: exceed it and only THIS service is killed
+#   OOMScoreAdj  and if the whole box runs out anyway, volunteer this service first
+MemoryHigh=1536M
+MemoryMax=2G
+OOMScoreAdjust=500
 
 StandardOutput=journal
 StandardError=journal

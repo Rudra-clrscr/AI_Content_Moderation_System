@@ -76,6 +76,56 @@ That reads both models and exits non-zero if either is absent. `bonc-api.service
 
 ---
 
+## The measured host (vmi3527693, Contabo, surveyed 2026-10-31)
+
+Ubuntu 24.04.5, **4 cores, 7.8 GB RAM, no swap**, 80 GB free, no GPU, Python 3.12.3.
+It is a shared staging box, not a dedicated ML server — it already runs
+`bonc-search-ai-staging`, `bonc-brochureiq-staging`, `bonc-video-api`, `bonc-video-sfu`,
+`fastapi`, `fastapi-staging`, nginx and coturn.
+
+```
+Mem:  7.8Gi total   4.7Gi used   3.1Gi available   Swap: 0B
+existing gunicorn RSS:  2.55 + 1.26 + 1.04 + 0.30  =  5.15 GB
+```
+
+| configuration | needs | left of 3.1 GB | |
+|---|---|---|---|
+| text model only | 0.81 GB | +2.29 | ok |
+| **both models, `VIDEO_CHECK=0`** | **1.47 GB** | **+1.63** | **ok — this is the one** |
+| both models + Whisper | 2.47 GB | +0.63 | tight |
+| both models, 2 workers | 2.94 GB | +0.16 | will OOM |
+
+**One worker, video off.** Two workers do not fit, and neither does Whisper alongside both
+models. There is **no swap**, so there is no soft landing: a global out-of-memory event is
+resolved by the kernel killing whichever process scores worst, and that score tracks RSS —
+which on this box is the **2.5 GB AI search**. Deploying carelessly here does not degrade
+this service, it kills that one.
+
+`bonc-api.service` therefore sets `MemoryHigh=1536M`, `MemoryMax=2G` and
+`OOMScoreAdjust=500`: this service is throttled first, hard-capped second, and volunteered
+to the OOM killer ahead of everything that was here before it.
+
+### What this host already answers
+
+| | |
+|---|---|
+| ports 8000–8003 | **all taken** by existing gunicorn masters — use **8004** |
+| nginx on 80/443 | present, so **`trust_proxy_hops: 1`** is required, not optional |
+| ODBC Driver 18 | **already installed** — the Microsoft apt step is skipped entirely |
+| git-lfs | **not installed** — `install.sh` adds it (needed for the text model) |
+| `/opt/bonc` | free; `/opt` holds `bonc-Video`, `bonc-video`, a release dir and `microsoft` |
+| `bonc-api.service` | name is free |
+| GPU | none — CPU-only, which is what `requirements.txt` pins |
+
+With 4 cores shared across eight services, `OMP_NUM_THREADS=2` rather than 4.
+
+**The honest recommendation:** both models fit, but with ~1.6 GB of headroom on a box whose
+other tenants fluctuate. If image moderation matters in production, this wants its own
+instance or more RAM. Adding 2–4 GB of swap would not make it fast — ONNX inference that
+swaps is unusable — but it would turn a kill into a slowdown, which is the better failure.
+
+---
+
 ## Sizing the VPS
 
 Measured resident memory, **per gunicorn worker** — each worker loads its own copy
