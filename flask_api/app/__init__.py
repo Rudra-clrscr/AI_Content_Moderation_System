@@ -54,9 +54,7 @@ def create_app(
     # bytes; UTF-8 worst case + JSON overhead, or a PDF upload plus its multipart envelope.
     json_limit = settings.max_chars * 4 + 4096
     app.config["MAX_CONTENT_LENGTH"] = max(json_limit, settings.pdf.max_bytes + 8192,
-                                           settings.media.max_bytes + 8192,
-                                           (settings.video.config.max_bytes + 8192)
-                                           if settings.video.enabled else 0) \
+                                           settings.media.max_bytes + 8192) \
         if settings.pdf.enabled else json_limit
 
     models = ModelRegistry()
