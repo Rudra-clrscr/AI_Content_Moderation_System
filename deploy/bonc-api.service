@@ -33,7 +33,7 @@ ExecStartPre=/opt/bonc/.venv/bin/python /opt/bonc/flask_api/scripts/check_deploy
 
 Restart=on-failure
 RestartSec=10
-# Loading 1.24 GB of ONNX from a cold VPS disk, plus the Whisper warm-up, is not quick.
+# Loading 1.24 GB of ONNX from a cold VPS disk is not quick.
 TimeoutStartSec=600
 TimeoutStopSec=90
 
@@ -53,21 +53,12 @@ RestrictSUIDSGID=true
 # inference starves them. media.visual.intra_op_threads in settings.yaml covers the image side.
 Environment=OMP_NUM_THREADS=2
 
-# VIDEO MODERATION IS OFF on this host, and it is set here rather than left to .env because
-# forgetting it is expensive: wsgi.py warms Whisper in a background thread on startup, which
-# downloads the model on first run and costs about another 1 GB resident. Both models plus
-# Whisper is 2.47 GB against 3.1 GB available, which is where this box stops fitting.
-#
-# A video upload then follows media.allow_unchecked_video, which is `true` in settings.yaml -
-# so videos PUBLISH with checked: false rather than being refused. Set it to false if an
-# unwatched video should be turned away instead; the author is told to attach a still or a PDF.
-Environment=VIDEO_CHECK=0
-
 # ---- MEMORY: THIS SERVICE MUST DIE BEFORE ANYTHING ELSE DOES ----------------------------
 # Measured on the target host: 7.8 GB total, 4.7 GB already used by the services that were
 # there first, 3.1 GB available, and NO SWAP. Both models are 1.24 GB resident plus about
 # 0.25 GB of Python and gunicorn, so one worker fits in roughly 1.5 GB with headroom to
-# spare - but only just, and only at one worker.
+# spare - but only just, and only at one worker. Video is not checked at all since the
+# transcription path was removed, so there is no Whisper model on top of this any more.
 #
 # With no swap, a global out-of-memory event is resolved by the kernel killing whichever
 # process scores worst, and that score tracks RSS. The largest process on this box is the
