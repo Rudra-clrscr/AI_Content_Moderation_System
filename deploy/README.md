@@ -78,11 +78,26 @@ build first — they provide the same module and must not be installed together.
 
 ## Install
 
+Tested against **Ubuntu 24.04 LTS** (`python3` there is 3.12, which is what this was
+developed and tested on).
+
 ```bash
-# as a user with sudo, on a fresh Debian 12 / Ubuntu 22.04 box
-sudo -u bonc git clone <repo-url> /opt/bonc     # create the user first if cloning by hand
-sudo bash /opt/bonc/deploy/install.sh
+tmux new -s bonc                                # the install is long; SSH drops kill it
+git clone <repo-url> /opt/bonc
+bash /opt/bonc/deploy/install.sh
 ```
+
+Run it under `tmux`. It downloads ~400 MB of models and builds a virtualenv; a dropped session
+leaves a half-built venv and a half-populated `models/` directory, neither of which announces
+itself. Reattach with `tmux attach -t bonc`.
+
+**The SQL Server driver.** `result_sink: sql` writes every decision through `pyodbc` using
+"ODBC Driver 18 for SQL Server", which Ubuntu does not carry. The script adds Microsoft's
+repository and installs it. Without it nothing fails loudly: `sinks.FailSafeSink` catches the
+error so storage can never refuse a member's post, so requests succeed, the dashboard's own
+SQLite audit log still fills, and the only sign is one `db_write_failed` line per decision
+while SQL Server receives nothing. Skip it with `INSTALL_MSSQL_DRIVER=0`, and set
+`RESULT_SINK=log` in `.env` if this host is not meant to write to SQL Server at all.
 
 `install.sh` is idempotent — re-run it after a `git pull` to pick up a new model or new
 dependencies. It installs system packages (including **git-lfs**, without which the text model

@@ -3,6 +3,16 @@
 #
 #     sudo bash deploy/install.sh
 #
+# RUN IT UNDER tmux. It downloads ~400 MB of models and builds a virtualenv, which takes long
+# enough that a dropped SSH session kills it half-done - leaving a venv with some packages and
+# a models directory with some models, neither of which announces itself:
+#
+#     tmux new -s bonc            # then run this; reattach later with `tmux attach -t bonc`
+#
+# Tested against Ubuntu 24.04 LTS (python3.12), which is what `python3` is there. The venv
+# matters on 24.04 for a second reason: PEP 668 makes a system-wide `pip install` fail with
+# externally-managed-environment, so everything goes in .venv.
+#
 # Idempotent: safe to re-run after a `git pull` to pick up a new model or new dependencies.
 # It does NOT write .env and does not touch an existing one - secrets are yours to place.
 set -euo pipefail
@@ -21,10 +31,35 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y --no-install-recommends \
     "${PY}" "${PY}-venv" "${PY}-dev" build-essential \
-    git git-lfs ca-certificates curl \
+    git git-lfs ca-certificates curl gnupg tmux \
     ffmpeg          `# faster-whisper decodes audio through it; media.video.enabled is true` \
     libgl1 libglib2.0-0   `# Pillow/opencv runtime for the image path on a headless box`
 git lfs install --system
+
+# ---- 1b. ODBC driver for the SQL Server sink ----------------------------------------
+# settings.yaml has `result_sink: sql`, which writes every decision to SQL Server through
+# pyodbc with "ODBC Driver 18 for SQL Server". Ubuntu does not carry that driver.
+#
+# WITHOUT IT NOTHING FAILS LOUDLY. sinks.FailSafeSink catches the error so a storage problem
+# can never refuse a member's post: the request succeeds, the dashboard's own SQLite audit log
+# still fills up, and the only sign is a `db_write_failed` line per decision. The moderation
+# log looks healthy while SQL Server receives nothing.
+#
+# Set INSTALL_MSSQL_DRIVER=0 to skip this, and RESULT_SINK=log in .env if this host is not
+# meant to write to SQL Server at all.
+if [ "${INSTALL_MSSQL_DRIVER:-1}" = "1" ]; then
+    say "ODBC driver for SQL Server"
+    install -d -m 0755 /usr/share/keyrings
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+        | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+    . /etc/os-release
+    echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] \
+https://packages.microsoft.com/ubuntu/${VERSION_ID}/prod ${VERSION_CODENAME} main" \
+        > /etc/apt/sources.list.d/mssql-release.list
+    apt-get update -qq
+    ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc
+    odbcinst -q -d | tr -d '[]' | sed 's/^/  registered driver: /'
+fi
 
 # ---- 2. user and checkout -----------------------------------------------------------
 say "service user and directories"
