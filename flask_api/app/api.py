@@ -11,7 +11,6 @@ from werkzeug.exceptions import HTTPException
 from app import client_address
 from app.gate import GateMatch, GateResult
 from app.media import MediaError, detect_kind, read_image
-from app.video import VideoFailed, VideoUnavailable
 from app.model import ModelNotReady
 from app.pdf import PdfError
 from app.pdf import extract as pdf_extract
@@ -206,9 +205,9 @@ def moderate_media():
         scores the picture itself against `config/visual_policy.yaml`, which catches a weapon
         or gore photograph carrying no words at all. With the visual check off or its model
         missing, the result says `visual_content_checked: false` and behaves as it used to.
-      * **Video** — its audio is transcribed to English and judged like typed text, at the
-        admin's level for the surface (see app/video.py); the pictures are not examined. If the
-        audio check is unavailable, `media.allow_unchecked_video` decides, as it always did.
+      * **Video** — not checked. The audio-transcription path was removed along with its
+        Whisper dependency, so `media.allow_unchecked_video` decides: refuse it, or publish it
+        and record `checked: false` so nothing reads the allow as "we looked at it".
 
     `/v1/moderate/pdf` is the original path and still works; it accepts the other kinds too.
     """
@@ -227,8 +226,7 @@ def moderate_media():
         return _error(400, "invalid_content_type", "unknown 'content_type'", allowed=_CONTENT_TYPES)
     content_id = request.form.get("content_id") or None
 
-    cap = max(pdf_limits.max_bytes, media.max_bytes,
-              svc.settings.video.config.max_bytes if svc.settings.video.enabled else 0)
+    cap = max(pdf_limits.max_bytes, media.max_bytes)
     data = upload.read(cap + 1)
     if len(data) > cap:
         return _error(413, "media_too_large", f"the file is larger than {cap} bytes", limit=cap)
@@ -322,10 +320,11 @@ def moderate_media():
             return jsonify({**_allowed_without_text(upload.filename, content_type, content_id), **extra}), 200
 
     elif kind == "video":
-        if svc.settings.video.enabled:
-            return _moderate_video(svc, data, upload.filename, content_type, content_id, block)
-        # The audio check is switched off (or not installed): video is handled exactly as it
-        # always was, by media.allow_unchecked_video.
+        # NOTHING LISTENS TO A VIDEO ANY MORE. The audio check and its Whisper dependency were
+        # removed; what is left is the rule that predated them, media.allow_unchecked_video -
+        # publish it and say plainly that it was not checked, or refuse it. The code default
+        # is to refuse, because accepting an unchecked video is a policy choice and not a
+        # sensible default for a moderation service.
         if not media.allow_unchecked_video:
             return _error(422, "media_not_checkable",
                           "video cannot be checked by this service, so it cannot be published. "
@@ -359,78 +358,6 @@ def moderate_media():
         thresholds = Thresholds(allow_max=media.ocr_text_reject_min,
                                 reject_min=media.ocr_text_reject_min)
     return _moderate(ModerationRequest(text, content_type, content_id), extra, thresholds)
-
-
-def _moderate_video(svc, data: bytes, filename: str, content_type: ContentType,
-                    content_id: str | None, block: dict):
-    """Listen to a video, then judge what was said exactly as if it had been typed.
-
-    The speech becomes English text (app/video.py) and goes through `_moderate`, so the gate,
-    the DeBERTa model, the sink and - above all - the admin's setting for this surface all
-    apply with no second code path: ON/OFF, and the lenient/medium/strict bar. Anything other
-    than `allow` is not published, which is also what the front end enforces.
-
-    The pictures are NOT examined, and every branch says so (`visual_content_checked: false`).
-    """
-    media = svc.settings.media
-    video = svc.settings.video
-    block.update(audio_checked=False, visual_content_checked=False)
-
-    # Admin OFF for this surface: nothing is listened to and nothing is judged. `_moderate`
-    # records it as published-unmoderated (`decided_by: disabled`), never as clean. Skipping the
-    # listening here also saves the CPU a transcription would have cost.
-    if not svc.levels.for_type(content_type.value).enabled:
-        block.update(checked=False, moderation_enabled=False)
-        return _moderate(ModerationRequest(f"[{filename}]", content_type, content_id), {"media": block})
-
-    if len(data) > video.config.max_bytes:
-        return _error(413, "media_too_large", f"the video is larger than {video.config.max_bytes} bytes",
-                      limit=video.config.max_bytes)
-    try:
-        speech = video.check(data)
-    except VideoUnavailable:
-        # The check cannot run on this machine at all: fall back to the pre-existing policy
-        # rather than closing the Videos tab. The record says checked: false.
-        if not media.allow_unchecked_video:
-            return _error(422, "media_not_checkable",
-                          "video cannot be checked by this service, so it cannot be published. "
-                          "Upload a still image or a PDF instead.", kind="video")
-        block.update(text_found=False, checked=False)
-        return jsonify({**_allowed_without_text(filename, content_type, content_id), "media": block}), 200
-    except MediaError as exc:
-        status = 413 if exc.code in ("media_too_large", "media_too_long") else 422
-        return _error(status, exc.code, exc.message, **exc.extra)
-    except VideoFailed:
-        # It was listening and it broke. Refused, because publishing a video nobody listened to
-        # is the hole this closes - and the author did nothing wrong, so offer a retry.
-        return _error(503, "media_not_checkable",
-                      "this video could not be checked just now. Please try again in a moment.",
-                      kind="video")
-
-    block.update(speech.as_dict(), audio_checked=True, checked=True,
-                 text_found=speech.has_speech, text_readable=True)
-    if not speech.has_speech:
-        # No audio track, or no speech in it: nothing was said, so nothing is harmful in what
-        # was said. Allowed, and recorded like any other upload with no text to judge.
-        return jsonify({**_allowed_without_text(filename, content_type, content_id), "media": block}), 200
-    if speech.translated and speech.source_text:
-        # The English is a TRANSLATION, and a translation launders abuse: Whisper turns a Hindi
-        # curse into something clean, and the text model is English-centric anyway. The gate has
-        # Hindi and Hinglish rules (Devanagari and Roman script), so it reads the words as they
-        # were SPOKEN as well. Only a block-level match refuses here; everything else still goes
-        # to the model below, on the English.
-        source = ModerationRequest(speech.source_text, content_type, content_id)
-        gate, gate_ms = svc.pipeline.run_gate(source)
-        if gate.blocked:
-            policy = svc.levels.for_type(content_type.value)
-            result = {**svc.pipeline.gate_only_result(source, gate, gate_ms), "moderation": policy.as_dict()}
-            _emit(result)
-            return jsonify({**result, "media": block}), 200
-    limit = svc.settings.pdf.max_chars
-    if len(speech.text) > limit:
-        return _error(413, "content_too_long",
-                      f"the video's speech is {len(speech.text)} characters, over the {limit} character limit")
-    return _moderate(ModerationRequest(speech.text, content_type, content_id), {"media": block})
 
 
 def _visual_reject(filename: str, looked, content_type: ContentType,
@@ -555,7 +482,6 @@ def ready():
         # this here rather than infer it from a published result - the visual check turns
         # itself off when its model is missing, and that is exactly when you want to know.
         "visual": svc.settings.visual.status,
-        "video": svc.settings.video.status,
         # Which surfaces are currently unmoderated. An operator should be able to read that
         # from outside rather than infer it from what gets published.
         "moderation_disabled_for": svc.levels.disabled_features(),
@@ -668,115 +594,4 @@ def reload_model():
     except Exception as exc:
         return _error(500, "reload_failed", f"{type(exc).__name__}: {exc}", active_version=previous)
     return jsonify({"status": "reloaded", "previous_version": previous, "model_version": svc.models.version}), 200
-
-
-_transcription_pipelines = {}
-
-
-def _get_transcription_pipeline(model_size: str, device: str = "auto"):
-    from pipeline.config import PipelineConfig
-    from pipeline.orchestrator import VideoTranscriptionPipeline
-    key = (model_size, device)
-    if key not in _transcription_pipelines:
-        cfg = PipelineConfig(
-            model_size=model_size,
-            device=device,
-            output_formats=set(),
-            word_timestamps=True,
-            keep_extracted_audio=False,
-            condition_on_previous_text=False,
-        )
-        _transcription_pipelines[key] = VideoTranscriptionPipeline(config=cfg)
-    return _transcription_pipelines[key]
-
-
-@bp.post("/v1/media/transcribe")
-def transcribe_media_file():
-    """Transcribes an uploaded video file using the offline Faster-Whisper pipeline.
-    Returns detected language, full transcript, word/sentence segments, and exportable formats (txt, srt, vtt, json).
-    """
-    upload = request.files.get("file")
-    if upload is None:
-        return _error(400, "missing_file", "multipart field 'file' is required")
-
-    filename = upload.filename or "video.mp4"
-    data = upload.read()
-    if not data:
-        return _error(400, "empty_file", "uploaded file is empty")
-
-    import os
-    import sys
-    import tempfile
-    from pathlib import Path
-
-    # Ensure pipeline package is importable
-    root_dir = Path(__file__).resolve().parents[2]
-    if str(root_dir) not in sys.path:
-        sys.path.insert(0, str(root_dir))
-
-    try:
-        from pipeline.config import PipelineConfig
-        from pipeline.orchestrator import VideoTranscriptionPipeline
-        from pipeline.stages.ingestion import IngestionError, NoAudioStreamError
-    except ImportError as exc:
-        return _error(500, "transcription_unavailable", f"Pipeline import error: {exc}")
-
-    suffix = Path(filename).suffix or ".mp4"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(data)
-        tmp_path = Path(tmp.name)
-
-    try:
-        model_size = "small"
-        try:
-            model_size = _svc().settings.video.config.model_size
-        except Exception:
-            pass
-
-        pipeline = _get_transcription_pipeline(model_size)
-        result = pipeline.process(tmp_path)
-
-        sink = pipeline.sink_stage
-        txt_content = sink.to_txt(result.full_text, result.segments)
-        srt_content = sink.to_srt(result.segments)
-        vtt_content = sink.to_vtt(result.segments)
-        json_content = sink.to_json(result)
-
-        return jsonify({
-            "status": "ok",
-            "filename": filename,
-            "detected_language": result.detected_language,
-            "language_probability": round(result.language_probability, 4),
-            "processing_time_seconds": round(result.processing_time_seconds, 2),
-            "total_words": result.total_words,
-            "full_text": result.full_text,
-            "segments": [
-                {
-                    "id": s.id,
-                    "start": round(s.start, 3),
-                    "end": round(s.end, 3),
-                    "text": s.text,
-                    "time_range": s.formatted_time_range,
-                }
-                for s in result.segments
-            ],
-            "formats": {
-                "txt": txt_content,
-                "srt": srt_content,
-                "vtt": vtt_content,
-                "json": json_content,
-            }
-        }), 200
-
-    except NoAudioStreamError:
-        return _error(422, "no_audio_stream", "The uploaded video does not contain an audio stream to transcribe.")
-    except Exception as exc:
-        log.exception("Transcription failed: %s", exc)
-        return _error(500, "transcription_failed", str(exc))
-    finally:
-        try:
-            if tmp_path.exists():
-                tmp_path.unlink()
-        except OSError:
-            pass
 

@@ -32,13 +32,6 @@ pypdfium2>=4.30            # renders a page to pixels; handles CCITT/JBIG2 scans
 # own right and must not break if the OCR stack is ever dropped or swapped.
 pillow>=10.0
 
-# Video moderation (app/video.py): the audio is extracted and transcribed to English text, which the
-# ordinary text pipeline then judges. Optional: without these the service still starts, and a video
-# falls back to media.allow_unchecked_video exactly as it did before. The Whisper model itself
-# (settings.yaml media.video.model_size) downloads on first start.
-faster-whisper>=1.2.0
-av>=11.0.0,<14.0.0
-imageio-ffmpeg>=0.6.0
 
 # Excel export of the moderation audit log (app/log_export.py). It arrived transitively
 # through pandas; declared here because the dashboard's Export button needs it in its own
