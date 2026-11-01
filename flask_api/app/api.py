@@ -497,6 +497,39 @@ def articles_page(name: str = "index.html"):
     return send_from_directory(_ARTICLES_DIR, name)
 
 
+# The spec is documentation, so it lives in docs/ beside API_REFERENCE.md rather than being
+# copied in here - two copies of an endpoint list drift, and the stale one is always the one
+# somebody tests against. A deploy that ships flask_api/ alone therefore has no spec, which is
+# why the handler below says so plainly instead of returning Flask's 404 page.
+_SPEC_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
+
+
+@bp.get("/openapi.yaml")
+def openapi_spec():
+    """The OpenAPI document. Served by default; API_DOCS=0 turns it off."""
+    if not _svc().settings.api_docs:
+        return _error(404, "not_found", "API docs are turned off (API_DOCS=0)")
+    if not (_SPEC_DIR / "openapi.yaml").exists():
+        return _error(404, "not_found",
+                      f"no spec at {_SPEC_DIR / 'openapi.yaml'}; it ships in the repository's "
+                      "docs/ directory, which a flask_api-only deployment does not carry")
+    return send_from_directory(_SPEC_DIR, "openapi.yaml", mimetype="application/yaml")
+
+
+@bp.get("/docs")
+def api_docs():
+    """Swagger UI, served from this app so "Try it out" is a SAME-ORIGIN request.
+
+    This service sends no CORS headers, and adding them to reach a Swagger UI hosted
+    somewhere else would mean relaxing the browser's protection on every endpoint - on the
+    unauthenticated submission endpoints too - for the sake of a developer convenience.
+    Serving the page from here costs one route and leaves that boundary alone.
+    """
+    if not _svc().settings.api_docs:
+        return _error(404, "not_found", "API docs are turned off (API_DOCS=0)")
+    return send_from_directory(Path(__file__).parent / "static", "docs.html")
+
+
 @bp.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200

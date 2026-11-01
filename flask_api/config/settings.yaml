@@ -514,6 +514,13 @@ word_scan:                 # word-by-word analysis (see app/targeted.py WordScan
 
 demo_page: false           # true (or DEMO_PAGE=1) serves the browser demo at /demo
 
+api_docs: true             # serves GET /docs (Swagger UI) and GET /openapi.yaml. On, unlike
+                           # demo_page: these describe the contract integrators code against,
+                           # and a running instance is the one copy that cannot be stale. They
+                           # publish the shape of the endpoints, no data and no credentials.
+                           # Set false (or API_DOCS=0) where the endpoint list itself is not
+                           # meant to be public - an instance reachable from the internet.
+
 trust_proxy_hops: 0        # HOW MANY PROXIES SIT IN FRONT OF THIS SERVICE (or TRUST_PROXY_HOPS).
                            # 0 means none, and a caller's address is the socket's - the only
                            # value that cannot be forged. Above 0, that many hops are stripped

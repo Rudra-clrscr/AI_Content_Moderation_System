@@ -342,6 +342,8 @@ every demo sentence against the decision the demo guide promises.
 | POST | `/v1/moderate/pdf` | The original path for the above; still works and accepts every kind. |
 | GET | `/v1/moderate/<request_id>` | Looks up a result (async mode only). |
 | GET | `/demo` | Browser demo UI. Only served when `DEMO_PAGE=1`. |
+| GET | `/docs` | Swagger UI, served from this app's own origin so "Try it out" needs no CORS. On by default; `API_DOCS=0` turns it off. |
+| GET | `/openapi.yaml` | The OpenAPI document, read from the repository's `docs/`. On by default; `API_DOCS=0` turns it off. |
 | GET | `/health` | Liveness check. |
 | GET | `/ready` | Readiness check. Returns `503` if no model is loaded in sync mode. |
 | POST | `/v1/admin/model/reload` | Hot-swaps the model. Needs the `X-Admin-Token` header and the `ADMIN_TOKEN` env var. |

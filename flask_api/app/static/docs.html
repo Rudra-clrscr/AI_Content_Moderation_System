@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BONC Moderation API</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui.min.css">
+<style>
+  body { margin: 0; background: #fafafa; }
+  .topbar { display: none; }           /* the URL bar invites loading someone else's spec */
+  .bonc-note {
+    font: 14px/1.5 system-ui, sans-serif; background: #fff8e1; border-bottom: 1px solid #ffe082;
+    padding: 10px 16px; color: #5d4037;
+  }
+  .bonc-note code { background: #fff; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="bonc-note">
+  Served from the API's own origin, so "Try it out" works without CORS.
+  Admin endpoints need <strong>Authorize &rarr; AdminToken</strong> (the <code>ADMIN_TOKEN</code> value).
+  Check <code>GET /ready</code> first &mdash; if the model did not load, moderation answers 503.
+</div>
+<div id="swagger-ui"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui-bundle.min.js"></script>
+<script>
+  // Relative URL on purpose: whatever host and port this page was served from is the host
+  // the requests go to, so a tunnel or a non-default port needs no edit here.
+  window.ui = SwaggerUIBundle({
+    url: "openapi.yaml",
+    dom_id: "#swagger-ui",
+    deepLinking: true,
+    displayRequestDuration: true,     // this API reports its own latency; show the wire time too
+    tryItOutEnabled: true,
+    filter: true,                     // 48 operations is more than fits on a screen
+    defaultModelsExpandDepth: 0,      // schemas are reference material, not the first thing to read
+    presets: [SwaggerUIBundle.presets.apis],
+  });
+</script>
+</body>
+</html>
