@@ -142,3 +142,18 @@ POST /v1/moderate  {"content": text, "content_type": "article"}
 
 The distribution in section 3 is the same endpoint with `decision=allow`, paged in 250s to
 1,500, reading `risk_score` off each row.
+
+## 6. Resolution of Findings A & B
+
+Both architectural defects identified in Section 4 have been resolved:
+
+### Resolution of Finding A (Highlighter False Attribution)
+In `app/pipeline.py` (`_sentence_issues`):
+- Previously, when a document was rejected as an aggregate whole by `Stage.MODEL`, but no individual sentence crossed `thresholds.allow_max`, the highlighter fell back to `[max(scored, key=lambda x: x[2])]`. This falsely blamed and highlighted innocent sentences (e.g. score 0.003961, 25x below threshold) and generated meaningless trigger words.
+- **Fixed:** For `Decision.REJECT`, `_sentence_issues` only selects sentences that actually crossed `thresholds.allow_max` (`chosen = flagged`). When all sentences are clean, `issues` remains empty. The author is informed of the document-level policy rejection without falsely accusing innocent sentences.
+
+### Resolution of Finding B (Severity Mismatch on Strict Rejections)
+In `app/feedback.py` (`severity_of`) and `app/pipeline.py`:
+- Previously, `severity_of` mapped any score `< 0.50` to `"low"`, so content rejected at `level_1` (0.10), `level_2` (0.20), or `strict` (0.25) was reported with `"severity": "low"` ("A small thing to look at before this goes out") directly under a rejection notice.
+- **Fixed:** `severity_of(risk, decision, threshold=threshold)` now accounts for the decision and threshold. A rejection is **never** rated `"low"`. If content is rejected, it is rated at least `"medium"`, and reaches `"high"` when risk is substantially above threshold (`risk >= threshold + 0.30` or `risk >= 0.80`).
+

@@ -44,7 +44,22 @@ def app_with(make_settings, scorer, **overrides):
     (0.0, "low"), (0.49, "low"), (0.50, "medium"), (0.79, "medium"), (0.80, "high"), (1.0, "high"),
 ])
 def test_bands_read_off_the_risk_score(risk, expected):
-    assert severity_of(risk, Decision.REJECT) == expected
+    # For non-reject decisions (revise), scores map cleanly across the three severity bands
+    assert severity_of(risk, Decision.REVISE) == expected
+
+
+@pytest.mark.parametrize("risk, threshold, expected", [
+    (0.107, 0.10, "medium"),    # Finding B: clean article refused at 0.10 is not rated 'low'
+    (0.25, 0.20, "medium"),
+    (0.35, 0.25, "medium"),
+    (0.45, 0.10, "high"),      # well above threshold (0.45 >= 0.10 + 0.30)
+    (0.55, 0.50, "medium"),
+    (0.75, 0.50, "medium"),
+    (0.85, 0.50, "high"),
+    (0.25, None, "medium"),
+])
+def test_rejected_content_is_never_rated_low(risk, threshold, expected):
+    assert severity_of(risk, Decision.REJECT, threshold=threshold) == expected
 
 
 def test_no_model_score_is_read_from_the_decision():
