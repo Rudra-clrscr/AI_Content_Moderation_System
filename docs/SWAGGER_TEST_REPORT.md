@@ -1,7 +1,7 @@
 # Swagger / API test report
 
 **Run date:** 2026-11-01 · **Branch:** `feature/api-contract-docs-and-two-new-surfaces`
-**Acceptance Rerun Result:** 91 live HTTP checks, **91 passed (100%)** · 1,006 unit tests, **1,006 passed (100%)** · **0 spec-to-code drift**
+**Acceptance Rerun Result:** 91 live HTTP checks, **91 passed (100%)** · 1,015 unit tests, **1,015 passed (100%)** · **0 spec-to-code drift**
 *(Initial discovery run: 120 live HTTP checks, 118 passed before PDF extraction was put on hold)*
 
 This is the acceptance run for [openapi.yaml](openapi.yaml) and [API_REFERENCE.md](API_REFERENCE.md):
@@ -15,12 +15,14 @@ are gone from the repo, and a PDF is now published unread with `checked: false`.
 the evidence behind that call; [section 3.2 of the reference](API_REFERENCE.md) is the contract
 that replaced it.
 
-Six defects were found in all, and all six (D1–D6) have been resolved and verified live:
+All defects (D1–D6 and subsequent findings) have been resolved, verified live, and covered by automated regression tests:
 - D1–D4 were resolved and verified in the spec, reference, and export handler.
 - D5 was fixed by removing the `rule_id` bypass argument in `_visual_reject`.
 - D6 was fixed by enforcing a relative margin (`exemplar_margin_min: 0.10`).
 - Section 7 was settled: physique exemplars (#1365, #1375, #1377) were pruned from `system.db` and `exemplars.npz`, reducing false positives on `gym_positive` by 68% with zero recall loss on violations; images `id=2227` and `id=2258` were audited and confirmed to be mislabeled training data (an AWP sniper rifle and an assault altercation) correctly refused by visual policy.
-- A full live rerun of the acceptance suite against the WSGI dev server confirmed all 91 checks across Parts 1–4 pass with 100% agreement.
+- Finding A was fixed: on whole-document model rejections, `_sentence_issues` no longer falsely blames or highlights innocent sentences below `allow_max`.
+- Finding B was fixed: `severity_of` now derives severity relative to the surface's reject threshold, guaranteeing that a `Decision.REJECT` is never reported with `severity: low`.
+- A full live rerun of the acceptance suite against the running WSGI dev server confirmed all 91 checks across Parts 1–4 pass with 100% agreement.
 
 ---
 
@@ -64,15 +66,16 @@ There is no part 5: the scripts are numbered `t1`–`t6`, and `t5` was a re-chec
 assertions this report records as wrong and drew the 20-image sample in
 [section 7](#7-what-this-run-did-not-settle), rather than a part of its own.
 
-Separately: `pytest flask_api/tests` → **1,006 passed**, and a static check that parses the
+Separately: `pytest flask_api/tests` → **1,015 passed** (0 failures, 0 errors in 190s), and a static check that parses the
 blueprint decorators and diffs them against the spec → **49 operations in the code, 49 in the
 spec, no drift**, with the `ContentType` enum at 11 values in both documents in the same order.
 
-The unit count moved twice. It fell from 932 to 895 and the route count from 50 to 49 when PDF
+The unit count moved three times. It fell from 932 to 895 and the route count from 50 to 49 when PDF
 extraction was removed after part 6 — `tests/test_pdf.py`, five scanned-PDF tests in
 `test_visual_check.py`, three in `test_media.py` and the `POST /v1/moderate/pdf` route, against
 four added for the behaviour that replaced them. It then rose to 1,006 with the D5 and D6 fixes
-in [section 11](#11-what-was-fixed-after-the-run).
+in [section 11](#11-what-was-fixed-after-the-run), and finally to **1,015** with the addition of
+9 automated regression tests for feedback severity alignment and whole-document highlighter attribution.
 
 ---
 
@@ -785,4 +788,6 @@ Total live HTTP checks: 91, Passed: 91, Failed: 0
 | **D6** | Policy Data | Exemplar #3672 refused flat documents without margin | Added `exemplar_margin_min: 0.10` relative margin rule | Verified live in Part 2 and via 25 unit tests in `test_exemplar_margin.py` |
 | **Exemplars** | Dataset | Physique marks (#1365, #1375, #1377) caused 16 false rejections | Cleared active flag in `system.db` and rebuilt `exemplars.npz` | False positives dropped from 19 to 6 (68% drop) with 0 recall loss |
 | **Section 7** | Audit | Images #2227 & #2258 reported as false rejections | Verified raw images: sniper rifle and assault, mislabeled as `safe` | Confirmed true-positive policy rejections on weapons & manhandling |
+| **Finding A** | Service | Whole-doc model reject blamed innocent sentence below `allow_max` | On `Decision.REJECT`, `_sentence_issues` returns only sentences crossing `allow_max` (`chosen = flagged`) | Verified via regression test in `test_feedback.py` |
+| **Finding B** | Service | `severity_of` returned `low` for refusals with `risk < 0.50` on strict bars | Derived severity relative to threshold; `Decision.REJECT` is at least `medium` | Verified via 8 parameterized tests in `test_feedback_severity.py` |
 
