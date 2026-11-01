@@ -131,8 +131,9 @@ def test_every_dashboard_surface_is_reported(client):
     """The chips are built from this list. A surface missing here is a page whose setting
     nobody can see or reach, which is the state the whole feature is fixing."""
     surfaces = settings_view(client)["surfaces"]
-    for ct in ("business_profile", "video", "article", "request", "proposal",
-               "business_proposal", "post", "advertisement", "product_listing"):
+    for ct in ("business_profile", "video", "article", "network_article", "request",
+               "proposal", "business_proposal", "post", "group_post", "advertisement",
+               "product_listing"):
         assert ct in surfaces, ct
 
 

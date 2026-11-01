@@ -75,10 +75,12 @@ the box it came from.
 | Tab | `content_type` | Send |
 |---|---|---|
 | Articles | `article` | title + body + link URLs (`moderateArticle`) |
+| Network articles | `network_article` | as Articles; published to the network |
 | Add Business | `business_profile` | name, about, services, address |
 | Videos | `video` | title + description + tags — **not the footage** |
 | Requests | `request` | title + requirement + category |
 | Proposals / Business Proposals | `proposal`, `business_proposal` | title + text + terms |
+| Feed / group posts | `post`, `group_post` | the written fields |
 
 The type doesn't change how text is scored — it picks the wording the author sees ("Your
 proposal needs a few changes") and is stored with the decision — so send the one the member is

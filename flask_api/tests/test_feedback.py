@@ -205,7 +205,8 @@ def test_sentence_highlighted_once_when_targeted_check_already_marked_it(make_se
     ("article", "article"), ("video", "video"), ("request", "request"),
     ("proposal", "proposal"), ("business_proposal", "business proposal"),
     ("business_profile", "business profile"), ("product_listing", "listing"),
-    ("advertisement", "ad"), ("post", "post"),
+    ("advertisement", "ad"), ("post", "post"), ("group_post", "group post"),
+    ("network_article", "article"),
 ])
 def test_every_dashboard_surface_has_its_own_wording(make_settings, content_type, noun):
     """One content type per tab. A missing noun would silently fall back to "post" and tell a

@@ -96,9 +96,11 @@
   // Their names are BONC's own, from the `nouns` block in config/feedback_messages.yaml -
   // the words authors are already shown ("Your listing needs a few changes"). That file is
   // the source of truth; these three are copied because they have no nav entry to read.
-  const SURFACE_ORDER = ["business_profile", "video", "article", "request", "proposal",
-                         "business_proposal", "post", "advertisement", "product_listing"];
-  const OFF_TAB_NAMES = { post: "Post", advertisement: "Ad", product_listing: "Listing" };
+  const SURFACE_ORDER = ["business_profile", "video", "article", "network_article", "request",
+                         "proposal", "business_proposal", "post", "group_post",
+                         "advertisement", "product_listing"];
+  const OFF_TAB_NAMES = { post: "Post", group_post: "Group post", advertisement: "Ad",
+                          product_listing: "Listing", network_article: "Network article" };
 
   function surfaceList() {
     const named = {};
@@ -2462,12 +2464,14 @@
                 <select class="logs-select" id="logs-surface-filter">
                   <option value="" ${filter.surface === "" ? "selected" : ""}>All Surfaces</option>
                   <option value="article" ${filter.surface === "article" ? "selected" : ""}>Articles</option>
+                  <option value="network_article" ${filter.surface === "network_article" ? "selected" : ""}>Network Articles</option>
                   <option value="video" ${filter.surface === "video" ? "selected" : ""}>Videos</option>
                   <option value="request" ${filter.surface === "request" ? "selected" : ""}>Requests</option>
                   <option value="proposal" ${filter.surface === "proposal" ? "selected" : ""}>Proposals</option>
                   <option value="business_proposal" ${filter.surface === "business_proposal" ? "selected" : ""}>Business Proposals</option>
                   <option value="business_profile" ${filter.surface === "business_profile" ? "selected" : ""}>Business Profiles</option>
                   <option value="post" ${filter.surface === "post" ? "selected" : ""}>Feed Posts</option>
+                  <option value="group_post" ${filter.surface === "group_post" ? "selected" : ""}>Group Posts</option>
                   <option value="advertisement" ${filter.surface === "advertisement" ? "selected" : ""}>Advertisements</option>
                   <option value="product_listing" ${filter.surface === "product_listing" ? "selected" : ""}>Listings</option>
                 </select>
