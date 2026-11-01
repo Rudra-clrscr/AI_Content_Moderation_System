@@ -1,0 +1,1980 @@
+openapi: 3.0.3
+
+info:
+  title: BONC Moderation API
+  version: "1.9"
+  description: |
+    Text, image and PDF moderation for the BONC platform.
+
+    **Result schema version is `1.9`** — that is what `info.version` tracks, since the
+    result payload is the contract consumers depend on. The HTTP surface is versioned
+    separately by the `/v1/` path prefix.
+
+    ### Reading a response
+
+    A refusal is **not** an HTTP error. `decision: "reject"` comes back `200`. Branch on
+    the `decision` field; reserve error handling for 4xx and 5xx.
+
+    ### Authentication
+
+    - The three `/v1/moderate*` submission endpoints and the two probes are **open**.
+    - Admin endpoints accept **either** an `X-Admin-Token` header **or** a logged-in
+      session cookie (`bonc_admin`). With the cookie, every non-GET request must also
+      carry `X-Requested-With: bonc-admin` or it is refused `403` — that is the CSRF
+      defence. Token auth is not subject to it, which makes the token the practical
+      choice for Swagger and scripts.
+    - `POST /v1/admin/model/reload` accepts the **token only**; a session is rejected.
+    - If `ADMIN_TOKEN` is unset *and* no admin account exists, admin endpoints answer
+      `404` ("disabled"), not `401`.
+
+    ### Testing notes
+
+    Call `GET /ready` first. If the model did not load, `/v1/moderate` answers `503` and
+    `/ready` explains why in `model_error` — the process stays up with a broken model by
+    design.
+
+  contact:
+    name: API reference
+    url: https://github.com/Rudra-clrscr/BONC/blob/main/docs/API_REFERENCE.md
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+
+# Order matters: Swagger UI lists sections in this order, and the moderation and admin
+# endpoints are the ones that get deployed and tested. The dev pages come last.
+tags:
+  - name: Moderation
+    description: The product. Submit content, get a decision.
+  - name: "Admin: auth"
+    description: Sign-in and password recovery.
+  - name: "Admin: levels"
+    description: How strictly each surface is moderated.
+  - name: "Admin: audit"
+    description: The moderation log and its exports.
+  - name: "Admin: blocking"
+    description: Refusing submissions from an address or network.
+  - name: "Admin: images"
+    description: The image dataset behind the visual check, and its training.
+  - name: "Admin: policy"
+    description: The visual policy, written in words.
+  - name: Operational
+    description: Liveness and readiness, plus the docs and the dev-only demo pages.
+
+security: []
+
+# =====================================================================================
+paths:
+
+  # ---- Moderation -------------------------------------------------------------------
+  /v1/moderate:
+    post:
+      tags: [Moderation]
+      summary: Moderate text
+      operationId: moderateText
+      description: |
+        The endpoint the platform calls on every piece of member-written text.
+
+        Join the whole form into one `content` string — harm split across fields is still
+        harm, and moderating fields separately misses a clean title with the scam in the
+        description.
+
+        `content_type` does not change how the text is scored. It selects the admin's
+        level for that surface, the author-facing wording, and whether surface-scoped
+        gate rules and the grievance check apply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content, content_type]
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 25000
+                  description: Non-empty after stripping. Limit is `limits.max_chars`.
+                content_type:
+                  $ref: '#/components/schemas/ContentType'
+                content_id:
+                  oneOf:
+                    - { type: string }
+                    - { type: integer }
+                  description: Your platform's own ID. Always returned as a string.
+            examples:
+              clean:
+                summary: An ordinary listing (expect allow)
+                value:
+                  content: Premium basmati rice exporter, FSSAI certified.
+                  content_type: product_listing
+                  content_id: LST-10293
+              scam:
+                summary: Text a gate rule or the model should refuse
+                value:
+                  content: Pay the processing fee to this personal UPI first and I will release your consignment.
+                  content_type: post
+                  content_id: POST-5521
+              grievance:
+                summary: A public complaint — refused on article/post/advertisement only
+                value:
+                  content: Nobody at their support desk has replied about the refund in two weeks.
+                  content_type: article
+      responses:
+        "200":
+          description: A decision was reached — allow, revise **or** reject.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModerationResult' }
+        "202":
+          description: Async mode only — queued for scoring.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingResult' }
+        "400":
+          description: '`invalid_json`, `invalid_content`, `invalid_content_type`, `invalid_content_id`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "403":
+          description: '`client_blocked` — this address is on the blocklist.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "413":
+          description: '`content_too_long`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "500":
+          description: '`inference_failed` — carries `request_id`.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "503":
+          description: '`model_not_ready`, or `queue_unavailable` in async mode.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /v1/moderate/media:
+    post:
+      tags: [Moderation]
+      summary: Moderate an uploaded image, PDF or video
+      operationId: moderateMedia
+      description: |
+        Post **one** file per request — each gets its own decision and its own audit row.
+        The kind is detected from the file's bytes, never its name.
+
+        - **Image** — two passes. OCR reads any writing; the CLIP visual check scores the
+          picture itself. Text read off a picture is judged at a raised bar (0.99) with no
+          revise band.
+        - **PDF** — text extraction with OCR for scanned pages. The visual check runs on
+          rendered pages too, and a refusal names the page.
+        - **Video** — not examined. `media.allow_unchecked_video` decides whether it is
+          refused or published with `checked: false`.
+
+        Returns `404` when `pdf.enabled` is false.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Image (15 MB cap), PDF (25 MB cap) or video.
+                content_type:
+                  allOf: [{ $ref: '#/components/schemas/ContentType' }]
+                  default: article
+                content_id:
+                  type: string
+            encoding:
+              file: { contentType: image/png, image/jpeg, application/pdf, video/mp4 }
+      responses:
+        "200":
+          description: |
+            A decision was reached. The body is the ordinary result plus a `media` block
+            (and an identical `pdf` block for PDFs, kept for the original contract).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaModerationResult' }
+        "400":
+          description: '`invalid_file`, `invalid_content_type`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "403":
+          description: '`client_blocked`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "404":
+          description: '`not_found` — file moderation is disabled (`PDF_UPLOAD=0`).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "413":
+          description: '`media_too_large`, `pdf_too_large`, `pdf_too_many_pages`, `pdf_text_too_long`, `content_too_long`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "422":
+          description: |
+            `media_unreadable` (writing OCR could not read), `media_unsupported`
+            (not an image, PDF or video), `media_not_checkable` (video, when
+            `allow_unchecked_video` is false), or a PDF extraction failure.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "503":
+          description: '`media_not_checkable` — the OCR or visual model threw. Retryable.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /v1/moderate/pdf:
+    post:
+      tags: [Moderation]
+      summary: Moderate an uploaded file (alias of /v1/moderate/media)
+      operationId: moderatePdf
+      description: |
+        **The same handler as `/v1/moderate/media`.** This is the original path, kept for
+        the existing contract; it accepts images and video too. Prefer
+        `/v1/moderate/media` in new code.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                content_type:
+                  allOf: [{ $ref: '#/components/schemas/ContentType' }]
+                  default: article
+                content_id: { type: string }
+      responses:
+        "200":
+          description: A decision was reached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaModerationResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "413": { $ref: '#/components/responses/TooLarge' }
+        "422": { $ref: '#/components/responses/Unprocessable' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/moderate/{request_id}:
+    get:
+      tags: [Moderation]
+      summary: Fetch an async result
+      operationId: moderationStatus
+      description: |
+        Only meaningful in async mode. **In sync mode this returns `404 not_supported`**,
+        because there is nothing to poll.
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 'The completed result, or `{"status": "pending" | "failed"}`.'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ModerationResult' }
+                  - { $ref: '#/components/schemas/PendingResult' }
+        "404":
+          description: '`not_supported` — status lookup is async-mode only.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  # ---- Operational ------------------------------------------------------------------
+  /health:
+    get:
+      tags: [Operational]
+      summary: Liveness
+      operationId: health
+      description: Always `200`. Touches nothing, so it stays up while the model is broken.
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { status: { type: string, example: ok } }
+
+  /ready:
+    get:
+      tags: [Operational]
+      summary: Readiness, and the most useful diagnostic in the service
+      operationId: ready
+      description: |
+        Returns `503` with `status: "not_ready"` when the mode is `sync` and the model is
+        not loaded. The body is identical either way, so a failing probe still explains
+        itself through `model_error`.
+
+        Two fields exist so an operator can see things from outside rather than infer them
+        from published content: `visual` (are pictures actually being looked at) and
+        `moderation_disabled_for` (which surfaces are unmoderated right now).
+      responses:
+        "200":
+          description: Ready to serve.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyStatus' }
+        "503":
+          description: 'The model is not loaded. Same body, `status: "not_ready"`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyStatus' }
+
+  /demo:
+    get:
+      tags: [Operational]
+      summary: Browser demo UI (dev only)
+      operationId: demoPage
+      description: Enabled with `DEMO_PAGE=1`; never on in production. `404` otherwise.
+      responses:
+        "200": { description: HTML page, content: { text/html: {} } }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /articles:
+    get:
+      tags: [Operational]
+      summary: Reference front-end (dev only)
+      operationId: articlesPage
+      description: |
+        The tab bar, per-surface forms and the Write-article modal with publish-time
+        moderation. Worth reading before writing your own client — its
+        `moderation-client.js` is the reference implementation of field joining and
+        offset-based highlighting. Gated behind `DEMO_PAGE=1`.
+      responses:
+        "200": { description: HTML page, content: { text/html: {} } }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /articles/{name}:
+    get:
+      tags: [Operational]
+      summary: A file from the reference front-end (dev only)
+      operationId: articlesAsset
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The asset. }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /docs:
+    get:
+      tags: [Operational]
+      summary: Swagger UI
+      operationId: apiDocs
+      description: |
+        Serves Swagger UI **from this app's own origin**, so "Try it out" is a same-origin
+        request and no CORS headers are needed.
+
+        Served by default — this is the contract integrators code against, not a demo, so
+        it is not gated behind `DEMO_PAGE`. `API_DOCS=0` turns it off where the endpoint
+        list itself should stay unpublished; it then answers `404`.
+
+        This service sends no CORS headers anywhere. Reaching a Swagger UI hosted
+        elsewhere would mean relaxing that on every endpoint — including the
+        unauthenticated submission endpoints — for a developer convenience.
+      responses:
+        "200": { description: The Swagger UI page., content: { text/html: {} } }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /openapi.yaml:
+    get:
+      tags: [Operational]
+      summary: This document
+      operationId: openapiSpec
+      description: |
+        Served by default; `API_DOCS=0` turns it off.
+
+        Served from the repository's `docs/` directory, which is where the spec lives so it
+        sits beside `API_REFERENCE.md` and cannot drift from a second copy. A deployment
+        that ships `flask_api/` alone carries no `docs/`, and this says so plainly rather
+        than returning a bare 404.
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content: { application/yaml: { schema: { type: string } } }
+        "404":
+          description: '`not_found` — docs disabled, or the spec is not present in this deployment.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  # ---- Admin: auth ------------------------------------------------------------------
+  /v1/admin/auth/login:
+    post:
+      tags: ["Admin: auth"]
+      summary: Sign in
+      operationId: adminLogin
+      description: |
+        Sets the `bonc_admin` session cookie (HttpOnly, SameSite=Strict).
+
+        `401` on failure with the **same message** whether or not the account exists, and a
+        dummy hash is checked when it does not, so response timing does not reveal which.
+
+        **Rate limited:** 20 attempts per IP and 5 per email, each per 15 minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, maxLength: 320 }
+                password: { type: string }
+      responses:
+        "200":
+          description: Signed in. The cookie is set on this response.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { email: { type: string, format: email } }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401":
+          description: '`invalid_credentials`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  /v1/admin/auth/logout:
+    post:
+      tags: ["Admin: auth"]
+      summary: Clear the session
+      operationId: adminLogout
+      responses:
+        "200":
+          description: Session cleared.
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+
+  /v1/admin/auth/me:
+    get:
+      tags: ["Admin: auth"]
+      summary: Who is signed in
+      operationId: adminMe
+      description: Reads the session cookie only — an `X-Admin-Token` does not satisfy this.
+      security: [{ AdminSession: [] }]
+      responses:
+        "200":
+          description: The signed-in admin.
+          content:
+            application/json:
+              schema: { type: object, properties: { email: { type: string, format: email } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/admin/auth/password/forgot:
+    post:
+      tags: ["Admin: auth"]
+      summary: Request a 6-digit reset code
+      operationId: adminForgot
+      description: |
+        **Always returns the same `200` body**, whether or not the address belongs to an
+        admin, so it cannot be used to enumerate accounts. A rate limit being hit returns
+        that same body too.
+
+        The code is hashed before storage, expires after 10 minutes, replaces any older
+        code, is subject to a 60-second resend cooldown, and is **never written to the
+        log**. *Limits: 10 per IP and 5 per email, per hour.*
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties: { email: { type: string, format: email } }
+      responses:
+        "200":
+          description: Generic acknowledgement — reveals nothing either way.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  message: { type: string }
+        "400": { $ref: '#/components/responses/BadRequest' }
+
+  /v1/admin/auth/password/verify:
+    post:
+      tags: ["Admin: auth"]
+      summary: Exchange the code for a reset token
+      operationId: adminVerify
+      description: |
+        The token is good for 10 minutes. Five wrong guesses lock the code. Failures
+        distinguish expired, locked and plain wrong internally but all answer
+        `400 invalid_code`. *Limit: 30 per IP per 15 minutes.*
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email: { type: string, format: email }
+                code: { type: string, pattern: '^\d{6}$' }
+      responses:
+        "200":
+          description: Code accepted.
+          content:
+            application/json:
+              schema: { type: object, properties: { reset_token: { type: string } } }
+        "400":
+          description: '`invalid_request` or `invalid_code`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  /v1/admin/auth/password/reset:
+    post:
+      tags: ["Admin: auth"]
+      summary: Set a new password
+      operationId: adminReset
+      description: |
+        The password must be at least 10 characters, mix letters and digits, not be the
+        email address, and be at most 200 characters.
+
+        **Clears the session on success**, so an attacker holding a stolen cookie loses it.
+        *Limit: 20 per IP per 15 minutes.*
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, reset_token, new_password]
+              properties:
+                email: { type: string, format: email }
+                reset_token: { type: string }
+                new_password: { type: string, minLength: 10, maxLength: 200 }
+      responses:
+        "200":
+          description: Password changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  message: { type: string }
+        "400":
+          description: '`invalid_request`, `weak_password` or `invalid_token`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  # ---- Admin: levels ----------------------------------------------------------------
+  /v1/admin/moderation-levels:
+    get:
+      tags: ["Admin: levels"]
+      summary: The whole levels table
+      operationId: getModerationLevels
+      description: Every named level, the default policy, and each configured surface.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: The table.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LevelsTable' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/AdminDisabled' }
+
+  /v1/admin/moderation-levels/{content_type}:
+    parameters:
+      - name: content_type
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/ContentType' }
+    put:
+      tags: ["Admin: levels"]
+      summary: Change one surface, live
+      operationId: setModerationLevel
+      description: |
+        Takes effect on the **next request** — nothing restarts — and is persisted, so a
+        restart keeps it.
+
+        `enabled` and the bar are independent: setting a level on a disabled surface
+        stores it for when the toggle comes back on.
+
+        **An unknown surface is `404 no_such_surface`, not `400`** — the difference between
+        "there is no such page" and "that value is wrong". An admin who typed `articles`
+        (the plural) needs the first.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                enabled: { type: boolean }
+                level:
+                  type: string
+                  example: strict
+                  description: Any name defined in `moderation_levels.yaml`.
+                reject_min: { type: number, minimum: 0, maximum: 1 }
+                allow_max: { type: number, minimum: 0, maximum: 1 }
+            examples:
+              toggleOff: { summary: Stop moderating this surface, value: { enabled: false } }
+              namedLevel: { summary: Apply a named level, value: { level: strict } }
+              rawBar: { summary: Set the rating directly, value: { reject_min: 0.62 } }
+      responses:
+        "200":
+          description: The resulting policy for that surface.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeaturePolicy' }
+        "400":
+          description: '`invalid_request` — unknown fields, or an invalid value.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/CsrfMissing' }
+        "404":
+          description: '`no_such_surface` — lists the surfaces that do exist.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    delete:
+      tags: ["Admin: levels"]
+      summary: Drop a surface's override so it follows the default again
+      operationId: clearModerationLevel
+      description: |
+        **Not the same as setting it back to the default's current value**, which freezes a
+        copy that stops tracking later changes to the default. An admin undoing an
+        experiment means "follow the default", and this is the only way to express it.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: Cleared. `had_override` says whether anything was actually removed.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/FeaturePolicy' }
+                  - type: object
+                    properties:
+                      cleared: { type: boolean }
+                      had_override: { type: boolean }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/CsrfMissing' }
+        "404":
+          description: '`no_such_surface`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /v1/admin/moderation-settings:
+    get:
+      tags: ["Admin: levels"]
+      summary: Flattened view for the dashboard
+      operationId: getModerationSettings
+      description: |
+        `level` is non-null **only when every surface agrees**. `mixed` is true when they
+        do not — a UI should warn before overwriting in that case.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: The flattened view.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingsView' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: ["Admin: levels"]
+      summary: Apply one setting to EVERY surface
+      operationId: putModerationSettings
+      description: |
+        > **This overwrites every surface.** Any per-surface tuning done through
+        > `PUT /v1/admin/moderation-levels/{content_type}` is silently flattened by a save
+        > here. Check `mixed` on the `GET` before calling this.
+
+        Writes are serialised behind a lock so two admins saving at once cannot interleave.
+        If the database write fails the in-memory levels are rolled back, so memory and
+        disk keep telling the same story, and the call returns `500 save_failed` having
+        changed nothing.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, level]
+              additionalProperties: false
+              properties:
+                enabled: { type: boolean }
+                level: { type: string, example: strict }
+      responses:
+        "200":
+          description: The resulting flattened view.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingsView' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/CsrfMissing' }
+        "500":
+          description: '`save_failed` — nothing was changed.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/model/reload:
+    post:
+      tags: ["Admin: levels"]
+      summary: Hot-swap the model bundle (token only)
+      operationId: reloadModel
+      description: |
+        **Accepts `X-Admin-Token` only** — a logged-in session is rejected here, unlike
+        every other admin endpoint. Returns `404` when `ADMIN_TOKEN` is unset.
+
+        Swaps to the bundle in `MODEL_DIR`. **Only swaps if the new model loads and warms
+        up**; otherwise the old one stays live and the error names what is still serving.
+      security: [{ AdminToken: [] }]
+      responses:
+        "200":
+          description: Swapped.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: reloaded }
+                  previous_version: { type: string, nullable: true }
+                  model_version: { type: string, nullable: true }
+        "401":
+          description: '`unauthorized` — invalid admin token.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "404":
+          description: '`not_found` — `ADMIN_TOKEN` is unset, so this is disabled.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "500":
+          description: '`reload_failed` — carries `active_version`, which is still serving.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  # ---- Admin: audit -----------------------------------------------------------------
+  /v1/admin/moderation-logs:
+    get:
+      tags: ["Admin: audit"]
+      summary: List decisions
+      operationId: getModerationLogs
+      description: Malformed `limit` or `offset` fall back to the defaults rather than erroring.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: decision, in: query, schema: { type: string, enum: [allow, revise, reject] } }
+        - { name: content_type, in: query, schema: { $ref: '#/components/schemas/ContentType' } }
+        - { name: severity, in: query, schema: { type: string, enum: [low, medium, high] } }
+        - { name: q, in: query, description: Free-text search, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0, minimum: 0 } }
+      responses:
+        "200":
+          description: A page of decisions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs: { type: array, items: { type: object } }
+                  total: { type: integer, description: Rows matching the filters, not rows returned. }
+                  limit: { type: integer }
+                  offset: { type: integer }
+                  stats:
+                    type: object
+                    description: Counts over the whole filtered set, for the header tiles.
+                    properties:
+                      allow: { type: integer }
+                      revise: { type: integer }
+                      reject: { type: integer }
+                      total: { type: integer }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: ["Admin: audit"]
+      summary: Clear the entire audit log
+      operationId: clearModerationLogs
+      description: |
+        > **No confirmation step and no filter — this takes everything.**
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: Cleared.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cleared: { type: boolean }
+                  count: { type: integer }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/CsrfMissing' }
+
+  /v1/admin/moderation-logs/export:
+    get:
+      tags: ["Admin: audit"]
+      summary: Download the log as text, Word or Excel
+      operationId: exportModerationLogs
+      description: |
+        Takes the **same filters** as the list endpoint, because the button sits on a
+        filtered screen and "export" there can only mean "what I am looking at".
+
+        **Not paginated** — it walks the whole matching set up to `max_rows` (capped at
+        50,000) and the file records both numbers about itself.
+
+        Only the Excel path has an optional dependency. Without `openpyxl` it returns
+        `503` naming the missing package; text and Word still work.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [txt, doc, xlsx, word, docx, excel, xls], default: txt }
+          description: '`word`/`docx` map to `doc`; `excel`/`xls` map to `xlsx`.'
+        - { name: decision, in: query, schema: { type: string } }
+        - { name: content_type, in: query, schema: { type: string } }
+        - { name: severity, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: max_rows, in: query, schema: { type: integer, default: 50000, maximum: 50000 } }
+      responses:
+        "200":
+          description: The file.
+          headers:
+            Content-Disposition: { schema: { type: string }, description: 'attachment; filename="…"' }
+            X-Export-Rows: { schema: { type: integer }, description: Rows actually written. }
+            X-Export-Total: { schema: { type: integer }, description: Rows that matched the filter. }
+            Cache-Control: { schema: { type: string }, description: '`no-store` — a point-in-time copy.' }
+          content:
+            text/plain: {}
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document: {}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {}
+        "400":
+          description: '`bad_format`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "503":
+          description: '`export_unavailable` — `openpyxl` is missing. Text and Word still work.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/moderation-logs/{request_id}:
+    get:
+      tags: ["Admin: audit"]
+      summary: One decision in full
+      operationId: getModerationLogDetail
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: request_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The stored decision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModerationResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  # ---- Admin: blocking --------------------------------------------------------------
+  /v1/admin/blocked-clients:
+    get:
+      tags: ["Admin: blocking"]
+      summary: List blocked addresses
+      operationId: listBlockedClients
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: Current blocks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  blocked: { type: array, items: { $ref: '#/components/schemas/BlockedClient' } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: ["Admin: blocking"]
+      summary: Block an address or network
+      operationId: addBlockedClient
+      description: |
+        Blocking stops casual repetition from one connection. It is **not an identity
+        control**: a mobile connection changes address by switching to cellular, and a VPN
+        changes it by clicking.
+
+        > A `/24` can be one household or one office behind a single NAT, so refusing a
+        > network can refuse people who did nothing. Prefer `ip` scope unless you have a
+        > reason.
+
+        Refusing your own connection returns `409 would_block_self` — the screen that
+        would undo a self-block sits behind the block.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: { type: string, example: 203.0.113.45 }
+                scope: { type: string, enum: [ip, network], default: ip }
+                reason: { type: string, example: repeat scam listings }
+      responses:
+        "201":
+          description: Blocked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  blocked: { $ref: '#/components/schemas/BlockedClient' }
+                  message: { type: string }
+        "400":
+          description: '`missing_value`, `bad_scope` or `bad_address`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/CsrfMissing' }
+        "409":
+          description: '`would_block_self` — names the address it detected.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/blocked-clients/{value}:
+    delete:
+      tags: ["Admin: blocking"]
+      summary: Unblock
+      operationId: removeBlockedClient
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: value, in: path, required: true, schema: { type: string } }
+        - { name: scope, in: query, schema: { type: string, enum: [ip, network] } }
+      responses:
+        "200":
+          description: Unblocked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unblocked: { type: boolean }
+                  count: { type: integer }
+                  message: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404":
+          description: '`not_blocked`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  # ---- Admin: images ----------------------------------------------------------------
+  /v1/admin/images/categories:
+    get:
+      tags: ["Admin: images"]
+      summary: List categories
+      operationId: listImageCategories
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: Categories and the active policy mode.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories: { type: array, items: { type: object } }
+                  active_mode: { type: string, example: standard }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: ["Admin: images"]
+      summary: Create a category
+      operationId: addImageCategory
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                display_name: { type: string }
+                default_action: { type: string, enum: [allow, block], default: allow }
+                description: { type: string }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  category: { type: object }
+                  message: { type: string }
+        "400":
+          description: '`invalid_input` — `name` is required.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "409":
+          description: '`category_exists`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/images/categories/{name}:
+    put:
+      tags: ["Admin: images"]
+      summary: Update a category
+      operationId: updateImageCategory
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string }
+                default_action: { type: string, enum: [allow, block] }
+                description: { type: string }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  category: { type: object }
+                  message: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/admin/images:
+    get:
+      tags: ["Admin: images"]
+      summary: List dataset images
+      operationId: listImages
+      description: |
+        Also returns `withdrawn_categories`. The grid needs it because an exemplar in a
+        withdrawn category still renders as a live rule while the live check is ignoring
+        it — which would be the card stating the opposite of the truth.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: category, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string, enum: [allow, block] } }
+        - { name: selected, in: query, schema: { type: string, enum: ["0", "1"] } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, default: 1, minimum: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 24 } }
+      responses:
+        "200":
+          description: A page of images.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object } }
+                  pagination:
+                    type: object
+                    description: There is no top-level `total` — it lives in here.
+                    properties:
+                      page: { type: integer }
+                      limit: { type: integer }
+                      total: { type: integer }
+                      total_pages: { type: integer }
+                  filtered:
+                    type: object
+                    description: Counts over the current filters.
+                    properties:
+                      total: { type: integer }
+                      allowed: { type: integer }
+                      blocked: { type: integer }
+                      selected: { type: integer }
+                      teaching_allow: { type: integer }
+                      teaching_block: { type: integer }
+                  stats:
+                    type: object
+                    description: The same counts over the whole dataset, ignoring filters.
+                  active_policy_mode: { type: string }
+                  withdrawn_categories: { type: array, items: { type: string } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/admin/images/{image_id}:
+    get:
+      tags: ["Admin: images"]
+      summary: One image record
+      operationId: getImage
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: image_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The record.
+          content:
+            application/json:
+              schema: { type: object, properties: { image: { type: object } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/admin/images/{image_id}/file:
+    get:
+      tags: ["Admin: images"]
+      summary: The image bytes
+      operationId: getImageFile
+      description: Cached an hour. `404 file_missing` when the row exists but the file does not.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: image_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The image.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404":
+          description: '`not_found` or `file_missing`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/images/upload:
+    post:
+      tags: ["Admin: images"]
+      summary: Add an image to the dataset
+      operationId: uploadDatasetImage
+      description: |
+        The response's `taught` block says what the upload changed — whether the
+        description was added as a policy phrasing, and that the image is selected for the
+        next retrain.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                category: { type: string, default: safe }
+                action: { type: string, enum: [allow, block], default: allow }
+                description: { type: string }
+      responses:
+        "201":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  image: { type: object }
+                  taught: { type: object, nullable: true }
+                  message: { type: string }
+        "400":
+          description: '`no_file` or `empty_filename`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/admin/images/batch:
+    put:
+      tags: ["Admin: images"]
+      summary: Bulk select, bulk action, or per-image updates
+      operationId: batchUpdateImages
+      description: |
+        Three operations behind one route, chosen by which key is present.
+
+        1. **`select_all`** — bulk select/deselect under the **same filters the grid is
+           showing**. Taking only the category made the button act on pictures the admin
+           could not see, and the retrain that followed measured a change nobody made.
+        2. **`bulk_action` + `category`** — set a whole category to allow or block.
+        3. **`updates`** — an array of per-image modifications.
+
+        Only `action` and `category` reach the live check; `is_selected` is the next
+        retrain's business and deliberately does **not** trigger a reload.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                select_all: { type: boolean }
+                category: { type: string }
+                search: { type: string }
+                action: { type: string }
+                bulk_action: { type: string, enum: [allow, block] }
+                updates:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      action: { type: string, enum: [allow, block] }
+                      category: { type: string }
+                      is_selected: { type: integer, enum: [0, 1] }
+            examples:
+              selectAll: { summary: Deselect everything matching the grid's filters, value: { select_all: false, category: physique, search: gym } }
+              bulkAction: { summary: Block a whole category, value: { bulk_action: block, category: weapons } }
+              updates: { summary: Per-image edits, value: { updates: [{ id: 412, action: block, category: gore }] } }
+      responses:
+        "200":
+          description: Applied. `exemplars` reports how many rules now refuse and allow.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  updated: { type: integer }
+                  exemplars: { type: object }
+                  message: { type: string }
+        "400":
+          description: '`invalid_updates` — `updates` must be an array.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/admin/images/train:
+    post:
+      tags: ["Admin: images"]
+      summary: Retrain the visual probe
+      operationId: trainProbe
+      description: |
+        > **Changes server state.** Refits the probe on the stored embeddings and overwrites
+        > `models/img_v1/probe.npz`, which every later image check then uses. There is no
+        > dry-run; `POST /v1/admin/policy/reset` restores the startup snapshot.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                C: { type: number, default: 1.0, description: Inverse regularisation strength. }
+                preset: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Training result.
+          content: { application/json: { schema: { type: object } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "500":
+          description: '`training_error`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/images/preset:
+    post:
+      tags: ["Admin: images"]
+      summary: Apply a policy preset
+      operationId: applyPreset
+      description: |
+        > **Changes server state.** Switches which categories count as blocked and refits
+        > accordingly, so it changes live decisions for every caller at once.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [preset]
+              properties:
+                preset: { type: string, example: child_products }
+      responses:
+        "200":
+          description: Applied.
+          content: { application/json: { schema: { type: object } } }
+        "400":
+          description: '`missing_preset`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "500":
+          description: '`preset_error`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/images/history:
+    get:
+      tags: ["Admin: images"]
+      summary: The last ten training runs
+      operationId: trainingHistory
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: History.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history: { type: array, items: { type: object } }
+                  active_policy_mode: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/admin/images/load-all:
+    post:
+      tags: ["Admin: images"]
+      summary: Import the dataset directory into the database
+      operationId: loadAllImages
+      description: |
+        > **Changes server state and walks the whole dataset directory.** It embeds every
+        > image it finds, so on a populated server this is the slowest call in the API.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: Imported.
+          content: { application/json: { schema: { type: object } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  # ---- Admin: policy ----------------------------------------------------------------
+  /v1/admin/policy/labels:
+    get:
+      tags: ["Admin: policy"]
+      summary: The visual policy, as written
+      operationId: listPolicyLabels
+      description: |
+        `live_labels` is what the **model** is scoring right now — that is `prompts.npz`,
+        not this file. `in_sync` says whether the two agree; they differ when someone
+        edited the YAML by hand without rebuilding, which is worth showing rather than
+        assuming.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: The policy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  labels: { type: object }
+                  version: { type: integer }
+                  live_labels: { type: array, items: { type: string } }
+                  in_sync: { type: boolean }
+                  default_available: { type: boolean }
+                  named_categories: { type: object }
+                  balance: { type: object }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/admin/policy/labels/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[a-z0-9_]+$' }
+    put:
+      tags: ["Admin: policy"]
+      summary: Create or replace a rule
+      operationId: upsertPolicyLabel
+      description: |
+        Refusing and allowing the same sentence are both coherent policies, and only the
+        admin knows which they meant — so a clash **stops and asks** rather than letting
+        write order decide. A conflict returns `409 policy_conflict`; resend with
+        `resolve: "refuse"` or `resolve: "allow"` to say which side stands.
+
+        **Only what the edit introduces is checked.** Checking every wording on every save
+        meant four of the fifteen shipped rules could not be edited at all.
+
+        The response's `consequences` block says what the save means for the author and
+        for the rest of the policy — decided here and reported nowhere else.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompts]
+              properties:
+                prompts:
+                  type: array
+                  minItems: 1
+                  maxItems: 24
+                  items: { type: string, maxLength: 200 }
+                  example: ["a photo of a handgun", "a photo of a rifle"]
+                unsafe: { type: boolean, default: true }
+                category: { type: string, description: Defaults to the label name. Only meaningful when `unsafe`. }
+                reject_min: { type: number, minimum: 0, maximum: 1, description: Only read when `unsafe` is true. }
+                resolve: { type: string, enum: [refuse, allow], description: Settle a reported conflict. }
+      responses:
+        "200":
+          description: Created or updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [created, updated] }
+                  label: { type: string }
+                  entry: { type: object }
+                  live_labels: { type: array, items: { type: string } }
+                  consequences: { type: object }
+        "400":
+          description: '`bad_name`, `missing_prompts`, `prompt_too_long`, `too_many_prompts`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "409":
+          description: '`policy_conflict` — carries `conflicts` and `this_verdict`.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "500":
+          description: '`policy_build_failed`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+    delete:
+      tags: ["Admin: policy"]
+      summary: Remove a rule
+      operationId: deletePolicyLabel
+      description: |
+        **Removing the last allowing rule is refused.** The safe phrasings are what the
+        unsafe ones are judged against, so deleting the last one would make every ordinary
+        photograph compete only against rules that refuse it.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: Deleted.
+          content: { application/json: { schema: { type: object } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404":
+          description: '`no_such_label`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "409":
+          description: Refused — this is the last allowing rule.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/policy/labels/{name}/phrasings:
+    post:
+      tags: ["Admin: policy"]
+      summary: Add one phrasing to a rule
+      operationId: addPolicyPhrasing
+      description: |
+        Separate from the `PUT` because that replaces a rule's whole prompt list, and the
+        callers that need this are adding a single sentence to whatever is already there.
+        Going through `PUT` would mean the client reconstructing the existing wordings and
+        sending them back — a race with anyone else editing, and a way to lose phrasings
+        by accident.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phrasing]
+              properties:
+                phrasing: { type: string, maxLength: 200 }
+                unsafe: { type: boolean, default: true }
+                category: { type: string, nullable: true }
+                resolve: { type: string, enum: [refuse, allow] }
+      responses:
+        "200":
+          description: Added.
+          content: { application/json: { schema: { type: object } } }
+        "400":
+          description: '`missing_phrasing`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "409":
+          description: '`policy_conflict`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "500":
+          description: '`policy_build_failed`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/policy/exemplars:
+    get:
+      tags: ["Admin: policy"]
+      summary: List exemplars
+      operationId: listExemplars
+      description: Embeddings are stripped from the rows — they are 2 KB each.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: The marked pictures.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exemplars: { type: array, items: { type: object } }
+                  count: { type: integer }
+                  reject_min: { type: number }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: ["Admin: policy"]
+      summary: Mark pictures "refuse like this", "allow like this", or clear
+      operationId: setExemplars
+      description: |
+        This is the half of policy an admin actually has. Writing phrasings is a skill;
+        pointing at a picture they just looked at is not. Takes effect **on the next
+        upload** — no retraining, no dataset, and undoing it is clearing the same flag.
+
+        ### `preview: true` measures the reach first
+
+        **An exemplar generalises by appearance, and appearance does not respect the
+        categories a person has in mind.** A rainbow marked "refuse things like this"
+        scored 0.828 against a cloud photograph — both are soft-coloured sky — and the
+        cloud was refused with nothing in the policy naming clouds.
+
+        With `preview`, nothing is changed and the response reports `would_match`,
+        `by_category` and the twelve closest pictures. Grouped by category, because the
+        surprise is never "it caught more" but "it caught **those**".
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, mode]
+              properties:
+                ids: { type: array, minItems: 1, items: { type: integer } }
+                mode: { type: string, enum: [block, allow, clear] }
+                preview: { type: boolean, default: false }
+                resolve: { type: string }
+            examples:
+              preview: { summary: Measure the reach without changing anything, value: { ids: [412], mode: block, preview: true } }
+              apply: { summary: Refuse lookalikes of these pictures, value: { ids: [412, 517], mode: block } }
+      responses:
+        "200":
+          description: Applied, or the preview.
+          content: { application/json: { schema: { type: object } } }
+        "400":
+          description: '`missing_ids`, `bad_ids` or `bad_mode`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404":
+          description: '`no_such_image` (preview only)'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "409":
+          description: '`no_embeddings` (preview only)'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/policy/preview:
+    post:
+      tags: ["Admin: policy"]
+      summary: Try candidate phrasings against the stored images
+      operationId: previewPolicyPhrasings
+      description: |
+        Scores candidate wordings **without changing anything**. There is no inference over
+        images at all — one subprocess encodes the phrasings, then a dot product against
+        embeddings already in `system.db`.
+
+        > ### These numbers are not the live scores
+        >
+        > They are **raw cosine similarities**, which for CLIP sit in a narrow band:
+        > measured, a wedding photograph against "a photo of a wedding ceremony" is
+        > **0.32** here while the same picture scores **0.96** through the live
+        > `classify()`. The live check softmaxes across every label, which concentrates
+        > almost all the mass on the winner; a raw similarity does not.
+        >
+        > Read this as a **ranking** — which of your pictures these words pick out — never
+        > as a prediction of `reject_min`. A wording is good when it *separates*.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompts]
+              properties:
+                prompts:
+                  type: array
+                  minItems: 1
+                  maxItems: 24
+                  items: { type: string, maxLength: 200 }
+                  example: ["a photo of fireworks exploding"]
+                limit: { type: integer, default: 12, minimum: 1, maximum: 48 }
+                selected_only: { type: boolean, default: false }
+                over_threshold: { type: boolean, default: false }
+      responses:
+        "200":
+          description: The ranking.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches: { type: array, items: { type: object } }
+                  over_threshold: { type: array, items: { type: object }, nullable: true }
+                  note: { type: string }
+        "400":
+          description: '`missing_prompts` or `too_many_prompts`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "409":
+          description: '`no_embeddings` — run the image loader first.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "500":
+          description: '`no_encoder` or `encode_failed`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/policy/reset:
+    post:
+      tags: ["Admin: policy"]
+      summary: Back to the policy as it shipped
+      operationId: resetPolicy
+      description: |
+        > **Changes server state.** Overwrites `config/visual_policy.yaml` and the probe,
+        > discarding every label, phrasing and exemplar edit made since startup.
+
+        Restores the snapshot taken at startup, before any admin could edit it — so this
+        always means what it says, rather than whatever the first editor happened to save.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      responses:
+        "200":
+          description: Reset.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: reset_to_default }
+                  labels: { type: array, items: { type: string } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "409":
+          description: '`no_default` — nothing has been edited yet, so there is nothing to go back to.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "500":
+          description: '`policy_build_failed`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+# =====================================================================================
+components:
+
+  securitySchemes:
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: |
+        The `ADMIN_TOKEN` value. Not subject to the CSRF header requirement, which makes
+        it the practical choice for Swagger and scripts.
+    AdminSession:
+      type: apiKey
+      in: cookie
+      name: bonc_admin
+      description: |
+        Set by `POST /v1/admin/auth/login`. HttpOnly and SameSite=Strict, so Swagger
+        cannot read or set it directly — **but** the browser will send it automatically
+        once you have logged in through this same origin.
+
+        With this scheme, every **non-GET** request must also carry
+        `X-Requested-With: bonc-admin` or it is refused `403`. Swagger UI cannot add that
+        header from a security scheme, so prefer `AdminToken` for write operations.
+
+  responses:
+    BadRequest:
+      description: Invalid input.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unauthorized:
+      description: |
+        `unauthorized` — log in, or send a valid `X-Admin-Token`.
+
+        Raised by `check_admin()` in the admin blueprint, so it uses the **flat** error
+        shape even on endpoints whose other errors are nested.
+      content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+    CsrfMissing:
+      description: |
+        `forbidden` — session auth on a non-GET without `X-Requested-With: bonc-admin`.
+        Flat error shape, like the other `check_admin()` refusals.
+      content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+    NotFound:
+      description: Not found.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    AdminDisabled:
+      description: |
+        `not_found` — `ADMIN_TOKEN` is unset and no admin account exists, so admin
+        endpoints are disabled rather than protected. Flat error shape.
+      content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+    TooLarge:
+      description: Over a size limit.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unprocessable:
+      description: Could not be processed.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    RateLimited:
+      description: '`rate_limited`. Carries `Retry-After` on login. Flat error shape.'
+      headers:
+        Retry-After: { schema: { type: integer }, description: Seconds to wait. }
+      content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+    Unavailable:
+      description: Temporarily unavailable.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  schemas:
+
+    Error:
+      type: object
+      description: |
+        **The nested envelope**, produced by `_error()` in `app/api.py`. Used by the
+        moderation endpoints, the probes, `/v1/admin/moderation-levels/*` and
+        `/v1/admin/model/reload`.
+
+        `error.code` is stable and machine-readable — branch on it, not on `message`.
+        Extra keys (`allowed`, `limit`, `request_id`, `kind`) appear per error where they
+        help the caller recover.
+
+        > **This API has two error shapes.** See `AdminError`. A client cannot assume one
+        > of them.
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: invalid_content_type }
+            message: { type: string, example: unknown 'content_type' }
+          additionalProperties: true
+
+    AdminError:
+      type: object
+      description: |
+        **The flat envelope**, produced by `_err()` in `app/admin_auth.py`,
+        `app/admin_images.py` and `app/admin_policy.py`. Used by every admin endpoint
+        those three blueprints own — auth, moderation-settings, the audit log, blocked
+        clients, images and visual policy.
+
+        Here the code is `error` itself (a string, not an object) and the message is a
+        sibling key. Extra keys (`conflicts`, `this_verdict`, `text_readable`) appear per
+        error.
+
+        > **Also returned by `check_admin()`**, which guards endpoints defined in
+        > `app/api.py`. So `GET /v1/admin/moderation-levels` answers `401` in **this**
+        > shape, while its own `404 no_such_surface` uses the nested `Error` — one
+        > endpoint, both shapes, depending on which layer refused.
+        >
+        > A robust client reads
+        > `typeof body.error === "string" ? body.error : body.error?.code`.
+      properties:
+        error: { type: string, example: unauthorized }
+        message: { type: string, example: please log in }
+      additionalProperties: true
+
+    ContentType:
+      type: string
+      description: |
+        The surface the member is publishing from. It does **not** change how text is
+        scored — it selects the admin's level, the author-facing wording, and whether
+        surface-scoped gate rules and the grievance check apply.
+      enum:
+        - business_profile
+        - product_listing
+        - post
+        - group_post
+        - advertisement
+        - article
+        - network_article
+        - video
+        - request
+        - proposal
+        - business_proposal
+
+    Decision:
+      type: string
+      description: '`revise` means not published yet — the author is shown what to fix and can resubmit.'
+      enum: [allow, revise, reject]
+
+    DecidedBy:
+      type: string
+      description: |
+        Which stage decided. `disabled` means **nothing ran** — not the model, not the
+        gate — because moderation is off for that surface. It must never be read as
+        "checked and found clean".
+      enum: [gate, model, targeted, sentence, disabled, grievance]
+
+    Thresholds:
+      type: object
+      properties:
+        allow_max: { type: number }
+        reject_min: { type: number }
+
+    FeaturePolicy:
+      type: object
+      properties:
+        content_type: { $ref: '#/components/schemas/ContentType' }
+        enabled: { type: boolean }
+        level: { type: string, nullable: true }
+        allow_max: { type: number }
+        reject_min: { type: number }
+
+    LevelsTable:
+      type: object
+      properties:
+        levels:
+          type: object
+          description: Named levels, e.g. `strict` 0.25, `medium` 0.50, `lenient` 0.85, and `level_1`–`level_10`.
+        default: { $ref: '#/components/schemas/FeaturePolicy' }
+        features:
+          type: object
+          description: Per-surface overrides. Ships as `{}` — every surface follows the default.
+
+    SettingsView:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        level:
+          type: string
+          nullable: true
+          description: Non-null **only when every surface agrees**.
+        mixed:
+          type: boolean
+          description: True when surfaces disagree. Warn before overwriting.
+        levels: { type: array, items: { type: string } }
+        surfaces: { type: object }
+
+    GateMatch:
+      type: object
+      properties:
+        rule_id: { type: string, example: scam.advance_fee }
+        category: { type: string }
+        action: { type: string, enum: [block, revise, flag] }
+        spans:
+          type: array
+          items: { type: array, items: { type: integer }, minItems: 2, maxItems: 2 }
+
+    Issue:
+      type: object
+      description: Offsets into `content`, ready to highlight. Sorted and non-overlapping.
+      properties:
+        start: { type: integer }
+        end: { type: integer }
+        source: { type: string, enum: [rule, model] }
+        message: { type: string }
+        rule_id: { type: string }
+        category: { type: string }
+        risk_score: { type: number }
+        words:
+          type: array
+          description: Trigger-word offsets inside this span.
+          items: { type: array, items: { type: integer } }
+
+    Feedback:
+      type: object
+      nullable: true
+      description: |
+        Author-facing. **Null when allowed.** `title` and `message` are already phrased for
+        the surface — show them as-is. A blank category means "do not name one", and the
+        generic message is used instead.
+      properties:
+        title: { type: string }
+        message: { type: string }
+        severity:
+          type: string
+          enum: [low, medium, high]
+          description: '`high` at risk ≥ 0.80, `medium` ≥ 0.50. A gate block carries no score and reports `high`.'
+        categories: { type: array, items: { type: string } }
+        issues: { type: array, items: { $ref: '#/components/schemas/Issue' } }
+
+    SentenceScore:
+      type: object
+      properties:
+        start: { type: integer }
+        end: { type: integer }
+        risk_score: { type: number }
+        kind: { type: string, example: window, description: Present for word windows over long sentences. }
+        low_syntax: { type: boolean, description: No grammatical substance — needs 0.90 to escalate. }
+        by: { type: string, example: prefilter, description: Cleared by the linear pre-filter; can never escalate. }
+
+    MediaBlock:
+      type: object
+      properties:
+        filename: { type: string }
+        kind: { type: string, enum: [image, pdf, video] }
+        text_found: { type: boolean }
+        text_readable: { type: boolean }
+        ocr_confidence: { type: number }
+        visual_content_checked:
+          type: boolean
+          description: |
+            **Whether the picture itself was scored.** False means nobody looked — it is
+            not a clean result.
+        checked:
+          type: boolean
+          description: False when the file was published without being fully examined.
+        visual: { type: object, description: The visual check's scores and winning label. }
+
+    ModerationResult:
+      type: object
+      description: |
+        Produced by `Pipeline._build`. The same object is returned to the caller and
+        handed to the sink for the audit log.
+
+        Offsets, not copies: `targeted_segments`, `sentence_scores`, `word_scores` and
+        `feedback.issues` all carry character offsets into `content`, so audit rows stay
+        free of duplicated text.
+      properties:
+        schema_version: { type: string, example: "1.9" }
+        request_id: { type: string, format: uuid }
+        status: { type: string, example: completed }
+        content_id: { type: string, nullable: true }
+        content_type: { $ref: '#/components/schemas/ContentType' }
+        content: { type: string }
+        content_sha256: { type: string }
+        decision: { $ref: '#/components/schemas/Decision' }
+        decided_by: { $ref: '#/components/schemas/DecidedBy' }
+        risk_score:
+          type: number
+          nullable: true
+          description: Null after a gate block, or when nothing ran.
+        predicted_label: { type: string, nullable: true }
+        label_scores: { type: object, nullable: true }
+        gate_matches: { type: array, items: { $ref: '#/components/schemas/GateMatch' } }
+        targeted_segments: { type: array, items: { type: object } }
+        sentence_scores: { type: array, items: { $ref: '#/components/schemas/SentenceScore' } }
+        word_scores: { type: array, items: { type: object } }
+        feedback: { $ref: '#/components/schemas/Feedback' }
+        gate_version: { type: integer }
+        model_version: { type: string, nullable: true }
+        thresholds: { $ref: '#/components/schemas/Thresholds' }
+        moderation: { $ref: '#/components/schemas/FeaturePolicy' }
+        latency_ms:
+          type: object
+          properties:
+            gate: { type: number }
+            inference: { type: number, nullable: true }
+            total: { type: number }
+            stages: { type: object }
+        decided_at: { type: string, format: date-time }
+
+    MediaModerationResult:
+      allOf:
+        - { $ref: '#/components/schemas/ModerationResult' }
+        - type: object
+          properties:
+            media: { $ref: '#/components/schemas/MediaBlock' }
+            pdf:
+              allOf: [{ $ref: '#/components/schemas/MediaBlock' }]
+              description: PDFs only. Identical to `media`, kept for the original contract.
+
+    PendingResult:
+      type: object
+      properties:
+        request_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, failed] }
+        content_id: { type: string, nullable: true }
+        content_type: { $ref: '#/components/schemas/ContentType' }
+        status_url: { type: string, example: /v1/moderate/f1e2d3c4 }
+        moderation: { $ref: '#/components/schemas/FeaturePolicy' }
+
+    ReadyStatus:
+      type: object
+      properties:
+        status: { type: string, enum: [ready, not_ready] }
+        mode: { type: string, enum: [sync, async] }
+        gate_version: { type: integer }
+        gate_rules: { type: integer }
+        thresholds: { $ref: '#/components/schemas/Thresholds' }
+        visual:
+          type: object
+          description: |
+            Whether pictures are actually being looked at. When not ready this collapses to
+            `{enabled, ready: false, reason}`, naming what is missing.
+          properties:
+            enabled: { type: boolean }
+            ready: { type: boolean }
+            reason: { type: string }
+            labels: { type: array, items: { type: string } }
+            prompts: { type: integer }
+            reject_min: { type: number }
+            probe: { type: boolean }
+            probe_reject_min: { type: number }
+            provider: { type: string }
+            scoring: { type: string }
+            label_thresholds: { type: object }
+        moderation_disabled_for:
+          type: array
+          items: { type: string }
+          description: Which surfaces are currently unmoderated.
+        model_ready: { type: boolean, description: Sync mode only. }
+        model_version: { type: string, nullable: true }
+        model_backend: { type: string }
+        model_error: { type: string, nullable: true }
+
+    BlockedClient:
+      type: object
+      properties:
+        value: { type: string }
+        scope: { type: string, enum: [ip, network] }
+        reason: { type: string }
+        created_by: { type: string, description: Blank when blocked by a token-authenticated script. }
+        created_at: { type: string, format: date-time }

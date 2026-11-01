@@ -4,10 +4,12 @@
 # {noun} is replaced by the content type's name below, e.g. "Your article needs a few changes".
 nouns:
   article: article
+  network_article: article
   product_listing: listing
   business_profile: business profile
   advertisement: ad
   post: post
+  group_post: group post
   video: video
   request: request
   proposal: proposal

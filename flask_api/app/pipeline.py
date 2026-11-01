@@ -48,8 +48,10 @@ class ContentType(str, Enum):
     BUSINESS_PROFILE = "business_profile"     # Add Business
     PRODUCT_LISTING = "product_listing"
     POST = "post"
+    GROUP_POST = "group_post"                 # a post inside a group, not the open feed
     ADVERTISEMENT = "advertisement"
     ARTICLE = "article"                       # Articles
+    NETWORK_ARTICLE = "network_article"       # Articles published to the network, not the company page
     VIDEO = "video"                           # Videos — the title/description, not the footage
     REQUEST = "request"                       # Requests
     PROPOSAL = "proposal"                     # Proposals

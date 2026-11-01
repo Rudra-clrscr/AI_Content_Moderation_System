@@ -30,12 +30,13 @@ title with the scam in the description is still a scam. `moderation-client.js`'s
 | Dashboard tab | `content_type` | Send |
 |---|---|---|
 | Articles | `article` | title + body + link URLs |
+| Network articles | `network_article` | as above, published to the network |
 | Add Business | `business_profile` | name, about, services, address |
 | Videos | `video` | **title + description + tags.** The footage itself is *not* checked — see below |
 | Requests | `request` | title + requirement + category |
 | Proposals | `proposal` | title + proposal text + terms |
 | Business Proposals | `business_proposal` | as above |
-| — | `product_listing`, `advertisement`, `post` | existing surfaces |
+| — | `product_listing`, `advertisement`, `post`, `group_post` | existing surfaces |
 
 Every one of these is clickable at `/articles` with `DEMO_PAGE=1`: the tab bar is live, each
 tab opens its own form, and the `content_type` it sends is printed above that form.

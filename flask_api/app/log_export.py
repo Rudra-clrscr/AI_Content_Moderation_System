@@ -211,7 +211,10 @@ def to_xlsx(rows, columns, total, truncated=False, filters=None) -> bytes:
 
 RENDERERS = {"txt": to_txt, "doc": to_doc, "xlsx": to_xlsx}
 MEDIA_TYPES = {
-    "txt": "text/plain; charset=utf-8",
+    # No charset here on purpose. Flask appends its own to any text/* mimetype, so stating
+    # it as well sent "text/plain; charset=utf-8; charset=utf-8" - valid enough that browsers
+    # shrug, but it is the sort of header a strict client is right to reject.
+    "txt": "text/plain",
     "doc": "application/msword",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }

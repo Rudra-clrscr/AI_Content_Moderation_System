@@ -179,6 +179,25 @@ def test_articles_page_and_assets_when_enabled(make_settings, scorer):
     assert c.get("/articles/../api.py").status_code == 404        # no path traversal
 
 
+def test_api_docs_served_by_default(client):
+    """Unlike /demo, the contract is not a demo: it is on unless someone turns it off."""
+    assert b"swagger-ui" in client.get("/docs").data
+    spec = client.get("/openapi.yaml")
+    assert spec.status_code == 200 and spec.mimetype == "application/yaml"
+
+
+def test_api_docs_not_gated_on_the_demo_flag(make_settings, scorer):
+    c = create_app(make_settings(demo_page=False), scorer=scorer).test_client()
+    assert c.get("/demo").status_code == 404
+    assert c.get("/docs").status_code == 200
+
+
+def test_api_docs_can_be_turned_off(make_settings, scorer):
+    c = create_app(make_settings(api_docs=False), scorer=scorer).test_client()
+    assert c.get("/docs").status_code == 404
+    assert c.get("/openapi.yaml").status_code == 404
+
+
 def test_article_content_type_accepted(client):
     r = client.post("/v1/moderate", json={"content": "Case study\n\nOur mill grew.", "content_type": "article"})
     assert r.status_code == 200

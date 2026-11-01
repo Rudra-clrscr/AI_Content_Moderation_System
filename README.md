@@ -54,8 +54,9 @@ Full walkthroughs: [SETUP_IMAGE_MODEL.md](flask_api/SETUP_IMAGE_MODEL.md) ·
 | `GET /health` | liveness |
 | `POST /v1/admin/model/reload` | hot-swap the text model |
 
-`content_type` is the surface — `product_listing`, `article`, `post`, `business_profile`,
-`advertisement`, `video`, `request`, `proposal`, `business_proposal`. It doesn't change the
+`content_type` is the surface — `product_listing`, `article`, `network_article`, `post`,
+`group_post`, `business_profile`, `advertisement`, `video`, `request`, `proposal`,
+`business_proposal`. It doesn't change the
 score; it selects the wording the author sees and is stored with the decision.
 
 The response shape is specified in [contracts/moderation_result.md](contracts/moderation_result.md).

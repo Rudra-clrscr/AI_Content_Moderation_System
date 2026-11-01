@@ -15,6 +15,7 @@ Env overrides (all optional):
     GRIEVANCE_REJECT_MIN  float, overrides the threshold the grievance bundle was trained with
     RESULT_SINK           sql | log
     DEMO_PAGE             1 to serve the demo UI at /demo (off by default)
+    API_DOCS              0 to turn off GET /docs and GET /openapi.yaml (on by default)
     TARGETED_ABUSE        0 to turn off per-sentence scoring of text aimed at someone
     SENTENCE_SCAN         0 to turn off scoring every sentence on its own
     WORD_SCAN             0 to turn off word windows and word-by-word trigger analysis
@@ -95,6 +96,13 @@ class Settings:
     db_timeout_seconds: int = 5
     result_sink: str = "sql"
     demo_page: bool = False
+    # ON by default, unlike demo_page. The reference and the Swagger page describe the
+    # contract callers have to code against, so a running instance is the one place they
+    # cannot be out of date - and a service other teams integrate with should be able to
+    # answer "what does this accept?" without a deploy. They expose no data and no
+    # credentials, only the shape of the endpoints; API_DOCS=0 turns them off where even
+    # the endpoint list is meant to stay unpublished.
+    api_docs: bool = True
     targeted: TargetedAbuse = field(default_factory=TargetedAbuse)
     sentence_scan: SentenceScan = field(default_factory=SentenceScan)
     word_scan: WordScan = field(default_factory=WordScan)
@@ -190,6 +198,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         db_timeout_seconds=int(env("DB_TIMEOUT_SECONDS", db.get("timeout_seconds", 5))),
         result_sink=env("RESULT_SINK", raw.get("result_sink", "sql")),
         demo_page=_as_bool(env("DEMO_PAGE", raw.get("demo_page", False))),
+        api_docs=_as_bool(env("API_DOCS", raw.get("api_docs", True))),
         targeted=TargetedAbuse(
             enabled=_as_bool(env("TARGETED_ABUSE", ta.get("enabled", True))),
             subjects=tuple(ta.get("subjects") or DEFAULT_SUBJECTS),
