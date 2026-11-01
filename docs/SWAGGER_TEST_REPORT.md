@@ -1,18 +1,27 @@
 # Swagger / API test report
 
-**Run date:** 2026-11-01 · **Commit:** `fd09080` (`feature/api-contract-docs-and-two-new-surfaces`)
-**Result:** 91 live HTTP checks, 91 passed · 932 unit tests, 932 passed · 0 spec-to-code drift
+**Run date:** 2026-11-01 · **Branch:** `feature/api-contract-docs-and-two-new-surfaces`
+**Result:** 120 live HTTP checks, 118 passed · 895 unit tests, 895 passed · 0 spec-to-code drift
 
 This is the acceptance run for [openapi.yaml](openapi.yaml) and [API_REFERENCE.md](API_REFERENCE.md):
 the two documents say what the service does, and this is the record of checking that claim
 against a running instance rather than against the source.
 
-Four defects were found. All four are fixed in the commit above. One of them was in the
-service, three were in the documents — which is the point of running this at all, because a
-wrong document is a defect that ships inside every client written against it.
+**What ships from this run: text and image moderation. PDF does not.** The 29 checks in
+[section 8](#8-part-6--the-pdf-path-2729) were run after the first 91, found two defects in the
+scanned-PDF path, and that path was taken out rather than deployed — `app/pdf.py` and its tests
+are gone from the repo, and a PDF is now published unread with `checked: false`. Section 8 is
+the evidence behind that call; [section 3.2 of the reference](API_REFERENCE.md) is the contract
+that replaced it.
 
-One finding is **not** fixed and is the reason to read [section 7](#7-what-this-run-did-not-settle):
-the visual check refuses roughly one in five pictures its own teaching data marks allowed.
+Six defects were found in all, and the counts in this report are the runs as they happened:
+the first 91 checks all passed; of the 29 PDF checks, 27 passed, one failure was a wrong
+assertion in the test, and one was a real defect.
+
+Two findings are **not** fixed here, and they are the two worth reading:
+[section 7](#7-what-this-run-did-not-settle) — the visual check refuses roughly one in five
+pictures its own teaching data marks allowed — and D6 in
+[section 6](#6-defects-found), the exemplar behind it, which is also what stopped PDF.
 
 ---
 
@@ -26,7 +35,7 @@ Text model | `bonc-v9-ver3`, schema `1.9` |
 Visual | CLIP, `CUDAExecutionProvider`, 173 prompts over 16 labels, softmax, probe on at `0.7` |
 Gate | 19 rules, `gate_version: 2` |
 Python / Flask | 3.12.10 / 3.1.3 |
-Spec | OpenAPI 3.0.3, 43 paths, **50 operations**, 8 tags |
+Spec | OpenAPI 3.0.3, 42 paths, **49 operations**, 8 tags (43 and 50 before PDF came out) |
 Swagger UI | 5.17.14, pinned, served from this app's own origin |
 
 Everything was driven over real HTTP with `requests`. Nothing used the Flask test client, because
@@ -46,11 +55,21 @@ AI/ML server, so those are what this report covers. The demo pages are not in sc
 2 | Media — images, PDFs, refusals | 13 | **13 pass** |
 3 | Admin — auth, levels, audit log, blocked clients | 31 | **31 pass** |
 4 | Image dataset + visual policy reads | 12 | **12 pass** |
-| | **Total** | **91** | **91 pass** |
+6 | **PDF path** — scans, offsets, limits, damage | 29 | **27 pass** ([section 8](#8-part-6--the-pdf-path-2729)) |
+| | **Total** | **120** | **118 pass** |
 
-Separately: `pytest flask_api/tests` → **932 passed** in 3m 50s, and a static check that parses the
-blueprint decorators and diffs them against the spec → **50 operations in the code, 50 in the
+There is no part 5: the scripts are numbered `t1`–`t6`, and `t5` was a re-check that re-ran two
+assertions this report records as wrong and drew the 20-image sample in
+[section 7](#7-what-this-run-did-not-settle), rather than a part of its own.
+
+Separately: `pytest flask_api/tests` → **895 passed** in 3m 21s, and a static check that parses the
+blueprint decorators and diffs them against the spec → **49 operations in the code, 49 in the
 spec, no drift**, with the `ContentType` enum at 11 values in both documents in the same order.
+
+The unit count fell from 932 to 895 and the route count from 50 to 49 in the same change: PDF
+extraction was removed after part 6, taking `tests/test_pdf.py`, five scanned-PDF tests in
+`test_visual_check.py`, three in `test_media.py` and the `POST /v1/moderate/pdf` route with it.
+Four tests were added for the behaviour that replaced them.
 
 ---
 
@@ -114,6 +133,10 @@ complete matters as much as the status code.
 
 ## 4. Part 2 — media (13/13)
 
+> Three rows below describe the PDF extraction path, which was **removed** after part 6 found
+> what [section 8](#8-part-6--the-pdf-path-2729) records. They passed when they were run and are
+> left as they were; `/v1/moderate/pdf` no longer exists and a PDF is no longer read.
+
 | Check | Result |
 |---|---|
 PNG with legible writing — OCR pass | `200`, `ocr_confidence: 0.9913`, `text_found: true`, `text_readable: true` |
@@ -133,7 +156,8 @@ would hand arbitrary data to an image decoder.
 
 PDF fixtures were written by hand — `reportlab` and `fpdf` are not installed in this environment —
 so the PDF path was exercised against a minimal but genuinely valid PDF 1.4 document with
-extractable text, not against a library's output.
+extractable text, not against a library's output. Three checks over two one-page documents is
+thin coverage for what that path claimed to do, which is why part 6 exists.
 
 **Both synthetic images were refused** — `violence_or_unrest` via `visual.exemplar#3672`. Neither
 contains anything of the sort; one is a green ellipse and the other is three lines of text about
@@ -237,6 +261,52 @@ thing — returns `400 missing_prompts`. The spec had it right; the reference ha
 all, so anyone working from the reference would have guessed, and the plausible guess is wrong. A
 field table was added.
 
+### D5 — a PDF page's visual refusal named the wrong rule *(service)*
+
+Found in part 6. `api.py`'s PDF branch passed an explicit `rule_id` built from the
+best-matching **label**, which skipped the cause-naming the image path uses — `refused_by()`,
+guarded by `if not rule_id:`. A page refused by exemplar #3672 was logged as **`visual.safe`**:
+a rule that does not exist, naming the safe label as the reason a thing was refused. The
+category translation was skipped with it, so the author got the generic "breaks community
+policies" where an image would have been told which policy.
+
+The comment immediately above that helper describes this exact bug being found and fixed for
+images — "an audit row saying a picture was blocked by the safe rule is worse than no audit
+row". It was still live for PDFs. `PageVisual` in `pdf.py` also dropped `exemplar_match`, so
+the cause was gone before it reached the helper; fixing it properly means carrying the cause
+through that struct.
+
+**Not fixed — removed.** Together with D6 this is why PDF extraction came out instead of being
+patched. The diagnosis is kept in `private_notes/pdf_on_hold/README.md` for when it returns.
+
+### D6 — one exemplar refuses ordinary business documents *(policy data)*
+
+Exemplar #3672, category `parties`, matches flat document-like pages above the 0.60 bar. Eight
+ordinary business documents rendered as scanned pages:
+
+```
+ ex_block  ex_allow     cause  REFUSED  document
+   0.6945    0.6203  exemplar     True  blank page
+   0.6668    0.6078  exemplar     True  price list
+   0.6338    0.5863  exemplar     True  supplier profile
+   0.6338    0.5901  exemplar     True  spec sheet
+   0.6235    0.5433  exemplar     True  letter
+   0.5947    0.5116    policy     True  dense paragraph
+   0.5878    0.5240      None    False  invoice
+   0.5740    0.5416      None    False  certificate
+                                 6 of 8 refused
+```
+
+A **blank page** is the strongest match in the set. For contrast, 30 real photographs drawn at
+random from the dataset: only 2 cross the bar. So the exemplar mechanism is not misfiring
+generally — it is specific to flat, low-detail images, which is what every page of a scan is,
+and also what the two synthetic PNGs in part 2 were.
+
+This is the same mechanism as [section 7](#7-what-this-run-did-not-settle) seen from the other
+side, and it is **not fixed here**: #3672 is a mark in `visual_policy.yaml`, which is admin
+work. The options are to drop that mark, raise `exemplar_reject_min` above 0.70, or skip the
+visual check on pages whose OCR text was readable.
+
 ### Four assertions in the test scripts were wrong, not the service
 
 Recorded because each one looked like a defect first: expecting `400` for oversized content when
@@ -294,7 +364,82 @@ That is the next step for this, and it is a measurement job, not a tuning one.
 
 ---
 
-## 8. Endpoints deliberately not fired
+## 8. Part 6 — the PDF path (27/29)
+
+Run after the first 91 checks, because three checks over two one-page documents in part 2 was
+not coverage of what `app/pdf.py` claimed to do. Fixtures: a four-page document with the abuse
+on page 3, a paragraph broken across PDF line wraps, a password-protected file, a truncated
+file, a 101-page file, a 210,000-character file, an image-only scan of abusive text, a scan of
+an ordinary supplier profile, a scan with nothing readable on it, a two-page file where only
+page 2 is a scan, and a text file named `.pdf`.
+
+### What held up
+
+| Claim | Result |
+|---|---|
+Abuse on page 3 of 4, not page 1 | rejected, `abuse.targeted` at offsets 198–207 and 208–213 |
+Offsets map to the right page | page spans `1:0-82 2:84-152 3:154-283 4:285-355` — both offsets land in page 3 |
+A paragraph broken across visual lines | still caught, 0.9996 — `_unwrap` rejoined it |
+Abuse that exists only as pixels | OCR read it at 0.9941 confidence, `source: ocr`, refused |
+A scan nothing can read | `422 pdf_text_not_extractable`, naming page 1 |
+One scanned page in a readable document | `422`, naming **page 2**, not page 1 |
+Password protected | `422 pdf_encrypted` |
+Truncated mid-file | `422 pdf_unreadable` — and the message is for the author, not the parser's class name |
+Text file named `.pdf` | `422 media_unsupported` |
+101 pages | `413 pdf_too_many_pages`, `{limit: 100, pages: 101}` |
+210,000 characters | `413 pdf_text_too_long`, `{limit: 100000}` |
+`/pdf` and `/media` | identical answers on all three cases tried |
+
+Extraction was **good**. The page-offset mapping, the paragraph unwrapping and the
+fail-closed rule for unreadable pages all did exactly what the module docstring claimed.
+
+### The two failures
+
+**One was the test's fault.** It read `feedback.issues[].words` to find the flagged offsets,
+but a rule-decided issue carries `start`/`end` — `words` is the model path's shape. The page
+mapping was correct; the assertion was looking at the wrong key.
+
+**The other was real, and ended the feature.** `scan_clean.pdf` — a scan of an ordinary
+supplier profile, OCR-readable, clean words — came back `200 reject`, rule **`visual.safe`**,
+no category. That is D5 and D6 in [section 6](#6-defects-found).
+
+Confirming it meant calling the visual check in-process, which also showed why the live server
+and a bare `load_settings()` disagree: exemplars are loaded from `exemplars.npz` by
+`reload_exemplars()`, so a fresh load scores nothing against them and reports
+`exemplar_block: 0.0`. With them loaded:
+
+```
+scan_clean.pdf    best label: safe (0.7007)
+                  exemplar block 0.6162  allow 0.5904   match #3672 (parties)
+                  refused_by: exemplar
+                  image path would log: visual.exemplar#3672
+                  PDF path logged:      visual.safe
+```
+
+### Why this did not come out in the unit tests
+
+`test_visual_check.py` had a test for a weapon inside a scanned PDF, and it asserted
+`rule_id == ["visual.weapon"]`. It passed. The stub's label was *already* `weapon`, so naming
+the rule from the label and naming it from the cause produce the same string — the test could
+not tell the two apart. A replacement needs a stub whose label and cause **disagree**: an
+exemplar match sitting under a safe top label, which is precisely the real case.
+
+### What shipped instead
+
+PDF extraction was removed rather than patched: `app/pdf.py`, `tests/test_pdf.py`, the five
+scanned-PDF tests, the `/v1/moderate/pdf` route and the `pdf:` settings block. A PDF now
+follows the video rule with the opposite default — `media.allow_unchecked_pdf: true` publishes
+it with `checked: false`, `visual_content_checked: false` and `text_found: false`.
+
+**That is fail-open**, and it is the one decision in this report a reader should push back on
+if they disagree: a scam brochure now publishes unread. The argument for it is that the
+alternative was turning away every scanned document, including the six in eight above, and that
+`checked: false` keeps the audit row honest about what happened. Set the flag to `false` to
+refuse PDFs instead.
+
+---
+
+## 9. Endpoints deliberately not fired
 
 Each of these either costs real time, writes data that cannot be put back, or belongs to work
 in flight. They are **untested by this run** and need their own pass before the AI/ML deploy:
@@ -314,12 +459,17 @@ change nothing — the labels file was compared before and after and was identic
 
 ---
 
-## 9. Reproducing this
+## 10. Reproducing this
 
-The run used four throwaway scripts outside the repository, one per part, each a flat list of
+The run used six throwaway scripts outside the repository, one per part, each a flat list of
 `check(name, condition)` calls over `requests`. They are not committed: they hard-code a local
 base URL and read `ADMIN_TOKEN` out of `flask_api/.env`, and a test that reads a secret from a
 developer's machine should not be something CI can be pointed at by accident.
+
+The PDF ones are the exception worth keeping: `t6_pdf.py` and the fixture builder that feeds it
+are saved in `private_notes/pdf_on_hold/` with the module they tested, because whoever picks PDF
+back up will want the 29 checks that found what section 8 records rather than writing them
+again.
 
 To redo it:
 
@@ -339,3 +489,8 @@ What is **not** worth moving into `pytest`, and should stay a manual pass before
 anything whose value is that it crosses the WSGI boundary — the raw headers, the multipart
 parsing, the 16 MB rejection — and anything that needs the real model loaded, because the unit
 suite deliberately runs without it.
+
+Part 6 is the argument for that last clause. The unit suite had a test for a refused scanned
+page and it passed, because it stubbed the visual check with a label that happened to match the
+real cause. The defect only appeared against the loaded model, the loaded exemplars and a
+document that looked like a document — none of which a stub provides.

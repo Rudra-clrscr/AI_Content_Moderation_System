@@ -1,24 +1,24 @@
-"""OCR for PDF pages that hold no extractable text.
+"""OCR for writing inside an uploaded picture.
 
-Without this, a scanned page is refused (app/pdf.py): text nobody can read can't be checked,
-and approving it would let a screenshot of a scam through. OCR turns some of those refusals
+Without this, the scam just moves into the image: a flyer, a screenshot or a shopfront photo
+carries its words as pixels, and text nobody read cannot be checked. OCR turns some of those
 into real decisions — it widens what we can *accept*, it does not make the system safer.
 
 RapidOCR is PaddleOCR's models exported to ONNX and run through onnxruntime, which is already
 this service's only inference runtime: no PyTorch, no Paddle, no system binary, and the same
 CPU tuning and offline-bundle discipline as the moderation model. Apache 2.0, and the weights
 ship inside the package, so nothing is downloaded at run time. Measured on rendered flyers:
-~0.5 s per page on CPU, recovering the text intact through low resolution, 7-degree skew and
-sensor noise.
+~0.5 s per picture on CPU, recovering the text intact through low resolution, 7-degree skew
+and sensor noise.
 
-Pages are rasterised with pypdfium2 rather than pulled out as embedded images. Scans arrive in
-awkward encodings (CCITT G4, JBIG2) that image extractors often refuse, and a decode failure
-here would refuse a legitimate document; rendering also catches pages whose "text" is really
-vector outlines, which no extractor can read.
+**It fails closed.** OCR that comes back with too little text, or with low confidence, leaves
+the writing unread, and `media.allow_unreadable_image` decides what happens then — never a
+clean result. Anyone can blur an image until OCR gives up, so this must never become a way to
+wave a picture through.
 
-**It still fails closed.** OCR that comes back with too little text, or with low confidence,
-leaves the page unreadable and the upload is refused as before. Anyone can blur an image until
-OCR gives up, so this must never become a way to wave a page through.
+This module used to render and read PDF pages as well (`read_pages`, `read_rendered`). Both
+went when app/pdf.py did; the page-rendering half is in private_notes/pdf_on_hold/ and in the
+history of that commit, to come back with it.
 """
 from __future__ import annotations
 
@@ -33,10 +33,7 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class OcrConfig:
     enabled: bool = True
-    max_pages: int = 60          # pages per upload; ~0.5 s each, bounds catalogs
-    dpi: int = 200               # 200 dpi is enough for body text and keeps pages ~2 MP
-    max_pixels: int = 4_000_000  # hard cap per page, whatever the dpi works out to
-    min_chars: int = 20          # below this the page is still unreadable
+    min_chars: int = 20          # below this the picture's writing is still unread
     min_confidence: float = 0.5  # mean recognition confidence below this is not trusted
     # Detection finds where the writing is; recognition turns it into characters. When the
     # recognition model doesn't cover the script, detection still finds every line and
@@ -64,7 +61,7 @@ class OcrConfig:
             raise ValueError("ocr.min_confidence must be in [0, 1]")
         if not 0.0 <= self.trust_short_confidence <= 1.0:
             raise ValueError("ocr.trust_short_confidence must be in [0, 1]")
-        if min(self.max_pages, self.dpi, self.max_pixels, self.min_chars, self.min_chars_per_box) < 1:
+        if min(self.min_chars, self.min_chars_per_box) < 1:
             raise ValueError("ocr limits must be positive")
 
     def reads_as_text(self, page: "PageText") -> bool:
@@ -134,67 +131,6 @@ class OcrEngine:
         # .onnx itself, so the weights and the language are all it needs from us.
         return {"Rec.model_path": str(path), "Rec.lang_type": lang}
 
-    def read_pages(self, pdf_bytes: bytes, page_indexes: list[int]) -> dict[int, PageText]:
-        """OCR the given 0-based pages of a PDF. Returns only the pages it managed to read;
-        anything missing from the result stays unreadable and is refused upstream."""
-        if not self.enabled or not page_indexes:
-            return {}
-        wanted = page_indexes[: self.config.max_pages]
-        out: dict[int, PageText] = {}
-        try:
-            import numpy as np
-            import pypdfium2 as pdfium
-            with self._lock:                      # one page at a time: bounded CPU, and the
-                engine = self._load()             # wrapper does its own preprocessing
-                doc = pdfium.PdfDocument(pdf_bytes)
-                try:
-                    for index in wanted:
-                        try:
-                            out[index] = self._read_page(doc, index, engine, np)
-                        except Exception:
-                            log.warning("OCR failed on page %d", index + 1, exc_info=True)
-                finally:
-                    doc.close()
-        except ImportError as exc:
-            log.warning("OCR disabled: %s (install rapidocr and pypdfium2 to enable it)", exc)
-            self._failed = True
-            return {}
-        except Exception:
-            log.exception("OCR could not run; pages stay unreadable")
-            return out
-        # A page has to clear the absolute floor AND look like text that was really read, so a
-        # scan in a script the recognition model doesn't cover stays unreadable (and is refused
-        # upstream) instead of passing as a page with a few characters on it.
-        return {i: p for i, p in out.items()
-                if len(p.text) >= self.config.min_chars and self.config.reads_as_text(p)}
-
-    def read_rendered(self, pages: dict[int, "object"]) -> dict[int, PageText]:
-        """OCR pages somebody else has already rendered.
-
-        `read_pages` renders and reads in one go, which is all OCR needs on its own. But a
-        scanned page also has to be *looked at* by the visual check, and rendering a page is
-        the expensive part - ~100 ms before either of them does any work. So the PDF path
-        renders once and hands the same bitmaps to both (app/pdf.py), and this is the half of
-        `read_pages` that takes them.
-        """
-        if not self.enabled or not pages:
-            return {}
-        out: dict[int, PageText] = {}
-        with self._lock:
-            try:
-                engine = self._load()
-            except Exception:
-                log.exception("OCR could not run; pages stay unreadable")
-                return {}
-            for index, image in pages.items():
-                t0 = time.perf_counter()
-                try:
-                    out[index] = self._to_page_text(engine(image), (time.perf_counter() - t0) * 1000)
-                except Exception:
-                    log.warning("OCR failed on page %d", index + 1, exc_info=True)
-        return {i: p for i, p in out.items()
-                if len(p.text) >= self.config.min_chars and self.config.reads_as_text(p)}
-
     def read_image(self, array) -> PageText:
         """OCR an already-decoded RGB image (app/media.py hands us attachments this way)."""
         if not self.enabled:
@@ -217,15 +153,3 @@ class OcrEngine:
         return PageText(" ".join(t.strip() for t in texts if t.strip()),
                         float(sum(scores) / len(scores)) if scores else 0.0, ms,
                         len(boxes) if boxes is not None else len(texts))
-
-    def _read_page(self, doc, index: int, engine, np) -> PageText:
-        page = doc[index]
-        width, height = page.get_size()                        # points (1/72 inch)
-        scale = self.config.dpi / 72.0
-        pixels = (width * scale) * (height * scale)
-        if pixels > self.config.max_pixels:                    # keep a hostile page size bounded
-            scale *= (self.config.max_pixels / pixels) ** 0.5
-        t0 = time.perf_counter()
-        bitmap = page.render(scale=scale)
-        image = np.asarray(bitmap.to_pil().convert("RGB"))
-        return self._to_page_text(engine(image), (time.perf_counter() - t0) * 1000)

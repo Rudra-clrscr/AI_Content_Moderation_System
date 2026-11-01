@@ -76,12 +76,9 @@
   .issues li { margin: 4px 0; }
   .issues .quote { font-weight: 600; }
   .issues .trigger { background: var(--reject-bg); color: var(--reject); border-radius: 3px; padding: 0 2px; }
-  .pdfrow { margin-top: 10px; align-items: flex-start; }
   .filebtn { border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer;
              background: var(--panel); white-space: nowrap; font-size: 13px; }
   .filebtn:hover { border-color: var(--accent); }
-  .pagetag { display: inline-block; font: 600 11px var(--mono); background: var(--panel);
-             border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin-right: 6px; }
   .cats { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
   .why { color: var(--muted); }
   .why b { color: var(--ink); }
@@ -148,13 +145,6 @@
     <div class="row">
       <span class="grow" id="count">0 characters · Ctrl+Enter to submit</span>
       <button class="primary" id="go">Moderate</button>
-    </div>
-
-    <div class="row pdfrow">
-      <label class="filebtn" for="pdf">Upload a PDF…</label>
-      <input type="file" id="pdf" accept="application/pdf,.pdf" hidden>
-      <span class="grow why" id="pdfname">Its text is extracted and checked the same way. Scanned
-        (image-only) PDFs are refused, because text nobody can read can't be checked.</span>
     </div>
 
     <div class="examples" id="examples"></div>
@@ -252,20 +242,10 @@ async function moderate() {
     body: JSON.stringify({ content, content_type: $("ctype").value, content_id: `DEMO-${history.length + 1}` }) }));
 }
 
-// PDF: the same pipeline, but the text comes out of the file. The response carries a page map,
-// so each issue can be shown with the page it was found on.
-$("pdf").addEventListener("change", async (ev) => {
-  const file = ev.target.files[0];
-  if (!file) return;
-  $("pdfname").textContent = `${file.name} · ${(file.size / 1024).toFixed(0)} KB — checking…`;
-  const form = new FormData();
-  form.append("file", file);
-  form.append("content_type", $("ctype").value);
-  form.append("content_id", `DEMO-PDF-${history.length + 1}`);
-  await submit(() => fetch("/v1/moderate/pdf", { method: "POST", body: form }));
-  $("pdfname").textContent = `${file.name} · ${(file.size / 1024).toFixed(0)} KB`;
-  ev.target.value = "";
-});
+// PDF upload was here. It went with app/pdf.py: nothing extracts a PDF any more, so a demo
+// that accepted one would be showing an `allow` that means "nobody read this" - the single most
+// misleading thing this page could do. /v1/moderate/media still takes a PDF and says so in the
+// response; there is just nothing to demonstrate.
 
 async function submit(send) {
   $("go").disabled = true;
@@ -276,7 +256,6 @@ async function submit(send) {
     const roundTrip = performance.now() - t0;
     if (!r.ok) return showError(r.status, body);
     if (body.status === "pending") return showPending(body);
-    if (body.pdf) $("content").value = body.content;   // show what was actually checked
     updateCount();
     lastResult = body;
     showResult(body, roundTrip);
@@ -287,8 +266,9 @@ async function submit(send) {
 
 function showError(status, body) {
   const e = body.error || {};
-  // A refused PDF is a decision, not a malfunction: nothing was published because nothing could be read.
-  const refused = String(e.code || "").startsWith("pdf_");
+  // media_not_checkable is a decision, not a malfunction: nothing was published because nothing
+  // could read the file.
+  const refused = e.code === "media_not_checkable" || e.code === "media_unreadable";
   $("result").innerHTML = `<h2>Decision</h2>
     <div class="${refused ? "verdict" : "error"}">
       ${refused ? `<span class="badge reject">not accepted</span><span class="why">${esc(e.message)}</span>`
@@ -361,12 +341,9 @@ function nudge(b) {
     for (const [s, e] of i.words || []) { out += esc(b.content.slice(pos, s)) + `<b class="trigger">${esc(b.content.slice(s, e))}</b>`; pos = e; }
     return out + esc(b.content.slice(pos, i.end));
   };
-  const pageOf = (off) => (b.pdf?.pages || []).find((p) => off >= p.start && off < p.end)?.page;
-  const list = issues.map((i) => {
-    const page = pageOf(i.start);
-    const tag = page ? `<span class="pagetag">page ${page}</span>` : "";
-    return `<li>${tag}<span class="quote">“${quote(i)}”</span>: ${esc(i.message)}</li>`;
-  }).join("");
+  // The page tag went with the PDF page map - nothing reaching this page spans pages now.
+  const list = issues.map((i) =>
+    `<li><span class="quote">“${quote(i)}”</span>: ${esc(i.message)}</li>`).join("");
   return `<div class="nudge nudge-${b.decision}">
       <div class="nudge-title">${b.decision === "revise" ? "✎" : "⛔"} ${esc(fb.title)}</div>
       <p>${esc(fb.message)}</p>

@@ -48,8 +48,7 @@ Full walkthroughs: [SETUP_IMAGE_MODEL.md](flask_api/SETUP_IMAGE_MODEL.md) ·
 | endpoint | what it takes |
 |---|---|
 | `POST /v1/moderate` | `{content, content_type, content_id}` — text |
-| `POST /v1/moderate/media` | multipart file — one image, PDF or video per request |
-| `POST /v1/moderate/pdf` | multipart PDF — extraction plus OCR for scans |
+| `POST /v1/moderate/media` | multipart file — one image, PDF or video per request. **Only an image is examined**; a PDF or a video is published with `checked: false`, or refused. |
 | `GET /ready` | model versions, thresholds, **whether pictures are actually being checked** |
 | `GET /health` | liveness |
 | `POST /v1/admin/model/reload` | hot-swap the text model |

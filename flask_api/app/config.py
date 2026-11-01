@@ -21,14 +21,13 @@ Env overrides (all optional):
     WORD_SCAN             0 to turn off word windows and word-by-word trigger analysis
     TRIAGE                0 to turn off the linear pre-filter (every span then goes to the model)
     TRIAGE_THRESHOLD      float, overrides the threshold chosen when the filter was trained
-    PDF_UPLOAD            0 to turn off POST /v1/moderate/pdf and /v1/moderate/media
     VISUAL_CHECK          0 to turn off the CLIP visual check (app/clip.py); results then say
                           visual_content_checked: false, as they did before it existed
     VISUAL_REJECT_MIN     float, overrides visual.reject_min
     VISUAL_PROBE_REJECT_MIN  float, overrides visual.probe_reject_min (the trained probe)
     VISUAL_DEVICE         auto | cuda | directml | cpu, where the visual check runs
     MEDIA_UPLOAD          0 to turn off image/video attachment checking
-    PDF_OCR               0 to turn off OCR of scanned pages (they are then refused, as before)
+    IMAGE_OCR             0 to turn off OCR of writing in pictures (app/ocr.py)
     DB_SERVER, DB_NAME    SQL Server host and database
     DB_USER, DB_PASSWORD  SQL auth; if DB_USER is unset, Windows auth (Trusted_Connection) is used
     DB_DRIVER             ODBC driver name (default "ODBC Driver 18 for SQL Server")
@@ -50,7 +49,6 @@ from app.routing import Thresholds
 from app.media import MediaLimits
 from app.clip import VisualCheck, VisualConfig
 from app.ocr import OcrConfig, OcrEngine
-from app.pdf import PdfLimits
 from app.targeted import DEFAULT_SUBJECTS, SentenceScan, TargetedAbuse, WordScan
 from app.grievance import GrievanceCheck
 from app.triage import TriageFilter
@@ -108,7 +106,6 @@ class Settings:
     word_scan: WordScan = field(default_factory=WordScan)
     triage: TriageFilter = field(default_factory=TriageFilter)   # disabled unless a bundle is configured
     grievance: GrievanceCheck = field(default_factory=GrievanceCheck)  # public surfaces only; see app/grievance.py
-    pdf: PdfLimits = field(default_factory=PdfLimits)
     media: MediaLimits = field(default_factory=MediaLimits)
     ocr: OcrEngine = field(default_factory=lambda: OcrEngine(OcrConfig(enabled=False)))
     # Off by default: the model files are not in the repo, so a deployment that has not run
@@ -146,8 +143,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
     ws = raw.get("word_scan", {})
     tr = raw.get("triage", {})
     gr = raw.get("grievance", {})
-    pdf = raw.get("pdf", {})
-    ocr = pdf.get("ocr", {})
+    ocr = raw.get("ocr", {})
     med = raw.get("media", {})
     vis = med.get("visual", {})
     env = os.environ.get
@@ -224,29 +220,19 @@ def load_settings(path: str | Path | None = None) -> Settings:
         ),
         triage=triage,
         grievance=grievance,
-        pdf=PdfLimits(
-            enabled=_as_bool(env("PDF_UPLOAD", pdf.get("enabled", True))),
-            max_bytes=int(pdf.get("max_bytes", 25_000_000)),
-            max_pages=int(pdf.get("max_pages", 100)),
-            max_chars=int(pdf.get("max_chars", 100_000)),
-            min_chars_per_page=int(pdf.get("min_chars_per_page", 20)),
-            reject_unreadable_pages=_as_bool(pdf.get("reject_unreadable_pages", True)),
-        ),
         media=MediaLimits(
             enabled=_as_bool(env("MEDIA_UPLOAD", med.get("enabled", True))),
             max_bytes=int(med.get("max_bytes", 15_000_000)),
             max_pixels=int(med.get("max_pixels", 40_000_000)),
             allow_unchecked_video=_as_bool(med.get("allow_unchecked_video", False)),
+            allow_unchecked_pdf=_as_bool(med.get("allow_unchecked_pdf", True)),
             allow_unreadable_image=_as_bool(med.get("allow_unreadable_image", False)),
             allow_unreadable_image_when_seen=_as_bool(
                 med.get("allow_unreadable_image_when_seen", True)),
             ocr_text_reject_min=float(med.get("ocr_text_reject_min", 0.99)),
         ),
         ocr=OcrEngine(OcrConfig(
-            enabled=_as_bool(env("PDF_OCR", ocr.get("enabled", True))),
-            max_pages=int(ocr.get("max_pages", 60)),
-            dpi=int(ocr.get("dpi", 200)),
-            max_pixels=int(ocr.get("max_pixels", 4_000_000)),
+            enabled=_as_bool(env("IMAGE_OCR", ocr.get("enabled", True))),
             min_chars=int(ocr.get("min_chars", 20)),
             min_confidence=float(ocr.get("min_confidence", 0.5)),
             min_chars_per_box=int(ocr.get("min_chars_per_box", 6)),

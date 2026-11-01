@@ -8,9 +8,11 @@ skips is checked by nothing at all. Two ways that happened:
   article then published clean: the whole-text score read 0.000226 because it could not see
   that far. Such spans are now scored and marked `low_syntax`; they simply may not escalate on
   a middling score.
-* `sentence_scan.max_sentences` was 400, sized for `limits.max_chars` (25,000). PDFs now reach
-  the pipeline with up to `pdf.max_chars` (100,000) characters, leaving roughly a thousand
-  spans past the cap.
+* `sentence_scan.max_sentences` was 400, sized for `limits.max_chars` (25,000), while PDFs
+  reached the pipeline with up to `pdf.max_chars` (100,000) characters - roughly a thousand
+  spans past the cap. PDF extraction has since been removed, so `limits.max_chars` is once
+  again the longest text that can arrive; the cap is left where it was raised to, because it
+  has to cover that again the day PDFs come back.
 """
 import pytest
 
@@ -91,10 +93,11 @@ def test_an_ordinary_sentence_still_escalates_in_the_middle_band(make_settings):
 
 
 def test_the_scan_cap_covers_the_longest_text_that_can_reach_it():
-    """`api.py` sends a PDF's text under pdf.max_chars, so the cap must cover that, not the
-    smaller limits.max_chars. 62 chars per span is a deliberately conservative sentence length."""
+    """The cap has to cover the longest text that can reach the pipeline. With PDF extraction
+    removed that is limits.max_chars; it was pdf.max_chars, four times larger, and the cap is
+    still sized for that. 62 chars per span is a deliberately conservative sentence length."""
     s = load_settings(PROJECT_ROOT / "config" / "settings.yaml")
-    longest = max(s.max_chars, s.pdf.max_chars)
+    longest = s.max_chars
     needed = longest / 62
     assert s.sentence_scan.max_sentences >= needed, (
         f"sentence_scan.max_sentences ({s.sentence_scan.max_sentences}) does not cover "

@@ -54,19 +54,21 @@ The platform's current policy is to publish unwatched footage rather than close 
 Turn the flag off the day footage must not go out unwatched. Video remains covered by human
 reporting, not by this service.
 
-## Request: `POST /v1/moderate/media` (and `/v1/moderate/pdf`)
+## Request: `POST /v1/moderate/media`
 
 `multipart/form-data` upload of **one** attachment — post one file per request, so each gets
-its own decision and its own audit row. Its text is extracted and then moderated by exactly
-the same pipeline, so a brochure is judged by the same rules as a pasted post.
-`/v1/moderate/pdf` is the original path and still works; both accept every kind below.
+its own decision and its own audit row. Any text read out of it is moderated by exactly the
+same pipeline, so a photographed sign is judged by the same rules as a pasted post.
+
+**`POST /v1/moderate/pdf` was removed** along with PDF extraction. It gives `405` now, because
+the URL matches `GET /v1/moderate/{request_id}` and that rule takes no POST. Post here.
 
 Anything published with a post has to be checked, or the scam simply moves into the picture.
 **What can be read differs by kind, so the rule differs too:**
 
 | Kind | What is read | Rule |
 |---|---|---|
-| `pdf` | Text, with OCR for scanned pages | A page that can't be read is **refused** |
+| `pdf` | Nothing — PDF extraction was removed | **Allowed unchecked** (`checked: false`) while `media.allow_unchecked_pdf` is on, as it is in the shipped config; **refused** (`422 media_not_checkable`) when it is off |
 | `image` | OCR **and** the visual check | Both run on the same decoded picture. Text is moderated — at a higher bar than typed text, see below — and the picture itself is scored against the visual policy, where a confident unsafe label **rejects** the upload (*1.7*). An image with writing OCR could not read is **allowed** when the visual check looked at the picture and cleared it, carrying `checked: false` for its words (*1.7*); it is **refused** (`422 media_unreadable`) when nothing looked at it either. With the visual check off or its model missing, this row behaves exactly as it did in 1.6 |
 | `video` | Nothing | **Allowed unchecked** (`checked: false`) while `media.allow_unchecked_video` is on, as it is in the shipped config; **refused** when it is off |
 | anything else | — | `422 media_unsupported` |
@@ -103,10 +105,12 @@ A file with nothing to read (a photo with no text, or an unchecked video) still 
 normal `allow` result and is still written to the audit log, so the record shows both what was
 published and that nothing in it could be read.
 
-**Why an image with no text is allowed but a blank PDF page is not:** a product photo with no
-writing on it is completely ordinary, and refusing those would break the feature for every
-honest seller. A PDF page with no text is not ordinary — it is a scan, and scans are how a
-screenshot of a scam arrives. The asymmetry is deliberate.
+**A PDF now behaves like a video, not like an image.** It used to be extracted and its
+unreadable pages refused; that path was removed while the scanned-page check is reworked, so
+nothing reads a PDF at all. It is published with `checked: false` rather than turned away,
+which is **fail-open** and deliberate: a scam brochure publishes unread. Treat an `allow` on
+`kind: "pdf"` as "nobody looked", never as a clean result. `media.allow_unchecked_pdf: false`
+refuses them instead.
 
 **Why writing OCR can't read is no longer refused outright** (*changed in 1.7*). It used to be,
 and the reason was sound: nothing had inspected the picture, so an unread caption was the whole
@@ -135,62 +139,62 @@ recognition model (`python scripts/fetch_ocr_langs.py devanagari`, then `ocr.rec
 and `ocr.rec_lang`); Hindi pictures are then extracted and judged like any other text.
 
 Media errors: `413 media_too_large`, `422 media_unsupported` / `media_not_checkable` /
-`media_unreadable`, plus all the PDF codes below. `503 media_not_checkable` is different from
+`media_unreadable`. `503 media_not_checkable` is different from
 the 422 of the same name: OCR itself failed, so nothing is known about the file either way —
 the upload is still refused, but the caller should offer a retry rather than tell the author
 their file is the problem.
 
 ### The PDF case in detail
 
+**Nothing reads a PDF.** `app/pdf.py` — extraction, OCR of scanned pages and the per-page
+visual check — was removed while the scanned path is reworked, and `POST /v1/moderate/pdf` went
+with it.
+
 | Field | Required | Notes |
 |---|---|---|
-| `file` | yes | The PDF. Limits are in `settings.yaml` under `pdf` (default 10 MB, 100 pages, 100,000 extracted characters). |
+| `file` | yes | The PDF. One 15 MB cap, `media.max_bytes`, the same as any other attachment. |
 | `content_type` | no (`article`) | As above. |
 | `content_id` | no | As above. |
 
-The response is the payload below plus a `pdf` block:
+The response is the ordinary payload plus a `media` block, and **no `pdf` block** — that went
+with the extractor that filled it. What a client must read instead:
 
 ```json
-"pdf": {
-  "filename": "catalogue.pdf",
-  "page_count": 4,
-  "extracted_chars": 5120,
-  "pages": [{"page": 1, "start": 0, "end": 1180, "chars": 1180},
-            {"page": 2, "start": 1182, "end": 2300, "chars": 1118,
-             "source": "ocr", "confidence": 0.9937}, …],
-  "unreadable_pages": [],
-  "ocr_pages": [2]
-}
+"media": {"filename": "catalogue.pdf", "kind": "pdf",
+          "text_found": false, "visual_content_checked": false, "checked": false}
 ```
 
-A page carries `"source": "ocr"` and a `confidence` when its text was read off the pixels
-rather than taken from the PDF; `ocr_pages` lists them, and the key is absent when none were.
+`checked: false` is the whole of the contract here. The decision will be `allow`, and it means
+**nobody read the file** — not that it was examined and found clean. A client that renders a
+tick for it is showing the member something untrue.
 
-`pages` maps character offsets in `content` to page numbers, so an issue in `feedback.issues`
-can be shown on the page it came from: find the page whose `start <= issue.start < end`.
+`media.allow_unchecked_pdf` decides:
 
-**Pages that can't be read are refused, not allowed.** A scanned page holds no extractable
-text, and content that can't be read can't be checked — allowing it would let a screenshot of a
-scam through untouched. Such uploads return `422 pdf_text_not_extractable` with
-`unreadable_pages`. Set `pdf.reject_unreadable_pages: false` to accept them anyway, in which
-case the pages are listed in `pdf.unreadable_pages` and the entry's `"readable": false`, and
-you are publishing pages the moderator never read.
+| Value | Behaviour |
+|---|---|
+| `true` (**shipped**) | `200 allow`, with the three flags above. |
+| `false` | `422 media_not_checkable`. |
 
-**OCR is attempted on those pages first** (`pdf.ocr` in `settings.yaml`, RapidOCR on
-onnxruntime), so a scanned brochure is read and judged rather than turned away. It only ever
-widens what can be accepted: a page OCR reads with too little text or too low confidence stays
-unreadable and is still refused, so degrading an image to defeat OCR gains nothing. Expect
-~0.5–1.5 s per OCR'd page against ~100 ms for a text PDF; `PDF_OCR=0` turns it off.
+PDF errors are down to two: `400 invalid_file` when no file was attached, and
+`413 media_too_large` over 15 MB. Everything that used to be reported — `pdf_encrypted`,
+`pdf_unreadable`, `pdf_too_many_pages`, `pdf_text_too_long`, `pdf_text_not_extractable` — is
+gone, because nothing opens the file to find out. **A client still handling those codes is not
+broken, it is just unreachable.**
 
-Long documents are **rejected, never truncated** (`413 pdf_text_too_long`): truncating would
-leave the tail unchecked while still answering "allowed".
+#### Why it was taken out
 
-PDF errors: `400 invalid_file`, `413 pdf_too_large` / `pdf_too_many_pages` / `pdf_text_too_long`
-/ `content_too_long`, `422 pdf_invalid` / `pdf_encrypted` / `pdf_unreadable` / `pdf_empty` /
-`pdf_text_not_extractable`, `404 not_found` when `pdf.enabled` is false.
+Extraction worked. Of 29 live checks over that path, 27 passed — page-level offsets, paragraph
+unwrapping, OCR of scanned pages at 0.99 confidence, encryption, damage and every limit. The
+scanned path is what failed: an exemplar in the visual policy matches flat, document-like
+pages, so **six of eight ordinary business documents** submitted as scans were refused — a
+blank page being the strongest match of all — and the refusal was recorded against a rule
+named `visual.safe`, which does not exist. A supplier scanning their own profile would have
+been told it broke community policy.
 
-In async mode the `202` response carries the `pdf` block, but the stored result fetched from
-`GET /v1/moderate/{request_id}` does not — the queue carries the extracted text, not the file.
+Publishing unread was judged the lesser harm over refusing every scanned document, with
+`checked: false` carrying the risk on the record. **Set `media.allow_unchecked_pdf: false` if
+your platform's answer is the other one.** The removed module, its tests and the live checks
+are in `private_notes/pdf_on_hold/`.
 
 ## Responses
 
@@ -314,7 +318,7 @@ is missed at **every** bar including the ordinary 0.5, so it is a gap in the mod
 in this threshold.
 
 **This moves the model's boundary only.** Gate rules are unaffected: a rule either matched or it
-did not, and a scam phrase photographed is still a scam phrase. PDFs keep the ordinary bar —
+did not, and a scam phrase photographed is still a scam phrase. Typed text keeps the ordinary bar —
 their text is extracted, not guessed at, and reads as what the author wrote.
 
 ## The visual check (*added in 1.7*)

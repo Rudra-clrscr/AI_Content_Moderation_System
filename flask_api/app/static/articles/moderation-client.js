@@ -6,7 +6,7 @@
  *
  *   moderateFields(...)  any form: Videos, Requests, Proposals, Business Proposals, Add Business
  *   moderateArticle(...) the Articles editor (title + rich-text body + link URLs)
- *   moderateFile(...)    one attachment: image, video or PDF
+ *   moderateFile(...)    one attachment: image, video or PDF (only an image is examined)
  *   showDecision(...)    the "before you post" popup: the moderation rating and what the
  *                        moderator found, over the marked-up form
  *
