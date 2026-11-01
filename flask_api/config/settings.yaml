@@ -197,6 +197,43 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # with the prompts, which is how the body-part regression was
                             # found in the first place.
     max_pixels: 40000000    # decoded size, against decompression bombs (as media.max_pixels)
+    exemplar_reject_min: 0.60
+                            # HOW CLOSE an upload must be to a picture an admin marked "refuse
+                            # things like this". Measured on this corpus: within a coherent
+                            # category image-to-image similarity averages 0.58-0.66 and across
+                            # categories 0.42-0.44, so 0.60 sits in the gap. Not comparable to
+                            # reject_min below - that scores against text, this against pictures.
+    exemplar_margin_min: 0.10
+                            # ...AND HOW MUCH CLOSER it must be than the nearest ALLOWING mark.
+                            # The bar alone asks "is this near something we refuse?" when the
+                            # question is "is it nearer to something we refuse than to something
+                            # we publish?" - and 0.60 sits only just above the cross-category
+                            # floor, so a mark with no distinctive look answers yes to anything.
+                            #
+                            # MEASURED 2026-11-01 over 11 marks and 513 pictures. ONE mark -
+                            # #3672, a `parties` photo - was producing 45 of the 85 exemplar
+                            # refusals in the sample, across weapons, gore, safe objects and
+                            # real BONC listings alike. #3669 (`toy`) produced 6, five of them
+                            # pictures that should have published. Sweeping the margin:
+                            #
+                            #   margin  business docs  real listings  safe objects | weapons lost
+                            #   0.00       8 of 8        7 of 63       14 of 150   |      0
+                            #   0.05       5             6             10          |      0
+                            #   0.10       1             3              7          |      0
+                            #   0.12       1             2              3          |      1
+                            #
+                            # Nothing is lost on weapons or gore up to 0.10: every one an
+                            # exemplar catches there is also caught by the probe or by a label's
+                            # own bar, so that channel was contributing no unique refusal to
+                            # those sets - only false ones. 0.10 is the knee.
+                            #
+                            # NOT measured on the categories the marks are FOR (parties,
+                            # physique, toy, minors) - there is no labelled set here for those.
+                            # The claim is "costs nothing on weapons and gore", not "costs
+                            # nothing". A deliberate mark should survive it: a real look-alike
+                            # sits far closer to the mark than to anything in the allowed set,
+                            # which is what a margin keeps while dropping coincidental matches.
+                            # 0.0 restores an absolute bar alone, the behaviour before this.
     probe_reject_min: 0.70  # the TRAINED probe's own boundary (models/img_v1/probe.npz,
                             # training/train_image_probe.py). A picture is refused if the
                             # written prompts cross reject_min OR the probe crosses this - they

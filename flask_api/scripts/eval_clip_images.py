@@ -153,7 +153,7 @@ def image_files(directory: Path) -> list[Path]:
 
 
 def score_dir(check: VisualCheck, directory: Path,
-              limit: int = 0) -> list[tuple[Path, float, str, dict, bool]]:
+              limit: int = 0) -> list[tuple[Path, float, str, dict, bool, str, int]]:
     from PIL import Image
 
     out, unreadable = [], []
@@ -172,7 +172,8 @@ def score_dir(check: VisualCheck, directory: Path,
         # which is not how the service decides any more - each label has its own, and
         # `decides_reject` is the only thing that knows all of them.
         out.append((path, result.unsafe_score, result.label, result.scores,
-                    check.decides_reject(result)))
+                    check.decides_reject(result), result.refused_by(check.config),
+                    (result.exemplar_match or {}).get("id")))
     # Loudly, and with the count: a set that quietly shrinks is the bug this file has already
     # been bitten by twice.
     if unreadable:
@@ -199,6 +200,8 @@ def main() -> int:
                     help="override the probe's boundary. NOT comparable across probes with "
                          "different class counts: the reading is 1 - P(safe), so more classes "
                          "lower P(safe) for every picture and shift the whole scale.")
+    ap.add_argument("--no-exemplars", action="store_true",
+                    help="skip the admin-marked exemplars, measuring prompts and probe alone")
     ap.add_argument("--limit", type=int, default=0, help="at most this many images per set")
     ap.add_argument("--dump", type=int, default=0, help="write this many worst cases per set")
     ap.add_argument("--dump-dir", type=Path, default=None)
@@ -221,6 +224,24 @@ def main() -> int:
         return 2
     print(f"running on {check.status['provider']}")
 
+    # EXEMPLARS ARE A DECISION CHANNEL AND THIS DID NOT LOAD THEM. Everything below ran against
+    # the prompts and the probe only, so a verdict this script called a false positive could be
+    # neither explained nor reproduced if an admin's mark was the thing refusing it - and a mark
+    # that refuses everything was invisible here while refusing 11% of real listings in
+    # production. `--no-exemplars` restores the old view for comparing prompt work in isolation.
+    if not args.no_exemplars:
+        if check.reload_exemplars():
+            marks = getattr(check, "_exemplars", None)
+            if marks:
+                n_block = sum(1 for a in marks[1] if a == "block")
+                print(f"{len(marks[1])} exemplars loaded "
+                      f"({n_block} refuse, {len(marks[1]) - n_block} allow), "
+                      f"margin {check.config.exemplar_margin_min}")
+        else:
+            print("no exemplars found - the marks channel is not being measured")
+    else:
+        print("exemplars NOT loaded (--no-exemplars): prompts and probe only")
+
     results: dict[str, tuple[list, bool | None]] = {}
     t0 = time.time()
     total = 0
@@ -238,10 +259,10 @@ def main() -> int:
     for name, (scored, expected) in results.items():
         if not scored:
             continue
-        vals = sorted(s for _, s, _, _, _ in scored)
+        vals = sorted(s for _, s, *_ in scored)
         n = len(vals)
         counts: dict[str, int] = {}
-        for _, _, label, _, _ in scored:
+        for _, _, label, *_ in scored:
             counts[label] = counts.get(label, 0) + 1
         top = ", ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])[:3])
         want = {True: "unsafe", False: "safe", None: "mixed"}[expected]
@@ -270,7 +291,7 @@ def main() -> int:
             if not scored:
                 row.append(f"{'-':>16}")
                 continue
-            hits = sum(1 for _, s, _, _, _ in scored if s >= thr)
+            hits = sum(1 for _, s, *_ in scored if s >= thr)
             rates[name] = hits / len(scored)
             row.append(f"{hits:>6}/{len(scored):<4} {rates[name]:>4.0%}")
         fp = max((rates.get(n, 0.0) for n in clean), default=0.0)
@@ -294,11 +315,33 @@ def main() -> int:
     for name, (scored, expected) in results.items():
         if not scored:
             continue
-        rej = sum(1 for *_, r in scored if r)
+        rej = sum(1 for row in scored if row[4])
         want = {True: "unsafe", False: "safe", None: "mixed"}[expected]
         flag = "" if expected is None else ("  <- recall" if expected else "  <- refusals")
         print(f"{name:24} {len(scored):5}  {want:>7}  {rej:5}/{len(scored):<4} "
               f"{rej / len(scored):>4.0%}{flag}")
+
+    # WHICH CHANNEL REFUSED. A set's refusal count says nothing about what to go and change:
+    # prompts, the probe and an admin's marks all land in the same number, and the three are
+    # edited in different places. A mark that refuses a whole set is visible here and nowhere
+    # else - which is how one came to be refusing 11% of real listings unnoticed.
+    print()
+    print("BY CHANNEL")
+    print(f"{'set':24} {'policy':>8} {'probe':>8} {'exemplar':>9}   marks that fired")
+    for name, (scored, expected) in results.items():
+        if not scored:
+            continue
+        by = {"policy": 0, "probe": 0, "exemplar": 0}
+        marks: dict[int, int] = {}
+        for row in scored:
+            cause = row[5]
+            if cause in by:
+                by[cause] += 1
+            if cause == "exemplar" and row[6] is not None:
+                marks[row[6]] = marks.get(row[6], 0) + 1
+        worst = ", ".join(f"#{i} x{n}" for i, n in
+                          sorted(marks.items(), key=lambda kv: -kv[1])[:4]) or "-"
+        print(f"{name:24} {by['policy']:8} {by['probe']:8} {by['exemplar']:9}   {worst}")
 
     # ---- the ones to look at ----
     if args.dump:
@@ -312,8 +355,12 @@ def main() -> int:
             worst = sorted(scored, key=lambda r: r[1], reverse=(expected is False))[: args.dump]
             folder = dump_dir / name.split()[0]
             folder.mkdir(parents=True, exist_ok=True)
-            for path, score, label, _, _ in worst:
-                shutil.copy(path, folder / f"{score:.3f}_{label}_{path.name}")
+            for path, score, label, _, _, cause, mark in worst:
+                # The cause is in the filename: eyeballing a folder of refusals is how a mark
+                # that matches everything gets spotted, and that needs the mark's id on the
+                # picture rather than in a table somewhere else.
+                why = f"_{cause}" + (f"#{mark}" if mark is not None else "") if cause else ""
+                shutil.copy(path, folder / f"{score:.3f}_{label}{why}_{path.name}")
         print(f"\nworst cases written to {dump_dir}")
     return 0
 

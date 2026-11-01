@@ -130,6 +130,33 @@ class VisualConfig:
     # to reject_min above - that one scores against text, this against pictures, and the two
     # live on different scales (0.277 vs 0.663 for the same wedding photograph).
     exemplar_reject_min: float = 0.60
+    # ...AND it has to beat the nearest ALLOWING mark by this much. An absolute bar alone asks
+    # "is this close to something we refuse?" when the question is "is it closer to something we
+    # refuse than to something we publish?" - and at 0.60, which sits only just above the
+    # cross-category floor, a mark with no distinctive look answers yes to almost anything.
+    #
+    # MEASURED (2026-11-01, 11 marks, 513 pictures). One mark - #3672, a `parties` photo - was
+    # producing 45 of the 85 exemplar refusals in the sample, across weapons, gore, safe objects
+    # and real listings alike; #3669 (`toy`) produced 6, of which 5 were pictures that should
+    # have published. Requiring a margin, swept against the labelled sets:
+    #
+    #   margin   business docs   real BONC listings   safe objects | weapons lost   gore lost
+    #   0.00         8 of 8           7 of 63           14 of 150  |      0             0
+    #   0.05         5                6                 10         |      0             0
+    #   0.10         1                3                  7         |      0             0
+    #   0.12         1                2                  3         |      1             0
+    #
+    # Zero refusals are lost on weapons or gore all the way to 0.10, because every one of those
+    # an exemplar catches is also caught by the probe or by a label's own bar - the exemplar
+    # channel was adding no unique refusal on those sets, only false ones. 0.10 is the knee.
+    #
+    # WHAT THIS IS NOT MEASURED ON: the categories the marks are actually FOR - parties,
+    # physique, toy, minors. There is no labelled set for those here, so the claim is "costs
+    # nothing on weapons and gore", not "costs nothing". A deliberate mark should survive it:
+    # a genuine look-alike sits far closer to the mark than to anything in the allowed set,
+    # and that is precisely what a margin preserves while dropping coincidental matches.
+    # Set to 0.0 to restore the behaviour of an absolute bar alone.
+    exemplar_margin_min: float = 0.10
     max_pixels: int = 40_000_000
     intra_op_threads: int = 4
     inter_op_threads: int = 1
@@ -237,7 +264,12 @@ class VisualResult:
         if self.exemplar_allow >= config.exemplar_reject_min and \
                 self.exemplar_allow >= self.exemplar_block:
             return None
-        if self.exemplar_block >= config.exemplar_reject_min:
+        # The margin here must match VisualCheck.decides_reject exactly, or the audit row names
+        # a channel that did not decide. `getattr` because an older bundle's config, or a test's
+        # stub config, predates the field - those fall back to the bar alone, as before.
+        if self.exemplar_block >= config.exemplar_reject_min and \
+                (self.exemplar_block - self.exemplar_allow) >= getattr(
+                    config, "exemplar_margin_min", 0.0):
             return "exemplar"
         if (self.probe_scores and not self.withdrawn_category
                 and self.probe_unsafe >= config.probe_reject_min):
@@ -746,7 +778,8 @@ class VisualCheck:
         if result.exemplar_allow >= self.config.exemplar_reject_min and \
                 result.exemplar_allow >= result.exemplar_block:
             return False
-        if result.exemplar_block >= self.config.exemplar_reject_min:
+        if result.exemplar_block >= self.config.exemplar_reject_min and \
+                (result.exemplar_block - result.exemplar_allow) >= self.config.exemplar_margin_min:
             return True
         # A WITHDRAWN CATEGORY GETS NO VOTE FROM THE PROBE. What is left is the written
         # policy below, and a category with no refusing rule publishes - which is what an

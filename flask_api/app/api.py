@@ -383,13 +383,21 @@ def moderate_media():
 
 
 def _visual_reject(filename: str, looked, content_type: ContentType,
-                   content_id: str | None, extra: dict, rule_id: str = "", page: int | None = None):
+                   content_id: str | None, extra: dict, page: int | None = None):
     """A refusal decided by the picture rather than by any text.
 
     Built as a gate block so it is indistinguishable downstream from a blocked phrase: it gets
     the configured feedback wording for its category, an audit row through the usual sink, and
     the same shape of result a caller already handles. The "content" is the filename, because
     there is no text to quote - what was wrong is in `media.visual`.
+
+    THERE IS NO `rule_id` ARGUMENT, AND THERE MUST NOT BE ONE. There used to be, defaulting to
+    "" and guarded by `if not rule_id:`, so a caller could supply its own and skip the naming
+    below. The PDF path did exactly that - it passed `f"visual.{worst.label}"` - and so a
+    scanned page refused by an exemplar was logged as `visual.safe`: the identical bug the
+    comment below describes being fixed for images, reintroduced one container along by the
+    one route that could opt out. The caller cannot opt out any more. A caller that wants a
+    different name wants `refused_by` to be wrong, which is a reason to fix `refused_by`.
     """
     svc = _svc()
     # Name the page when there is one, so the author is told where to look in a 40-page scan.
@@ -407,15 +415,14 @@ def _visual_reject(filename: str, looked, content_type: ContentType,
         cause = looked.refused_by(svc.settings.visual.config)
     except Exception:
         cause = None
-    if not rule_id:
-        if cause == "exemplar":
-            m = getattr(looked, "exemplar_match", None) or {}
-            # The image id is what makes this actionable: it is the row to go and change.
-            rule_id = f"visual.exemplar#{m.get('id')}" if m.get("id") else "visual.exemplar"
-        elif cause == "probe":
-            rule_id = f"visual.probe.{looked.label}"
-        else:
-            rule_id = f"visual.{looked.label}"
+    if cause == "exemplar":
+        m = getattr(looked, "exemplar_match", None) or {}
+        # The image id is what makes this actionable: it is the row to go and change.
+        rule_id = f"visual.exemplar#{m.get('id')}" if m.get("id") else "visual.exemplar"
+    elif cause == "probe":
+        rule_id = f"visual.probe.{looked.label}"
+    else:
+        rule_id = f"visual.{looked.label}"
     # The exemplar's OWN category, not the best-matching label's. A cloud refused by a rainbow
     # exemplar was being filed under `weapons`, because that is what the prompts happened to
     # rank highest once the probe had spoken - a category with no bearing on why it was
