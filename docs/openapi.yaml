@@ -4,7 +4,7 @@ info:
   title: BONC Moderation API
   version: "1.9"
   description: |
-    Text, image and PDF moderation for the BONC platform.
+    Text and image moderation for the BONC platform.
 
     **Result schema version is `1.9`** — that is what `info.version` tracks, since the
     result payload is the contract consumers depend on. The HTTP surface is versioned
@@ -150,7 +150,7 @@ paths:
   /v1/moderate/media:
     post:
       tags: [Moderation]
-      summary: Moderate an uploaded image, PDF or video
+      summary: Moderate an uploaded image
       operationId: moderateMedia
       description: |
         Post **one** file per request — each gets its own decision and its own audit row.
@@ -159,12 +159,13 @@ paths:
         - **Image** — two passes. OCR reads any writing; the CLIP visual check scores the
           picture itself. Text read off a picture is judged at a raised bar (0.99) with no
           revise band.
-        - **PDF** — text extraction with OCR for scanned pages. The visual check runs on
-          rendered pages too, and a refusal names the page.
+        - **PDF** — **not examined.** Extraction was removed while the scanned-page path is
+          reworked, so a PDF now follows the video rule: `media.allow_unchecked_pdf`
+          (default **true**) decides whether it is refused or published with
+          `checked: false`. There is no `pdf` block in the result any more, and
+          `POST /v1/moderate/pdf` is gone — post to this path instead.
         - **Video** — not examined. `media.allow_unchecked_video` decides whether it is
           refused or published with `checked: false`.
-
-        Returns `404` when `pdf.enabled` is false.
       requestBody:
         required: true
         content:
@@ -176,7 +177,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: Image (15 MB cap), PDF (25 MB cap) or video.
+                  description: Image, PDF or video. One 15 MB cap for every kind.
                 content_type:
                   allOf: [{ $ref: '#/components/schemas/ContentType' }]
                   default: article
@@ -187,8 +188,8 @@ paths:
       responses:
         "200":
           description: |
-            A decision was reached. The body is the ordinary result plus a `media` block
-            (and an identical `pdf` block for PDFs, kept for the original contract).
+            A decision was reached. The body is the ordinary result plus a `media` block.
+            A PDF or a video carries `checked: false` in it and nothing else was read.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MediaModerationResult' }
@@ -198,55 +199,18 @@ paths:
         "403":
           description: '`client_blocked`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
-        "404":
-          description: '`not_found` — file moderation is disabled (`PDF_UPLOAD=0`).'
-          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "413":
-          description: '`media_too_large`, `pdf_too_large`, `pdf_too_many_pages`, `pdf_text_too_long`, `content_too_long`'
+          description: '`media_too_large`, `content_too_long`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "422":
           description: |
             `media_unreadable` (writing OCR could not read), `media_unsupported`
-            (not an image, PDF or video), `media_not_checkable` (video, when
-            `allow_unchecked_video` is false), or a PDF extraction failure.
+            (not an image, PDF or video), or `media_not_checkable` — a video with
+            `allow_unchecked_video` false, or a PDF with `allow_unchecked_pdf` false.
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "503":
           description: '`media_not_checkable` — the OCR or visual model threw. Retryable.'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
-
-  /v1/moderate/pdf:
-    post:
-      tags: [Moderation]
-      summary: Moderate an uploaded file (alias of /v1/moderate/media)
-      operationId: moderatePdf
-      description: |
-        **The same handler as `/v1/moderate/media`.** This is the original path, kept for
-        the existing contract; it accepts images and video too. Prefer
-        `/v1/moderate/media` in new code.
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [file]
-              properties:
-                file: { type: string, format: binary }
-                content_type:
-                  allOf: [{ $ref: '#/components/schemas/ContentType' }]
-                  default: article
-                content_id: { type: string }
-      responses:
-        "200":
-          description: A decision was reached.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/MediaModerationResult' }
-        "400": { $ref: '#/components/responses/BadRequest' }
-        "404": { $ref: '#/components/responses/NotFound' }
-        "413": { $ref: '#/components/responses/TooLarge' }
-        "422": { $ref: '#/components/responses/Unprocessable' }
-        "503": { $ref: '#/components/responses/Unavailable' }
 
   /v1/moderate/{request_id}:
     get:
@@ -1870,7 +1834,10 @@ components:
             not a clean result.
         checked:
           type: boolean
-          description: False when the file was published without being fully examined.
+          description: |
+            False when the file was published without being examined at all — every PDF
+            and every video. Absent on an image, which is always read and scored.
+            **An allow with `checked: false` is not a clean result.**
         visual: { type: object, description: The visual check's scores and winning label. }
 
     ModerationResult:
@@ -1922,9 +1889,6 @@ components:
         - type: object
           properties:
             media: { $ref: '#/components/schemas/MediaBlock' }
-            pdf:
-              allOf: [{ $ref: '#/components/schemas/MediaBlock' }]
-              description: PDFs only. Identical to `media`, kept for the original contract.
 
     PendingResult:
       type: object

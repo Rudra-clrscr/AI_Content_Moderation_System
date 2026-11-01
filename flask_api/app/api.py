@@ -12,8 +12,6 @@ from app import client_address
 from app.gate import GateMatch, GateResult
 from app.media import MediaError, detect_kind, read_image
 from app.model import ModelNotReady
-from app.pdf import PdfError
-from app.pdf import extract as pdf_extract
 from app.pipeline import ContentType, ModerationRequest, Stage
 from app.routing import Decision, Thresholds
 
@@ -145,8 +143,8 @@ def _parse_request() -> ModerationRequest | tuple:
 
 def _moderate(req: ModerationRequest, extra: dict | None = None,
               thresholds: "Thresholds | None" = None):
-    """Gate, then queue or score. Shared by the JSON and PDF endpoints so a PDF is judged by
-    exactly the same rules. `extra` is merged into the response (the PDF page map).
+    """Gate, then queue or score. Shared by the JSON and the upload endpoints, so writing read
+    off a picture is judged by exactly the same rules. `extra` is merged into the response.
 
     `thresholds` raises the bar for one request - used for text OCR'd out of a picture, which
     is noisier than anything a member types. The gate is unaffected either way: a rule either
@@ -220,7 +218,6 @@ def moderate():
     return _moderate(req)
 
 
-@bp.post("/v1/moderate/pdf")
 @bp.post("/v1/moderate/media")
 def moderate_media():
     """Moderate one uploaded file: read whatever text it carries, then run the ordinary pipeline.
@@ -230,23 +227,20 @@ def moderate_media():
 
     What can be read differs by kind, and so does the rule (see app/media.py):
 
-      * **PDF** — text, with OCR for scanned pages. A page that can't be read is refused, and
-        the result carries a `pdf` block mapping offsets to page numbers.
       * **Image** — two passes over the same picture. OCR reads any writing, which catches
         the bypass of putting the scam in a screenshot; the CLIP visual check (app/clip.py)
         scores the picture itself against `config/visual_policy.yaml`, which catches a weapon
         or gore photograph carrying no words at all. With the visual check off or its model
         missing, the result says `visual_content_checked: false` and behaves as it used to.
+      * **PDF** — not checked. Extraction was taken out while the scanned-page path is
+        reworked, so `media.allow_unchecked_pdf` decides, exactly as it does for video:
+        publish it and record `checked: false`, or refuse it.
       * **Video** — not checked. The audio-transcription path was removed along with its
         Whisper dependency, so `media.allow_unchecked_video` decides: refuse it, or publish it
         and record `checked: false` so nothing reads the allow as "we looked at it".
-
-    `/v1/moderate/pdf` is the original path and still works; it accepts the other kinds too.
     """
     svc = _svc()
-    pdf_limits, media = svc.settings.pdf, svc.settings.media
-    if not pdf_limits.enabled:
-        return _error(404, "not_found", "file moderation is disabled")
+    media = svc.settings.media
 
     upload = request.files.get("file")
     if upload is None or not upload.filename:
@@ -258,39 +252,36 @@ def moderate_media():
         return _error(400, "invalid_content_type", "unknown 'content_type'", allowed=_CONTENT_TYPES)
     content_id = request.form.get("content_id") or None
 
-    cap = max(pdf_limits.max_bytes, media.max_bytes)
-    data = upload.read(cap + 1)
-    if len(data) > cap:
-        return _error(413, "media_too_large", f"the file is larger than {cap} bytes", limit=cap)
+    data = upload.read(media.max_bytes + 1)
+    if len(data) > media.max_bytes:
+        return _error(413, "media_too_large", f"the file is larger than {media.max_bytes} bytes",
+                      limit=media.max_bytes)
 
     kind = detect_kind(data, upload.filename)
     block = {"filename": upload.filename, "kind": kind}
 
     if kind == "pdf":
-        if len(data) > pdf_limits.max_bytes:
-            return _error(413, "pdf_too_large", f"the file is larger than {pdf_limits.max_bytes} bytes",
-                          limit=pdf_limits.max_bytes)
-        try:
-            extracted = pdf_extract(data, pdf_limits, upload.filename, svc.settings.ocr,
-                                    svc.settings.visual)
-        except PdfError as exc:
-            status = 413 if exc.code in ("pdf_too_large", "pdf_too_many_pages", "pdf_text_too_long") else 422
-            return _error(status, exc.code, exc.message, **exc.extra)
-        text = extracted.text
-        block = {**block, **extracted.as_dict()}
-        extra = {"pdf": block, "media": block}          # "pdf" kept for the original contract
-        if extracted.unsafe_visual:
-            # A scanned PDF is a stack of photographs. Whatever its text says, a page the
-            # visual check objects to is refused the same way the picture would be if it had
-            # been attached directly - the container must not decide the rule.
-            worst = max(extracted.unsafe_visual, key=lambda v: v.score)
-            return _visual_reject(upload.filename, worst, content_type, content_id, extra,
-                                  rule_id=f"visual.{worst.label}", page=worst.page)
+        # NOTHING READS A PDF ANY MORE. Extraction, its OCR of scanned pages and the per-page
+        # visual check were taken out while the scanned path is reworked: a scan of an ordinary
+        # business document was being refused by an exemplar that matches flat, document-like
+        # pages, and the refusal was logged against the wrong rule. See
+        # private_notes/pdf_on_hold/ on the machines that have it, and the commit that removed
+        # app/pdf.py.
+        #
+        # What is left is the same rule video follows - publish it and say plainly that it was
+        # not checked, or refuse it. Shipped `true`, which is FAIL-OPEN and deliberate: a scam
+        # brochure or a scanned threat publishes unread. `checked: false` is what keeps the
+        # audit row honest about that, so nothing downstream may read the allow as "we looked".
+        if not media.allow_unchecked_pdf:
+            return _error(422, "media_not_checkable",
+                          "PDFs cannot be checked by this service at the moment, so this one "
+                          "cannot be published. Paste the text, or attach an image instead.",
+                          kind=kind)
+        block.update(text_found=False, visual_content_checked=False, checked=False)
+        return jsonify({**_allowed_without_text(upload.filename, content_type, content_id),
+                        "media": block}), 200
 
     elif kind == "image":
-        if len(data) > media.max_bytes:
-            return _error(413, "media_too_large", f"the file is larger than {media.max_bytes} bytes",
-                          limit=media.max_bytes)
         try:
             seen = read_image(data, svc.settings.ocr, media, svc.settings.visual)
         except MediaError as exc:
@@ -360,7 +351,7 @@ def moderate_media():
         if not media.allow_unchecked_video:
             return _error(422, "media_not_checkable",
                           "video cannot be checked by this service, so it cannot be published. "
-                          "Upload a still image or a PDF instead.", kind=kind)
+                          "Upload a still image instead.", kind=kind)
         block.update(text_found=False, visual_content_checked=False, checked=False)
         return jsonify({**_allowed_without_text(upload.filename, content_type, content_id),
                         "media": block}), 200
@@ -370,7 +361,7 @@ def moderate_media():
                       "this file type cannot be checked. Attach an image, a video or a PDF.",
                       kind=kind)
 
-    char_limit = pdf_limits.max_chars if kind == "pdf" else svc.settings.max_chars
+    char_limit = svc.settings.max_chars
     if len(text) > char_limit:
         return _error(413, "content_too_long",
                       f"the file's text is {len(text)} characters, over the "
@@ -379,8 +370,7 @@ def moderate_media():
     # Words read off a photograph are held to a higher bar than words somebody typed. OCR of a
     # shopfront comes back as word-salad and the model, trained on prose, scores that noise
     # unreliably - it put four ordinary BONC listings in the reject band. Measured: legitimate
-    # signage 0.78-0.976, scam flyers 0.9997, so the two still separate. PDFs keep the ordinary
-    # bar: their text is extracted, not guessed at, and reads as what the author wrote.
+    # signage 0.78-0.976, scam flyers 0.9997, so the two still separate.
     # One boundary, not two. A "revise" verdict asks the author to edit the highlighted part,
     # which is meaningless for words baked into a photograph - their only remedies are to
     # replace the picture or leave it. So image text is allowed below the bar and refused at or

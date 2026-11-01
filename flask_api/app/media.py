@@ -5,18 +5,21 @@ post is published with it, so anything we cannot read is a way round the moderat
 clean article, put the scam in the picture. Each kind gets the strictest rule we can honestly
 support, and the rules differ because what we can read differs.
 
-**PDF** — text, with OCR for scanned pages (app/pdf.py). A page we cannot read is refused.
-
 **Image** — two passes over the same decoded picture. OCR reads any writing, which catches
 the common bypass of putting the scam in a screenshot; and the CLIP visual check (app/clip.py)
 scores the picture itself against the written policy in `config/visual_policy.yaml`, which
 catches what no amount of reading would — a weapon listing or a gore photograph with no words
-on it at all. An image with no text and nothing the visual check objects to is allowed: unlike
-a blank PDF page, a product photo with no writing on it is completely normal, and refusing
-those would break the feature for every honest seller.
+on it at all. An image with no text and nothing the visual check objects to is allowed: a
+product photo with no writing on it is completely normal, and refusing those would break the
+feature for every honest seller.
 
 `visual_content_checked` says which of those two actually happened. It is `false` wherever the
 visual check is off or its model is missing, and the caller must not read that as clean.
+
+**PDF** — not checked either, as of the commit that removed `app/pdf.py`. Extraction worked
+well on documents carrying real text; what stopped it was the scanned path, where an exemplar
+that matches flat document-like pages was refusing ordinary business paperwork. So PDFs follow
+the video rule for now, except that `media.allow_unchecked_pdf` ships **true**.
 
 **Video** — not checked. The audio-transcription path and its Whisper dependency were removed;
 `media.allow_unchecked_video` decides what happens to one, as it did before that check existed.
@@ -76,10 +79,15 @@ class MediaLimits:
     max_bytes: int = 15_000_000        # one attachment
     max_pixels: int = 40_000_000       # decoded image size, against decompression bombs
     allow_unchecked_video: bool = False
-    # An image with writing OCR could not read. Refusing is the fail-closed choice and matches
-    # the PDF rule (pdf.reject_unreadable_pages): a picture whose words nobody read is exactly
-    # how a scam arrives. Turn it on to publish those anyway - they are then recorded with
-    # checked: false, never as a clean result.
+    # A PDF, now that nothing extracts one. Shipped TRUE, unlike the video flag it copies: PDF
+    # checking is coming back, and turning the Articles tab's document uploads away in the
+    # meantime was judged worse than publishing them unread. It is still fail-open - a scam
+    # brochure publishes - so the result carries checked: false and the audit row says plainly
+    # that nobody looked. Set false the day a document must not go out unchecked.
+    allow_unchecked_pdf: bool = True
+    # An image with writing OCR could not read. Refusing is the fail-closed choice: a picture
+    # whose words nobody read is exactly how a scam arrives. Turn it on to publish those
+    # anyway - they are then recorded with checked: false, never as a clean result.
     allow_unreadable_image: bool = False
     # An image whose writing OCR could not read, but whose PICTURE the visual check looked at
     # and cleared. Refusing those was right while nothing inspected the picture; now that

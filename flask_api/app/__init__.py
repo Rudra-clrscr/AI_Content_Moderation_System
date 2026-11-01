@@ -51,11 +51,10 @@ def create_app(
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = settings or load_settings()
     app = Flask(__name__, static_folder=None)  # only /demo serves a file, and only when enabled
-    # bytes; UTF-8 worst case + JSON overhead, or a PDF upload plus its multipart envelope.
+    # bytes; UTF-8 worst case + JSON overhead, or an attachment plus its multipart envelope.
     json_limit = settings.max_chars * 4 + 4096
-    app.config["MAX_CONTENT_LENGTH"] = max(json_limit, settings.pdf.max_bytes + 8192,
-                                           settings.media.max_bytes + 8192) \
-        if settings.pdf.enabled else json_limit
+    app.config["MAX_CONTENT_LENGTH"] = max(json_limit, settings.media.max_bytes + 8192) \
+        if settings.media.enabled else json_limit
 
     models = ModelRegistry()
     if scorer is not None:

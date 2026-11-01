@@ -240,50 +240,48 @@ sentences aimed at someone do.
 cleaner ad isn't aimed at anyone, and 'idiot-proof' is one word, so neither
 triggers the rules."
 
-### 4.10 PDF uploads
+### 4.10 PDF uploads — removed from the demo
 
-Click **Upload a PDF…** on the demo page (or `POST /v1/moderate/pdf`). The text is extracted
-and checked by the same pipeline; the box then shows what was actually read, and each issue is
-tagged with the page it came from.
+**There is nothing to show here any more, and that is the honest version.** PDF extraction was
+taken out while the scanned-page check is reworked, so the demo page no longer has an
+**Upload a PDF…** button and `POST /v1/moderate/pdf` no longer exists.
 
-- A normal 2-page catalogue (products, "30% advance, balance before dispatch") → **allowed**
-- The same catalogue with "Earn 50000 per week… pay a small registration fee" on page 2 → **rejected**, with both sentences tagged **page 2**
-- A **scanned** flyer (an image, no text in the file at all) advertising "Earn 50000 per week… pay a small registration fee" → **rejected**, read by OCR
-- A scanned legitimate catalogue → **allowed**, read by OCR
-- A blank or illegible scan → **not accepted**: "no text could be read"
-- Anything that isn't a PDF → **not accepted**
+If someone asks about documents: `POST /v1/moderate/media` still *accepts* a PDF, and publishes
+it with `checked: false` — nobody read it. Do not demonstrate that as a feature. **If you are
+asked to show it, show the `checked: false` in the response**, say that the platform chose to
+publish documents unread rather than turn them all away, and that the flag to refuse them
+instead is one line of config.
 
-**Talking point, and the one to make:** "A scanned page has no text in it, so there's nothing
-to check. If we let that through, uploading a *screenshot* of a scam would defeat the whole
-system. So we OCR the page — and if OCR can't read it either, we refuse it rather than approve
-it. Blurring the image until the OCR fails doesn't get you published; it gets you turned away."
+**Talking point if it comes up:** "We had PDF extraction working — pages, offsets, OCR of
+scans. We took it out because the picture check behind it was refusing ordinary scanned
+paperwork: six out of eight business documents we tried, including a blank page. Shipping a
+moderator that turns away a supplier's own profile is worse than shipping one that says plainly
+it hasn't read the file yet."
 
-### 4.11 Article media (images, video, PDFs)
+### 4.11 Article media (images and video)
 
 On **http://127.0.0.1:8000/articles**, click **+ Write Article**, fill in a title and body,
-then use the **Upload image, video, or PDF** dropzone. Each attachment is checked as you add
-it, and a blocked one stops the publish.
+then use the **Upload image or video** dropzone. Each attachment is checked as you add it, and
+a blocked one stops the publish.
 
 | Attach | State shown | Why |
 |---|---|---|
 | A picture of "Earn 50000 per week… pay a small registration fee" | **blocked**, quoting the phrase | OCR read the scam out of the image |
-| An ordinary product photo | **not inspected** | no text in it — allowed, but the picture itself is never classified |
-| A clean PDF catalogue | **ok**, "1 page read" | text extracted and checked |
-| Any video | **blocked** | nothing in a video can be read by this service |
+| A weapon or gore photograph with no words on it | **blocked**, naming the policy | the visual check scored the picture itself |
+| An ordinary product photo | **ok** | OCR found no text and the visual check cleared the picture |
+| Any video | **not inspected** | nothing in a video is read by this service |
+
+The pickers no longer offer PDF, for the reason in 4.10: offering an upload that publishes
+unread, under a green tick, is the one thing this page must not do.
 
 Press **Publish** with the bad ones attached: the article is *not* published and the banner
 names the files to remove. Remove them and it publishes.
 
 **Talking point:** "An article goes out as a whole, so the attachments are moderated with it —
-otherwise you write a clean article and put the scam in the picture. Notice the photo says
-*not inspected*, not *ok*: we read text, we don't classify pictures. Saying so is the honest
-thing; pretending a green tick means the image is safe would be worse than no check at all."
-
-Point at the response: the page shows `"source": "ocr"` with its confidence, so an auditor can
-see which pages were read off pixels rather than text. A text PDF answers in ~100 ms; an OCR'd
-page costs about half a second to a second and a half. Long PDFs are rejected rather than
-truncated, for the same reason as above: a truncated check that answers "allowed" is worse than
-no check.
+otherwise you write a clean article and put the scam in the picture. Two passes, not one: we
+read the writing *and* we look at the picture. Where we can't do either — video, and PDFs for
+now — it says *not inspected* rather than *ok*. Pretending a green tick means safe would be
+worse than no check at all."
 
 ## 5. Gate rule reference
 

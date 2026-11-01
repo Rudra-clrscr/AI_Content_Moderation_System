@@ -116,7 +116,9 @@ An uploaded video is decided by `media.allow_unchecked_video` in `settings.yaml`
 predated the audio check. The shipped value is **`true`**, so **videos publish** and record
 `checked: false` — nothing reads the allow as "we looked at it". Set it to `false` and a video
 is turned away with "video cannot be checked by this service", and the author told to attach a
-still or a PDF instead. Worth choosing deliberately rather than inheriting.
+still image instead. Worth choosing deliberately rather than inheriting.
+`media.allow_unchecked_pdf` is the same choice for PDFs, shipped `true`: nothing reads a
+PDF since extraction was removed, so one publishes with `checked: false`.
 
 ### What this host already answers
 

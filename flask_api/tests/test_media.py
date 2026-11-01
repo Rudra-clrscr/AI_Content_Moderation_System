@@ -1,7 +1,7 @@
-"""Attachments on an article: images, video and the kind-detection that routes them.
+"""Attachments on an article: images, PDFs, video and the kind-detection that routes them.
 
-The rules differ by kind on purpose (see app/media.py): a PDF page with no text is refused,
-an image with no text is allowed, and video is refused unless the deployment says otherwise.
+The rules differ by kind on purpose (see app/media.py): an image with no text is allowed,
+video is refused unless the deployment says otherwise, and a PDF is now published unread.
 These tests pin those differences, because getting them the same way round would either break
 honest sellers or open the bypass this whole feature exists to close.
 """
@@ -12,7 +12,6 @@ import pytest
 from app import create_app
 from app.media import MediaLimits, detect_kind
 from app.model import ScoreResult
-from tests.test_pdf import make_pdf, make_scanned_pdf
 
 
 def png(width=40, height=20, colour=(200, 200, 200)) -> bytes:
@@ -39,6 +38,28 @@ def text_image(lines, fmt="PNG") -> bytes:
     return buf.getvalue()
 
 
+def pdf_bytes(line="Cotton bedsheets in king and queen sizes.") -> bytes:
+    """A minimal valid PDF. Nothing reads one any more, so it only has to be recognised as a
+    PDF by its leading bytes - the full builder went with tests/test_pdf.py."""
+    text = f"BT /F1 12 Tf 60 780 Td ({line}) Tj ET"
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R >>",
+            "\n".join([f"<< /Length {len(text)} >>", "stream", text, "endstream"])]
+    parts, offs = ["%PDF-1.4"], []
+    out = len(parts[0]) + 1
+    for i, o in enumerate(objs, 1):
+        offs.append(out)
+        body = f"{i} 0 obj\n{o}\nendobj"
+        parts.append(body)
+        out += len(body) + 1
+    parts.append(f"xref\n0 {len(objs) + 1}")
+    parts.append("0000000000 65535 f ")
+    parts.extend(f"{o:010d} 00000 n " for o in offs)
+    parts.append(f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{out}\n%%EOF")
+    return ("\n".join(parts) + "\n").encode("latin-1")
+
+
 def fake_video() -> bytes:
     return b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41" + b"\x00" * 200
 
@@ -62,7 +83,7 @@ def test_detect_kind(data, expected):
 
 
 def test_a_pdf_named_png_is_still_a_pdf():
-    assert detect_kind(make_pdf(["Cotton bedsheets in all sizes."]), "photo.png") == "pdf"
+    assert detect_kind(pdf_bytes(), "photo.png") == "pdf"
 
 
 def test_an_executable_named_jpg_is_refused_as_unknown():
@@ -168,25 +189,48 @@ def test_oversized_image_is_refused(make_settings):
     assert r.status_code == 413 and r.get_json()["error"]["code"] == "media_too_large"
 
 
-def test_pdf_still_works_through_the_media_path(make_settings):
-    body = upload(client(make_settings), make_pdf(["Cotton bedsheets in king and queen sizes."]),
-                  "cat.pdf").get_json()
-    assert body["decision"] == "allow" and body["media"]["kind"] == "pdf"
-    assert body["pdf"]["page_count"] == 1          # the original contract's block is still there
+def test_a_pdf_is_published_unread(make_settings):
+    """PDF checking was taken out while the scanned path is reworked. What is left is the video
+    rule with the opposite default: publish it, and say plainly that nothing read it."""
+    body = upload(client(make_settings), pdf_bytes(), "cat.pdf").get_json()
+    assert body["decision"] == "allow"
+    assert body["media"]["kind"] == "pdf"
+    # The honesty of the record is the whole of what is left. An allow nothing looked at must
+    # never be readable as a clean result.
+    assert body["media"]["checked"] is False
+    assert body["media"]["visual_content_checked"] is False
+    assert body["media"]["text_found"] is False
+    # The old contract's page map is gone with the extractor that filled it.
+    assert "pdf" not in body
 
 
-def test_the_old_pdf_path_is_unchanged(make_settings):
-    body = upload(client(make_settings), make_pdf(["Cotton bedsheets in king and queen sizes."]),
-                  "cat.pdf", path="/v1/moderate/pdf").get_json()
-    assert body["decision"] == "allow" and body["pdf"]["page_count"] == 1
+def test_a_pdf_can_be_refused_instead(make_settings):
+    c = client(make_settings, media=MediaLimits(allow_unchecked_pdf=False))
+    r = upload(c, pdf_bytes(), "cat.pdf")
+    assert r.status_code == 422
+    assert r.get_json()["error"]["code"] == "media_not_checkable"
 
 
-def test_scanned_pdf_attachment_still_fails_closed(make_settings):
-    """The difference that matters: no text in a PDF page is refused, no text in a photo is not."""
-    from app.pdf import PdfLimits
-    c = client(make_settings, pdf=PdfLimits(), media=MediaLimits())
-    r = upload(c, make_scanned_pdf(["Nothing readable"], scale=0.02), "scan.pdf")
-    assert r.status_code == 422 and r.get_json()["error"]["code"] == "pdf_text_not_extractable"
+def test_the_old_pdf_route_is_gone(make_settings):
+    """`/v1/moderate/pdf` was the original path. It went with the extractor; callers use
+    /v1/moderate/media, which still accepts a PDF.
+
+    405 rather than 404 because the URL now matches `GET /v1/moderate/<request_id>` - "pdf"
+    reads as a request id - and that rule takes no POST. Worth pinning either way: what must
+    not happen is a POST there quietly succeeding, or 500ing on a lookup of a thing called
+    "pdf"."""
+    r = upload(client(make_settings), pdf_bytes(), "cat.pdf", path="/v1/moderate/pdf")
+    assert r.status_code == 405
+
+
+def test_an_unread_pdf_is_still_recorded(make_settings):
+    """Publishing it unread is the policy; losing the audit row would not be."""
+    from app.sinks import MemorySink
+    sink = MemorySink()
+    c = create_app(make_settings(max_chars=50_000), scorer=KeywordScorer(), sink=sink).test_client()
+    upload(c, pdf_bytes(), "cat.pdf")
+    assert len(sink.results) == 1
+    assert sink.results[0]["decision"] == "allow"
 
 
 def test_decisions_for_files_are_recorded(make_settings, ocr):

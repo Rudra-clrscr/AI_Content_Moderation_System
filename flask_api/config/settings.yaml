@@ -131,6 +131,16 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # never its name.
   max_bytes: 15000000       # one attachment (15 MB)
   max_pixels: 40000000      # decoded image size, against decompression bombs
+  allow_unchecked_pdf: true # NOTHING READS A PDF. Extraction was taken out while the scanned
+                            # path is reworked (it was refusing ordinary business paperwork),
+                            # so a PDF now follows the video rule - except that this ships
+                            # TRUE where allow_unchecked_video ships false, because PDF
+                            # checking is coming back and turning document uploads away in the
+                            # meantime was judged worse than publishing them unread. It is
+                            # FAIL-OPEN: a scam brochure publishes. The result carries
+                            # checked: false and visual_content_checked: false so no reader can
+                            # mistake the allow for an inspection. Set false the day a document
+                            # must not go out unchecked.
   allow_unchecked_video: true
                             # INTERIM POLICY. Video cannot be read at all: no frame or audio
                             # analysis here. There is no visual model yet, so rather than block
@@ -266,8 +276,8 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # An image OCR found writing in but could NOT read (a script the
                             # recognition model doesn't cover, or a picture too poor to read).
                             # Nothing in such a picture has been checked, so it is refused -
-                            # the same rule as pdf.reject_unreadable_pages, and for the same
-                            # reason. Until the Devanagari recognition model is bundled (see
+                            # the fail-closed choice, and the one place this service still
+                            # makes it. Until the Devanagari recognition model is bundled (see
                             # ocr below), this refuses Hindi signage that used to publish with
                             # a clean result while the text read as gibberish. Set true to
                             # publish them anyway; they are then recorded with checked: false
@@ -313,57 +323,46 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # ordinary 0.5, so it is a gap in the model, not in this number.
                             #
                             # Gate rules are unaffected: a rule either matched or it did not,
-                            # and a scam phrase photographed is still a scam phrase. PDFs keep
-                            # the ordinary bar - their text is extracted, not guessed at.
+                            # and a scam phrase photographed is still a scam phrase.
 
-pdf:                        # POST /v1/moderate/pdf: extract the text, then moderate it normally
-  enabled: true             # PDF_UPLOAD=0 turns the endpoint off
-  max_bytes: 25000000       # 25 MB upload
-  max_pages: 100
-  max_chars: 100000         # extracted text. Longer documents are rejected, never truncated:
-                            # truncating would leave the tail unchecked but still say "allowed".
-                            # (limits.max_chars above still applies to what reaches the model.)
-  min_chars_per_page: 20    # a page with images but less text than this counts as unreadable
-  reject_unreadable_pages: true
-                            # Scanned pages carry no extractable text, so nothing can be checked
-                            # on them. Rejecting is the fail-closed choice: set false only if you
-                            # accept publishing pages the moderator never read.
-
-  ocr:                      # read the pixels of pages that carry no text (app/ocr.py, RapidOCR
-    enabled: true           # on onnxruntime). PDF_OCR=0 turns it off and those pages go back to
-                            # being refused. It widens what can be ACCEPTED; it is not a security
-                            # control, because a page it fails to read is still refused.
-    max_pages: 60           # per upload: ~0.5 s per page on CPU, bounds long catalogs
-    dpi: 200                # enough for body text; pages stay around 2 megapixels
-    max_pixels: 4000000     # hard cap per page whatever the dpi implies (hostile page sizes)
-    min_chars: 20           # OCR must recover at least this much, or the page stays unreadable
-    min_confidence: 0.5     # and be at least this confident, or we don't trust what it read
-    min_chars_per_box: 5    # Detection finds where the writing is; recognition turns it into
-    trust_short_confidence: 0.90
-                            # characters. A script the recognition model doesn't cover still
-                            # detects every line and then returns near-nothing, at a confidence
-                            # that clears min_confidence - which is how a Devanagari threat in a
-                            # PNG was reported as read and clean. Measured on rendered 48pt
-                            # text, characters recovered per detected line: English 25-28 at
-                            # conf 0.99, Hindi 1.5-4 at conf 0.62-0.76. So a line OCR really
-                            # read comes back as a word or more; below min_chars_per_box the
-                            # reading is not trusted unless recognition is at least
-                            # trust_short_confidence sure (genuinely short signage: "SALE").
-                            # Lowered 6 -> 5 (2026-10-08): a legitimate 12-line English
-                            # shopfront sign averaged 5.8 and was refused on the technicality,
-                            # while clean reads average 16 and the Devanagari failure this
-                            # guards against sat at 1.5-4. 5 keeps the margin and stops
-                            # refusing stylised signage.
-                            # Devanagari recognition is ON (2026-10-08). RapidOCR ships Latin
-                            # and Chinese only, which is why Hindi pictures used to read as
-                            # gibberish and get refused. This model reads Latin too, so it
-                            # REPLACES the default rather than running alongside it.
-                            #   python scripts/fetch_ocr_langs.py devanagari
-                            # The file is gitignored; re-run that on a fresh checkout, or
-                            # comment the two keys below out to fall back to Latin-only.
-                            # `--list` shows the other scripts available.
-    rec_model_path: models/ocr/devanagari_rec.onnx
-    rec_lang: devanagari
+ocr:                      # read the writing inside an uploaded picture (app/ocr.py,
+  enabled: true           # RapidOCR on onnxruntime). IMAGE_OCR=0 turns it off, and a
+                          # picture's words then go unread - media.allow_unreadable_image
+                          # decides what happens to it. It widens what can be ACCEPTED;
+                          # it is not a security control, because writing it fails to
+                          # read still leaves the picture unchecked.
+                          #
+                          # Was nested under `pdf:` until PDF checking was taken out.
+                          # The page-rendering keys that lived here - max_pages, dpi,
+                          # max_pixels - went with it; they only ever bounded PDF pages.
+  min_chars: 20           # OCR must recover at least this much, or the writing stays unread
+  min_confidence: 0.5     # and be at least this confident, or we don't trust what it read
+  min_chars_per_box: 5    # Detection finds where the writing is; recognition turns it into
+  trust_short_confidence: 0.90
+                          # characters. A script the recognition model doesn't cover still
+                          # detects every line and then returns near-nothing, at a confidence
+                          # that clears min_confidence - which is how a Devanagari threat in a
+                          # PNG was reported as read and clean. Measured on rendered 48pt
+                          # text, characters recovered per detected line: English 25-28 at
+                          # conf 0.99, Hindi 1.5-4 at conf 0.62-0.76. So a line OCR really
+                          # read comes back as a word or more; below min_chars_per_box the
+                          # reading is not trusted unless recognition is at least
+                          # trust_short_confidence sure (genuinely short signage: "SALE").
+                          # Lowered 6 -> 5 (2026-10-08): a legitimate 12-line English
+                          # shopfront sign averaged 5.8 and was refused on the technicality,
+                          # while clean reads average 16 and the Devanagari failure this
+                          # guards against sat at 1.5-4. 5 keeps the margin and stops
+                          # refusing stylised signage.
+                          # Devanagari recognition is ON (2026-10-08). RapidOCR ships Latin
+                          # and Chinese only, which is why Hindi pictures used to read as
+                          # gibberish and get refused. This model reads Latin too, so it
+                          # REPLACES the default rather than running alongside it.
+                          #   python scripts/fetch_ocr_langs.py devanagari
+                          # The file is gitignored; re-run that on a fresh checkout, or
+                          # comment the two keys below out to fall back to Latin-only.
+                          # `--list` shows the other scripts available.
+  rec_model_path: models/ocr/devanagari_rec.onnx
+  rec_lang: devanagari
 
 latency_budget_ms: 30      # inference-only budget for ONE call; overruns are logged, not failed.
                            # Realistic for short content (a listing is ~11 ms, p95 ~30 ms measured with

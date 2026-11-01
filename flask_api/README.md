@@ -106,7 +106,7 @@ Articles tab and "Write article" modal, in BONC Business Dashboard styling:
     issue has a **Show** button. The article is kept under *Needs changes*.
   - **reject**: the policy area is shown, and the article is kept under *Rejected*.
   - If the check fails (network, 503), nothing is published (fail closed).
-- **Article media** matches the platform's own dropzone: drag or pick images, video and PDFs.
+- **Article media** matches the platform's own dropzone: drag or pick images and video.
   Each one is checked as it's attached and shown with its state — *ok*, *not inspected* (nothing
   readable in it), or *blocked* with the phrase that tripped it. **A blocked attachment stops
   the publish**, naming the files to remove, because an article goes out as a whole.
@@ -168,58 +168,48 @@ picture.
 
 | Kind | Read | Rule |
 |---|---|---|
-| PDF | text + OCR for scans | a page that can't be read is **refused** |
-| Image | OCR only | text is moderated; **the picture is never classified**, so an image with no text is allowed and the result says `visual_content_checked: false` |
+| Image | OCR for its writing, **and** the CLIP visual check on the picture itself | text is moderated; the picture is scored against `config/visual_policy.yaml`. An image with no text and nothing the check objects to is allowed |
+| PDF | **nothing** | **allowed with `checked: false`** while `media.allow_unchecked_pdf` is on (the shipped setting); **refused** when off |
 | Video | nothing | **allowed with `checked: false`** while `media.allow_unchecked_video` is on (the shipped setting); **refused** when off |
 
-That asymmetry is deliberate: a product photo with no writing on it is ordinary, and refusing
-those would break the feature for honest sellers — but a PDF page with no text is a scan, and
-scans are how a screenshot of a scam arrives. The kind is taken from the file's leading bytes,
-never its name, so a `.png` that is really a PDF is treated as a PDF and a renamed executable
-is refused.
+An image with no writing on it is still allowed, because a product photo with no text is
+ordinary and refusing those would break the feature for honest sellers — what makes that safe
+is the visual check having looked at the picture, which `visual_content_checked` reports. The
+kind is taken from the file's leading bytes, never its name, so a `.png` that is really a PDF
+is treated as a PDF and a renamed executable is refused.
 
-**Known gap, stated plainly:** this service reads text. It has no image or video classifier,
-so a photograph of anything at all passes as long as it carries no harmful words, and footage
-is published unwatched. Closing that needs a separate model; until then `checked: false` and
-`visual_content_checked: false` are on the record, and the editor labels the file "not
-inspected", so nobody assumes otherwise.
+### PDFs are not checked at the moment
 
-`POST /v1/moderate/pdf` is the original path and still works. The response adds a `pdf` block
-mapping character offsets to page numbers, so each issue can be shown on the page it came from.
+`app/pdf.py` — extraction, OCR of scanned pages and the per-page visual check — was removed
+while the scanned path is reworked, and `POST /v1/moderate/pdf` went with it. Extraction itself
+was good; what stopped it was that an exemplar in the visual policy matches flat document-like
+pages, so six of eight ordinary business documents scanned and submitted were refused, and the
+refusal was recorded against the wrong rule. The diagnosis, the removed module and the 29 live
+checks that found it are in `private_notes/pdf_on_hold/` on the machines that have it.
 
-Two decisions in [app/pdf.py](app/pdf.py) are worth knowing:
+So a PDF now follows the video rule, with `media.allow_unchecked_pdf` shipped **true**: it
+publishes, and the record says `checked: false`, `visual_content_checked: false` and
+`text_found: false`. **That is fail-open** — a scam brochure publishes unread — and the honest
+record is the only thing standing in for a check. Set the flag to `false` to refuse PDFs
+instead. The article editor no longer offers PDF in its upload pickers for the same reason.
 
-- **A page we can't read is refused, not allowed.** Scanned pages yield no text, and a
-  moderator that "checks" empty text approves anything — uploading a screenshot of a scam would
-  defeat the whole system. A page carrying images but almost no extractable text counts as
-  unreadable and the upload is rejected (`422 pdf_text_not_extractable`) naming those pages.
-  `pdf.reject_unreadable_pages: false` accepts them, and then you are publishing pages nothing
-  checked.
-- **OCR is tried on those pages first** (see below), so a legitimate scanned brochure is read
-  and judged rather than turned away.
-- **Wrapped lines are rejoined.** PDFs break paragraphs at every visual line and the sentence
-  scan splits on newlines, so raw extracted text would arrive as dozens of fragments, each
-  judged without its context. Hyphenated splits ("manu-\nfacturer") are joined too, while real
-  paragraph breaks, bullets and headings are kept.
+**Known gap, stated plainly:** video is published unwatched — no frame decoding, no audio
+analysis — and PDFs are published unread. Both carry `checked: false`, and the editor labels
+the file "not inspected", so nobody assumes otherwise. Images are the one kind this service
+actually examines, by two independent passes.
 
-Long documents are rejected rather than truncated, because a truncated check that answers
-"allowed" is worse than no check. Limits (size, pages, characters) are under `pdf` in
-`settings.yaml`; `PDF_UPLOAD=0` disables the endpoint.
+### OCR for writing inside a picture
 
-### OCR for scanned pages
+Writing in an uploaded image is read with **RapidOCR** ([app/ocr.py](app/ocr.py)): PaddleOCR's
+models exported to ONNX and run through the onnxruntime this service already ships — no
+PyTorch, no Paddle, no system binary, and the weights live inside the package so nothing is
+downloaded at run time (Apache 2.0).
 
-Pages with no extractable text are rasterised and read with **RapidOCR** ([app/ocr.py](app/ocr.py)):
-PaddleOCR's models exported to ONNX and run through the onnxruntime this service already ships —
-no PyTorch, no Paddle, no system binary, and the weights live inside the package so nothing is
-downloaded at run time (Apache 2.0). Pages are rendered with `pypdfium2` rather than pulled out
-as embedded images, because scans arrive in encodings (CCITT G4, JBIG2) that image extractors
-often refuse, and a decode failure would turn away a legitimate document.
-
-Measured end to end on this service:
+Measured end to end on this service, when it still rendered PDF pages, which is the same OCR
+engine doing the same work:
 
 | Upload | Latency | Decision |
 |---|---|---|
-| Text PDF (OCR not needed) | 106 ms | allow |
 | Scanned scam flyer | 1.4 s | **reject** 0.999 (OCR confidence 0.99) |
 | Same, at 45% resolution | 0.7 s | **reject** 0.999 |
 | Same, skewed 7° | 0.9 s | **reject** 0.999 |
@@ -227,14 +217,13 @@ Measured end to end on this service:
 | Blank/illegible scan | 0.5 s | still refused |
 
 **It is not a security control.** OCR converts refusals into decisions; it never converts a
-refusal into an approval. A page it reads with too few characters (`min_chars`) or too little
-confidence (`min_confidence`) stays unreadable, so degrading an image until OCR fails gains
-nothing. Everything is bounded — pages per upload, render DPI, pixels per page — because
-decoding untrusted images is real attack surface. `PDF_OCR=0` turns it off, and the optional
-packages being absent disables it gracefully rather than failing uploads.
+refusal into an approval. Writing it reads with too few characters (`min_chars`) or too little
+confidence (`min_confidence`) stays unread, and `media.allow_unreadable_image` then decides —
+so degrading an image until OCR fails gains nothing. `IMAGE_OCR=0` turns it off, and the
+optional packages being absent disables it gracefully rather than failing uploads.
 
-Because OCR costs ~0.5–1.5 s per page against an 11 ms model call, a deployment expecting many
-scans should run the PDF endpoint in async mode.
+Because OCR costs ~0.5–1.5 s against an 11 ms model call, a deployment expecting many
+picture-heavy uploads should run in async mode.
 
 ## Triage pre-filter (`triage`)
 
@@ -338,8 +327,7 @@ every demo sentence against the decision the demo guide promises.
 | Method | Path | |
 |---|---|---|
 | POST | `/v1/moderate` | Moderates one piece of content. Returns `200` with the result, or `202` pending in async mode. |
-| POST | `/v1/moderate/media` | Moderates one uploaded attachment (multipart `file`): PDF, image or video. Reads whatever text it carries and runs the same pipeline. Refuses what it can't check. |
-| POST | `/v1/moderate/pdf` | The original path for the above; still works and accepts every kind. |
+| POST | `/v1/moderate/media` | Moderates one uploaded attachment (multipart `file`). **Only an image is examined**; a PDF or a video is published with `checked: false` or refused, per the `media.allow_unchecked_*` flags. |
 | GET | `/v1/moderate/<request_id>` | Looks up a result (async mode only). |
 | GET | `/demo` | Browser demo UI. Only served when `DEMO_PAGE=1`. |
 | GET | `/docs` | Swagger UI, served from this app's own origin so "Try it out" needs no CORS. On by default; `API_DOCS=0` turns it off. |

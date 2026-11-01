@@ -116,8 +116,8 @@ A `before_request` hook on the moderation blueprint resolves the caller's addres
 per request via `app/client_address.py`, honouring `X-Forwarded-For` to the depth of
 `trust_proxy_hops` (default `0`). The resolved address is attached to every audit row.
 
-For the three **submission** endpoints only (`/v1/moderate`, `/v1/moderate/media`,
-`/v1/moderate/pdf`) the address is checked against the blocklist; a hit returns
+For both **submission** endpoints only (`/v1/moderate` and `/v1/moderate/media`) the
+address is checked against the blocklist; a hit returns
 `403 client_blocked` with a deliberately vague message that names neither the address
 nor the scope. Admin endpoints are exempt, so an operator who blocks their own office
 network does not lock themselves out of the screen that would undo it.
@@ -131,8 +131,8 @@ it is a moderation convenience, not an authentication boundary.
 
 ### Request size
 
-`MAX_CONTENT_LENGTH` is computed at startup as the largest of the JSON limit
-(`max_chars × 4 + 4096`), `pdf.max_bytes + 8192` and `media.max_bytes + 8192`.
+`MAX_CONTENT_LENGTH` is computed at startup as the larger of the JSON limit
+(`max_chars × 4 + 4096`) and `media.max_bytes + 8192`.
 Exceeding it yields a Werkzeug `413`.
 
 ---
@@ -280,13 +280,16 @@ because there is nothing to poll.
 # 3. The moderation API — images, PDFs and video
 
 ## `POST /v1/moderate/media`
-## `POST /v1/moderate/pdf`
 
-**Both paths run the same handler.** `/v1/moderate/pdf` is the original route, kept for
-the existing contract; it accepts images and video too. Prefer `/v1/moderate/media`.
+**`POST /v1/moderate/pdf` is gone.** It was an alias of this route and went with PDF
+extraction; posting to it now gives `405`, because the URL matches
+`GET /v1/moderate/{request_id}` and that rule takes no POST. Post files here.
 
-**Auth:** none. **Content-Type:** `multipart/form-data`. **Returns `404 not_found`**
-when `pdf.enabled` is false.
+**Of the three kinds, only an image is examined.** A PDF and a video are published
+unexamined or refused, per the flags in 3.2 and 3.3 — see those sections before
+reading an `allow` from this endpoint as "we checked it".
+
+**Auth:** none. **Content-Type:** `multipart/form-data`.
 
 ### Request
 
@@ -303,7 +306,7 @@ when `pdf.enabled` is false.
 Whatever the kind, text that can be read out of the file is then passed through the
 **identical** pipeline described in section 2 — so a brochure is judged by the same rules
 as a pasted post. The response is the ordinary result object (section 4) plus a `media`
-block, and for PDFs an identical `pdf` block retained for the original contract.
+block. There is no longer a `pdf` block — it went with the extractor that filled it.
 
 ---
 
@@ -353,7 +356,7 @@ An uploaded image gets looked at **twice**, because the two bypasses are differe
 It is built as a **gate block**, so downstream it is indistinguishable from a blocked
 phrase: same feedback wording, same audit row, same sink, same response shape your client
 already handles. Because there is no text to quote, `content` is the filename —
-`[flyer.png]`, or `[scan.pdf, page 7]` for a PDF, so the author is told where to look.
+`[flyer.png]`, so the author is told which upload was refused.
 
 `rule_id` names **the channel that actually refused**, not the best-matching label:
 
@@ -403,34 +406,50 @@ claim — "we looked at it, we could not read the writing" — and never a clean
 
 ---
 
-## 3.2 PDFs
+## 3.2 PDFs — not checked, and allowed anyway
 
-Text is extracted with `pypdf`; pages carrying no extractable text are rendered and OCR'd
-(`pypdfium2` plus RapidOCR). The result carries a `pdf` block mapping text offsets to page
-numbers, so feedback can name the page.
+**Nothing reads a PDF.** `app/pdf.py` — extraction, OCR of scanned pages, and the
+per-page visual check — was removed while the scanned path is reworked. A PDF is now
+treated exactly as a video is, with the opposite default:
 
-| Limit | Default |
+| `media.allow_unchecked_pdf` | Behaviour |
 |---|---|
-| `pdf.max_bytes` | 25 MB |
-| `pdf.max_pages` | 100 |
-| `pdf.max_chars` | 100,000 extracted characters |
-| `pdf.min_chars_per_page` | 20 — below this a page counts as unreadable |
-| `ocr.max_pages` | 60 per upload (about 0.5 s per page on CPU) |
+| `true` (**code and `settings.yaml` default**) | Allow, and say so: `checked: false`, `visual_content_checked: false`, `text_found: false`. |
+| `false` | `422 media_not_checkable` — refuse it. |
 
-**Long documents are rejected, never truncated.** Truncating would leave the tail
-unchecked while still answering "allowed".
+**This is fail-open and deliberate.** A scam brochure or a scanned threat publishes with
+nobody having read it. `checked: false` is the whole of what protects you: an `allow` on
+a PDF is not a clean result, and a client that treats it as one is wrong. Set the flag to
+`false` the day a document must not go out unread.
 
-`pdf.reject_unreadable_pages` (default **true**) is the fail-closed choice: a page nobody
-could read is refused. Set it false only if you accept publishing pages the moderator
-never read.
+### Why it was stopped
 
-**A scanned PDF is a stack of photographs**, so the visual check runs on its rendered
-pages too. A page the visual check objects to is refused exactly as the picture would be
-had it been attached directly — the container must not decide the rule. The refusal names
-the page.
+Not because extraction was weak — it held up well. Of 29 live checks over the PDF path, 27
+passed: page-level offsets, paragraph unwrapping across PDF line breaks, OCR of scanned
+pages, encryption, damage and all four limits. What stopped it was the **scanned** path,
+where two defects meet:
 
-Errors: `413` for `pdf_too_large`, `pdf_too_many_pages` and `pdf_text_too_long`;
-`422` for everything else, with `PdfError.code` passed through as the error code.
+1. **Every visual refusal on a PDF page was logged against the wrong rule.** The PDF
+   branch passed an explicit `rule_id` built from the best-matching *label*, which skipped
+   the cause-naming the image path uses (`refused_by()`, guarded by `if not rule_id:`). A
+   page refused by exemplar #3672 was recorded as **`visual.safe`** — a rule that does not
+   exist, naming the safe label as the reason. The comment directly above that helper
+   describes this exact bug being fixed for images.
+
+2. **That exemplar matches flat, document-like pages.** Eight ordinary business documents
+   rendered as scans — a letter, a price list, a spec sheet, a supplier profile — and
+   **six were refused**, the worst being a *blank page* at 0.6945 against a 0.60 bar. For
+   contrast, only 2 of 30 real photographs from the dataset cross it. So this is not the
+   exemplar mechanism misfiring generally; it is specific to the flat, low-detail images
+   that every page of a scan produces.
+
+Together: a supplier scans their profile, OCR reads it perfectly, the words are clean, and
+it is refused for a policy violation whose audit row points at the wrong rule.
+
+Picking it back up means fixing (1) — carry the refusal cause through `PageVisual` and drop
+that argument — and a policy decision on (2) for whoever owns `visual_policy.yaml`. The
+removed module, its tests and the live checks that found this are in
+`private_notes/pdf_on_hold/` and in the history of the commit that removed them.
 
 ---
 
@@ -567,7 +586,7 @@ pictures.
 
 ### The `media` block
 
-Present on `/v1/moderate/media` and `/v1/moderate/pdf` responses.
+Present on `/v1/moderate/media` responses.
 
 | Field | Meaning |
 |---|---|
@@ -1214,7 +1233,6 @@ nothing has been edited yet, so there is nothing to go back to.
 |---|---|---|
 | `POST` | `/v1/moderate` | none |
 | `POST` | `/v1/moderate/media` | none |
-| `POST` | `/v1/moderate/pdf` | none |
 | `GET` | `/v1/moderate/<request_id>` | none |
 | `GET` | `/health` | none |
 | `GET` | `/ready` | none |
@@ -1301,10 +1319,6 @@ cover** — see 12.5.
 | `limits.max_chars` | 25,000 | `content` on `/v1/moderate` |
 | `thresholds.allow_max` | 0.30 | the default bar |
 | `thresholds.reject_min` | 0.70 | the default bar |
-| `pdf.max_bytes` | 25,000,000 | PDF upload |
-| `pdf.max_pages` | 100 | PDF upload |
-| `pdf.max_chars` | 100,000 | extracted PDF text |
-| `pdf.min_chars_per_page` | 20 | below this a page is unreadable |
 | `media.max_bytes` | 15,000,000 | one attachment |
 | `media.max_pixels` | 40,000,000 | decoded image, against decompression bombs |
 | `media.ocr_text_reject_min` | 0.99 | text read off a picture |
@@ -1321,7 +1335,7 @@ cover** — see 12.5.
 
 Environment overrides exist for several of these — `THRESHOLD_ALLOW_MAX`,
 `THRESHOLD_REJECT_MIN`, `VISUAL_REJECT_MIN`, `VISUAL_PROBE_REJECT_MIN`, `VISUAL_CHECK=0`,
-`PDF_UPLOAD=0`, `PDF_OCR=0`, `DEMO_PAGE=1`, `API_DOCS=0`, `ADMIN_TOKEN`, `MODEL_DIR`. See
+`IMAGE_OCR=0`, `DEMO_PAGE=1`, `API_DOCS=0`, `ADMIN_TOKEN`, `MODEL_DIR`. See
 `app/config.py`.
 
 ## 12.4 Error codes
@@ -1343,7 +1357,7 @@ Environment overrides exist for several of these — `THRESHOLD_ALLOW_MAX`,
 |---|---|
 | `invalid_file` | 400 |
 | `not_found` (file moderation disabled) | 404 |
-| `media_too_large`, `pdf_too_large`, `pdf_too_many_pages`, `pdf_text_too_long` | 413 |
+| `media_too_large`, `content_too_long` | 413 |
 | `media_unreadable`, `media_unsupported`, `media_not_checkable` (video) | 422 |
 | `media_not_checkable` (OCR or visual model threw) | 503 |
 

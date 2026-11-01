@@ -37,8 +37,11 @@
         { name: "products", label: "Products and services", type: TEXTAREA, maxlength: 4000,
           placeholder: "Cotton bedsheets, curtains, bulk orders…" },
       ],
-      media: { label: "Logo or brochure", accept: "image/*,application/pdf,.pdf",
-               text: "Upload a logo, photo or PDF brochure" },
+      // PDF dropped from `accept`: nothing extracts one any more, so a brochure uploaded here
+      // would publish with checked: false and the tab would say it was fine. The endpoint still
+      // takes a PDF - this is the UI declining to offer an unchecked path, not a server rule.
+      media: { label: "Logo or photo", accept: "image/*",
+               text: "Upload a logo or a photo" },
     },
     video: {
       heading: "Videos",
@@ -68,7 +71,9 @@
           placeholder: "Quantity, quality, delivery timeline, where you need it." },
         { name: "budget", label: "Budget or quantity", maxlength: 150, placeholder: "e.g. 200 m, ₹80–100 per metre" },
       ],
-      media: { label: "Specification", accept: "application/pdf,.pdf,image/*", text: "Upload a spec sheet (PDF or image)" },
+      // PDF dropped from every `accept` in this file: nothing extracts one, so it would publish
+      // with checked: false while the tab showed a tick. The server still accepts a PDF.
+      media: { label: "Specification", accept: "image/*", text: "Upload a spec sheet (image)" },
     },
     proposal: {
       heading: "Proposals",
@@ -84,7 +89,7 @@
         { name: "terms", label: "Payment terms", type: TEXTAREA, maxlength: 2000,
           placeholder: "e.g. 30% advance, balance before dispatch." },
       ],
-      media: { label: "Quotation", accept: "application/pdf,.pdf,image/*", text: "Upload a quotation (PDF or image)" },
+      media: { label: "Quotation", accept: "image/*", text: "Upload a quotation (image)" },
     },
     business_proposal: {
       heading: "Business Proposals",
@@ -100,7 +105,7 @@
         { name: "terms", label: "Commercial terms", type: TEXTAREA, maxlength: 2000,
           placeholder: "Margins, exclusivity, duration." },
       ],
-      media: { label: "Deck or terms", accept: "application/pdf,.pdf,image/*", text: "Upload a deck (PDF or image)" },
+      media: { label: "Deck or terms", accept: "image/*", text: "Upload a deck (image)" },
     },
   };
 
@@ -464,14 +469,12 @@
         } else if (media.visual_content_checked === false && media.text_found === false) {
           // Allowed, but nothing in it could be read. Say so rather than showing a tick.
           a.state = "unchecked";
-          a.detail = media.kind === "video" ? (media.audio_checked ? "no speech found; the footage itself isn't checked"
-                                                         : "video isn't checked by the moderator")
+          a.detail = media.kind === "video" ? "video isn't checked by the moderator"
+                   : media.kind === "pdf"   ? "PDFs aren't checked by the moderator"
                                             : "no text found; the picture itself isn't checked";
         } else {
           a.state = "ok";
-          a.detail = media.kind === "pdf" ? `${media.page_count} page${media.page_count === 1 ? "" : "s"} read`
-                                          : media.kind === "video" ? "speech transcribed and checked (the picture isn't inspected)"
-                                          : "text read and checked";
+          a.detail = "text read and checked";
         }
       } catch (e) {
         a.state = "bad";

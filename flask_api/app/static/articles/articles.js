@@ -388,14 +388,12 @@
         } else if (media.visual_content_checked === false && media.text_found === false) {
           // Allowed, but nothing in it could actually be read. Say so rather than showing a tick.
           a.state = "unchecked";
-          a.detail = media.kind === "video" ? (media.audio_checked ? "no speech found; the footage itself isn't checked"
-                                                         : "video isn't checked by the moderator")
+          a.detail = media.kind === "video" ? "video isn't checked by the moderator"
+                   : media.kind === "pdf"   ? "PDFs aren't checked by the moderator"
                                             : "no text found; the picture itself isn't checked";
         } else {
           a.state = "ok";
-          a.detail = media.kind === "pdf" ? `${media.page_count} page${media.page_count === 1 ? "" : "s"} read`
-                                          : media.kind === "video" ? "speech transcribed and checked (the picture isn't inspected)"
-                                          : "text read and checked";
+          a.detail = "text read and checked";
         }
       } catch (e) {
         a.state = "bad";

@@ -153,7 +153,7 @@ sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/flask_api/scripts/fetc
 # config/visual_policy.yaml, which is an offline step on whichever host edits the policy.
 
 # ---- 6. OCR language models ----------------------------------------------------------
-# settings.yaml pdf.ocr points at models/ocr/devanagari_rec.onnx, which is also not in git.
+# settings.yaml ocr.rec_model_path points at models/ocr/devanagari_rec.onnx, not in git either.
 say "OCR language models"
 sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" \
     "$APP_DIR/flask_api/scripts/fetch_ocr_langs.py" devanagari || \
