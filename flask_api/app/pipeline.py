@@ -264,7 +264,7 @@ class Pipeline:
                              label_scores={"not_grievance": round(1.0 - score, 6),
                                            "grievance": round(score, 6)},
                              model_version=version or self.grievance.version, inference_ms=0.0)
-        fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value, score)
+        fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value, score, threshold=self.thresholds.reject_min)
         # `total` has to include the model that decided. Left to default it would report the
         # gate's 0.1 ms for a request that spent 12 ms in this model, and the one number an
         # operator reads first would be the one that is wrong.

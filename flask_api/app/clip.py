@@ -779,7 +779,8 @@ class VisualCheck:
                 result.exemplar_allow >= result.exemplar_block:
             return False
         if result.exemplar_block >= self.config.exemplar_reject_min and \
-                (result.exemplar_block - result.exemplar_allow) >= self.config.exemplar_margin_min:
+                (result.exemplar_block - result.exemplar_allow) >= getattr(
+                self.config, "exemplar_margin_min", 0.0):
             return True
         # A WITHDRAWN CATEGORY GETS NO VOTE FROM THE PROBE. What is left is the written
         # policy below, and a category with no refusing rule publishes - which is what an
