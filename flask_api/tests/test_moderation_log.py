@@ -39,7 +39,9 @@ def test_a_decision_lands_in_the_audit_log(make_settings, scorer, sink):
     assert page["total"] == 1
     row = page["logs"][0]
     assert row["request_id"] == request_id
-    assert row["decision"] == r.get_json()["decision"]
+    # The log row keeps the pipeline's own word, which the response now returns as
+    # `legacy_decision` - `decision` on the wire is the .NET verdict.
+    assert row["decision"] == r.get_json()["legacy_decision"]
     assert row["content_type"] == "article"
     assert row["content_preview"].startswith("An ordinary sentence")
     # The primary sink still saw it too.

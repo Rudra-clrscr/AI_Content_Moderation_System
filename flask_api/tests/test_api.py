@@ -13,6 +13,11 @@ REQUIRED_KEYS = {
     "moderation",
 }
 
+# What `_format_moderation_data` adds on top of a pipeline result: the .NET verdict under each
+# of its names, the pipeline's own word, and the author-facing reason.
+ENVELOPE_KEYS = {"Action", "Decision", "action", "verdict", "approval_status",
+                 "legacy_decision", "Note"}
+
 
 def post(client, content="Industrial valves for sale", content_type="product_listing", **extra):
     return client.post("/v1/moderate", json={"content": content, "content_type": content_type, **extra})
@@ -22,15 +27,26 @@ def test_allow(client, sink):
     r = post(client, content_id=42)
     body = r.get_json()
     assert r.status_code == 200
-    assert body["decision"] == "allow" and body["decided_by"] == "model"
+    assert body["Success"] is True
+    assert body["Type"] == "success"
+    assert body["Action"] == "approved"
+    assert body["decision"] == "approved" and body["decided_by"] == "model"
     assert body["content_id"] == "42"
-    assert set(body) == REQUIRED_KEYS
+    # Every documented field is in `Data` for the .NET client and flattened alongside the
+    # envelope for the callers that predate it. Both, or one of the two is a broken contract.
+    assert REQUIRED_KEYS <= set(body)
+    assert REQUIRED_KEYS <= set(body["Data"])
+    assert body["Data"]["decision"] == "approved"
     # The recorded copy is the response plus the caller's address: the audit log needs it and
     # the public body deliberately does not carry it (see api._emit and test_client_address).
     recorded = sink.results[0]
     client = recorded.pop("client")
     assert (client["ip"], client["network"]) == ("127.0.0.1", "127.0.0.0/24")
-    assert recorded == body
+    # The audit trail keeps the pipeline's own vocabulary - "allow", not "approved" - so the
+    # admin log filters and every row written before the envelope still read the same. Apart
+    # from that one word and the keys the envelope adds, the row is still the response.
+    assert recorded["decision"] == "allow" and body["legacy_decision"] == "allow"
+    assert {k: v for k, v in body["Data"].items() if k not in ENVELOPE_KEYS} ==         {**recorded, "decision": "approved"}
 
 
 def test_revise_and_reject_by_score(make_settings, sink):
@@ -50,7 +66,7 @@ def test_gate_block_skips_model(client, scorer, sink):
 
 def test_gate_flag_is_recorded_only(client):
     body = post(client, content="details at bit.ly/xyz").get_json()
-    assert body["decision"] == "allow" and body["decided_by"] == "model"
+    assert body["decision"] == "approved" and body["decided_by"] == "model"
     m = body["gate_matches"][0]
     assert m["action"] == "flag" and m["spans"] == [[11, 21]]   # "bit.ly/xyz"
     assert body["feedback"] is None

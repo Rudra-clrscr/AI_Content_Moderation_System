@@ -144,7 +144,7 @@ def test_photo_without_text_is_allowed_but_says_it_was_not_looked_at(make_settin
     """A product photo carries no words. Refusing those would break the feature for every
     honest seller — but the caller must be able to see the picture was never classified."""
     body = upload(client(make_settings, ocr=ocr), png(), "product.png").get_json()
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["media"]["text_found"] is False
     assert body["media"]["visual_content_checked"] is False
 
@@ -152,7 +152,7 @@ def test_photo_without_text_is_allowed_but_says_it_was_not_looked_at(make_settin
 def test_clean_text_in_an_image_is_allowed(make_settings, ocr):
     body = upload(client(make_settings, ocr=ocr),
                   text_image(["Cotton bedsheets in king and queen sizes."]), "sizes.png").get_json()
-    assert body["decision"] == "allow" and body["media"]["text_found"] is True
+    assert body["decision"] == "approved" and body["media"]["text_found"] is True
 
 
 def test_video_is_refused_when_the_flag_is_off(make_settings):
@@ -166,7 +166,7 @@ def test_video_is_refused_when_the_flag_is_off(make_settings):
 def test_video_can_be_allowed_unchecked_when_that_is_the_policy(make_settings):
     c = client(make_settings, media=MediaLimits(allow_unchecked_video=True))
     body = upload(c, fake_video(), "clip.mp4").get_json()
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["media"]["checked"] is False and body["media"]["visual_content_checked"] is False
 
 
@@ -193,13 +193,15 @@ def test_a_pdf_is_published_unread(make_settings):
     """PDF checking was taken out while the scanned path is reworked. What is left is the video
     rule with the opposite default: publish it, and say plainly that nothing read it."""
     body = upload(client(make_settings), pdf_bytes(), "cat.pdf").get_json()
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["media"]["kind"] == "pdf"
     # The honesty of the record is the whole of what is left. An allow nothing looked at must
     # never be readable as a clean result.
     assert body["media"]["checked"] is False
     assert body["media"]["visual_content_checked"] is False
     assert body["media"]["text_found"] is False
+    # Including in the envelope's summary line, which is all a .NET caller may keep.
+    assert body["Message"] == "Published, but nothing in this file could be read or checked."
     # The old contract's page map is gone with the extractor that filled it.
     assert "pdf" not in body
 

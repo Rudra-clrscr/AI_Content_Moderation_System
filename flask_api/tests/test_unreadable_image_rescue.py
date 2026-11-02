@@ -111,14 +111,14 @@ def test_the_refusal_no_longer_fires_on_a_cleared_picture(make_settings):
     client = build(make_settings, CLEARED_BUT_TOP_LABEL_UNSAFE, reject=False)
     r = upload(client)
     assert r.status_code == 200, r.get_json()
-    assert r.get_json()["decision"] == "allow"
+    assert r.get_json()["decision"] == "approved"
 
 
 def test_a_plainly_safe_picture_was_never_affected_and_still_publishes(make_settings):
     """The half of the rescue that always worked, pinned so the fix did not narrow it."""
     r = upload(build(make_settings, PLAINLY_SAFE, reject=False))
     assert r.status_code == 200
-    assert r.get_json()["decision"] == "allow"
+    assert r.get_json()["decision"] == "approved"
 
 
 def test_publishing_it_never_claims_the_writing_was_checked(make_settings):
@@ -166,4 +166,4 @@ def test_readable_writing_is_still_read_and_judged(make_settings):
     # `checked: false` is the unreadable branch's own narrow claim; the readable path never
     # sets it, because the words really were read and judged.
     assert "checked" not in body["media"]
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"

@@ -192,13 +192,13 @@ def test_targeted_check_can_be_disabled(make_settings):
     # The sentence scan would also catch this sentence, so turn both off.
     s = make_settings(targeted=TargetedAbuse(enabled=False), sentence_scan=SentenceScan(enabled=False))
     body = post(create_app(s, scorer=SegmentScorer()).test_client(), TEXT)
-    assert body["decision"] == "allow" and body["targeted_segments"] == []
+    assert body["decision"] == "approved" and body["targeted_segments"] == []
 
 
 def test_low_segment_score_does_not_change_decision(make_settings):
     text = "Great valves. They deliver on time every week."
     body = post(create_app(make_settings(), scorer=SegmentScorer()).test_client(), text)
-    assert body["decision"] == "allow" and body["decided_by"] == "model"
+    assert body["decision"] == "approved" and body["decided_by"] == "model"
     assert len(body["targeted_segments"]) == 1
 
 
@@ -215,4 +215,4 @@ def test_skipped_when_whole_text_already_rejected(make_settings, tmp_path):
 def test_gate_flag_does_not_change_decision(make_settings):
     text = "See bit.ly/abc for prices. They deliver on time every week."
     body = post(create_app(make_settings(), scorer=SegmentScorer()).test_client(), text)
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"

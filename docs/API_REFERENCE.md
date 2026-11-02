@@ -32,62 +32,85 @@ GraphQL and no gRPC anywhere in this project.
 
 ## 1. Conventions
 
-### Error envelopes — there are two
+### Official Company Envelope & Unified Response Standard
 
-**A client cannot assume one shape.** The moderation blueprint and the three admin
-blueprints disagree, and one endpoint can return both depending on which layer refused.
-
-**Nested** — `_error()` in `app/api.py`:
+All endpoints now follow the **BONC Network Official Microservice Standard** (`ApiResponse<T>`) as specified in the official Swagger (`https://api.boncnetwork.com/swagger/index.html`):
 
 ```json
-{ "error": { "code": "invalid_content_type", "message": "unknown 'content_type'",
-             "allowed": ["business_profile", "product_listing", "..."] } }
+{
+  "Success": true,
+  "Message": "Content approved for publication.",
+  "Type": "success",
+  "Data": { ... }
+}
 ```
 
-**Flat** — `_err()` in `app/admin_auth.py`, `app/admin_images.py`, `app/admin_policy.py`:
+#### .NET Server Binary Verdicts: "approved" and "reject"
+
+For full integration with the company's ASP.NET Core backend (e.g. `AdminArticleActionDto`, `ArticleAdminActionDto`), moderation decisions explicitly map to two canonical actions:
+* **`"approved"`**: Content passed checks. `.NET` server immediately publishes the entity.
+* **`"reject"`**: Content refused or flagged. `.NET` server retains draft/rejected status and logs `Note`.
+
+Inside `Data`:
+* `Action`: `"approved"` | `"reject"` — and `"pending"` on the async `202`. **Branch on this one.**
+* `Decision`, `action`, `verdict`, `approval_status`: the same verdict under the names different
+  callers already look for. All four always agree with `Action`.
+* `decision`: `"approved"` | `"revise"` | `"reject"`. Not a second name for `Action`: an allow
+  becomes `"approved"`, but a **`"revise"` stays `"revise"`** here, because the author-facing
+  surfaces need to tell "fix the highlighted part and resubmit" apart from a flat refusal. A
+  `.NET` caller reading `decision` instead of `Action` must treat `"revise"` as a rejection.
+* `legacy_decision`: the pipeline's own word — `"allow"` | `"revise"` | `"reject"` — always.
+  This is what the audit log stores, so a log row and a response say it differently by design.
+* `status`: the request's lifecycle, `"completed"` or `"pending"` — *not* the verdict.
+* `Note`: rejection explanation or policy instruction (or `null` when approved).
+
+There is no `Status` key. `Action` is the verdict; `status` (lower case) is the lifecycle.
+
+#### Error Envelope
+
+Every error response, on the moderation routes and the admin routes alike, now carries the
+`ApiResponse` failure fields — `Success: false`, `Message`, `Type: "error"`, `Data: null` and a
+structured `Error` object. Branch on those and the two families are finally the same shape:
 
 ```json
-{ "error": "unauthorized", "message": "please log in" }
+{
+  "Success": false,
+  "Message": "unknown 'content_type'",
+  "Type": "error",
+  "Data": null,
+  "Error": {
+    "code": "invalid_content_type",
+    "message": "unknown 'content_type'",
+    "allowed": ["business_profile", "product_listing", "..."]
+  },
+  "error": {
+    "code": "invalid_content_type",
+    "message": "unknown 'content_type'"
+  }
+}
 ```
 
-Here the code *is* `error`, as a string, and `message` is a sibling key.
+`Error` is the one to read: `Error.code` is stable and machine-readable on every route.
 
-| Endpoints | Shape |
+**The legacy `error` key is still the old two shapes, and that has not changed.** It is kept
+only so clients written before the envelope keep working, and they disagree:
+
+| Where | Legacy `error` |
 |---|---|
-| `/v1/moderate*`, `/health`, `/ready`, `/demo`, `/articles`, `/docs`, `/openapi.yaml` | nested |
-| `/v1/admin/moderation-levels/*`, `/v1/admin/model/reload` — their *own* errors | nested |
-| `/v1/admin/auth/*`, `moderation-settings`, `moderation-logs*`, `blocked-clients*`, `images/*`, `policy/*` | flat |
-| **Any `401`/`403`/admin-disabled `404` from `check_admin()`** — including on the nested endpoints above | **flat** |
+| `_error()` in `app/api.py` — `/v1/moderate*`, `/health`, `/ready`, `/docs`, and the own errors of `/v1/admin/moderation-levels/*` and `/v1/admin/model/reload` | the **object** above, `{code, message, ...}` |
+| `_err()` in `app/admin_auth.py`, `app/admin_images.py`, `app/admin_policy.py` — and **any `401`/`403`/admin-disabled `404` from `check_admin()`, including on the routes in the row above** | the code as a **bare string**, with `message` as a sibling key |
 
-That last row is the trap. `GET /v1/admin/moderation-levels` answers `401` flat but its
-own `404 no_such_surface` nested — one endpoint, both shapes. `POST /v1/admin/model/reload`
-is the exception among admin routes: it does its own token check with `_error`, so even its
-`401` is nested.
-
-Verified against a running instance:
-
-```
-400  nested  POST /v1/moderate                        (bad content_type)
-401  flat    GET  /v1/admin/moderation-levels         (no auth)
-404  nested  PUT  /v1/admin/moderation-levels/bogus   (authenticated)
-401  flat    POST /v1/admin/auth/login                (bad credentials)
-401  nested  POST /v1/admin/model/reload              (no token header)
-```
-
-Read the code defensively:
+So `GET /v1/admin/moderation-levels` still answers `401` with `"error": "unauthorized"` and its
+own `404 no_such_surface` with `"error": {"code": ...}` — one endpoint, both legacy shapes. New
+code should read `Error.code` and ignore `error` entirely; old code reading `error` needs the
+defensive form it always needed:
 
 ```js
 const code = typeof body.error === "string" ? body.error : body.error?.code;
 ```
 
-In both shapes the code is stable and machine-readable — branch on it, not on `message`.
-Extra keys (`allowed`, `limit`, `request_id`, `kind`, `conflicts`, `this_verdict`) are
-added per error where they help the caller recover.
-
-Unhandled Werkzeug `HTTPException`s are funnelled into the **nested** envelope by
+Unhandled Werkzeug `HTTPException`s are funnelled into the `app/api.py` envelope by
 `_http_error`, so a 404 or a 405 never returns Flask's HTML error page.
-
-> Worth unifying. Until then, both shapes are load-bearing and a client must handle each.
 
 ### Authentication — three tiers
 

@@ -321,7 +321,7 @@ def test_a_clean_picture_is_allowed_and_says_it_was_looked_at(make_settings, sco
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(looked))
     body = post_image(client).get_json()
 
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["media"]["visual_content_checked"] is True
     assert body["media"]["visual"]["label"] == "safe"
 
@@ -331,7 +331,7 @@ def test_with_the_check_off_an_image_is_allowed_but_says_nobody_looked(make_sett
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(VisualResult(checked=False)))
     body = post_image(client).get_json()
 
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["media"]["visual_content_checked"] is False
     assert "visual" not in body["media"]
 
@@ -565,8 +565,8 @@ def client_scoring(make_settings, sink, risk, ocr, **kw):
 
 
 @pytest.mark.parametrize("risk, decision", [
-    (0.93, "allow"),    # the worst real BONC listing measured
-    (0.98, "allow"),    # garbled signage, still under the bar
+    (0.93, "approved"),    # the worst real BONC listing measured
+    (0.98, "approved"),    # garbled signage, still under the bar
     (0.999, "reject"),  # where scam flyers actually land
 ])
 def test_image_text_is_judged_at_the_higher_bar(make_settings, sink, ocr, risk, decision):
@@ -579,7 +579,7 @@ def test_image_text_has_no_revise_band(make_settings, sink, ocr):
     """A revise says "edit the highlighted part", which cannot be done to words baked into a
     photograph - the author can only replace the picture. So there is one boundary, not two."""
     body = upload_to(client_scoring(make_settings, sink, 0.80, ocr), image_with_text()).get_json()
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["thresholds"]["allow_max"] == body["thresholds"]["reject_min"]
 
 

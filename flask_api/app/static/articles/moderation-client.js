@@ -15,7 +15,7 @@
  *   const {result, parts, content} = await BoncModeration.moderateFields(
  *       [{name: "title", text: title}, {name: "description", text: description}],
  *       {contentType: "video", contentId: id});
- *   if (result.decision === "allow") return publish();
+ *   if (BoncModeration.isApproved(result)) return publish();
  *   const issues = BoncModeration.mapIssues(result.feedback, parts, content);
  *   showIssues(issues);                                  // highlight the inputs in place
  *   BoncModeration.showDecision({result, issues, noun: "video", onClose: () => focusFirst()});
@@ -167,6 +167,23 @@
   }
 
   /**
+   * Did this result approve the content?
+   *
+   * There is more than one word for yes. The service answers the .NET verdicts in `Action`
+   * ("approved" / "reject", and "pending" while an async check is still queued) and keeps the
+   * pipeline's own word in `decision`, where "allow" survives as a legacy alias. A caller that
+   * compares against one literal silently stops publishing clean content the day the other one
+   * is sent, which is exactly what happened to this page - so ask here, never inline.
+   *
+   * "revise" and "reject" are both no: neither is published as it stands.
+   */
+  function isApproved(result) {
+    if (!result) return false;
+    if (result.Action) return result.Action === "approved";
+    return result.decision === "approved" || result.decision === "allow";
+  }
+
+  /**
    * Map each feedback issue (offsets into the combined content) onto a field:
    *   {field: "title" | "body" | "link", start, end (relative to that field), linkIndex?, message, source, text,
    *    words: [{start, end, text}]}   // trigger words inside the issue (word-by-word scan), same field
@@ -225,11 +242,12 @@
       throw Object.assign(new Error("Could not reach the moderation service."), { code: "network" });
     }
     const body = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const err = body.error || {};
-      throw Object.assign(new Error(err.message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
+    if (!resp.ok || body.Success === false) {
+      const err = body.Error || body.error || {};
+      throw Object.assign(new Error(err.message || body.Message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
     }
-    return { result: body, parts, content };
+    const result = body.Data || body;
+    return { result, parts, content };
   }
 
   /**
@@ -253,11 +271,11 @@
       throw Object.assign(new Error("Could not reach the moderation service."), { code: "network" });
     }
     const body = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const err = body.error || {};
-      throw Object.assign(new Error(err.message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
+    if (!resp.ok || body.Success === false) {
+      const err = body.Error || body.error || {};
+      throw Object.assign(new Error(err.message || body.Message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
     }
-    return body;
+    return body.Data || body;
   }
 
   /**
@@ -287,11 +305,12 @@
       throw Object.assign(new Error("Could not reach the moderation service."), { code: "network" });
     }
     const body = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const err = body.error || {};
-      throw Object.assign(new Error(err.message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
+    if (!resp.ok || body.Success === false) {
+      const err = body.Error || body.error || {};
+      throw Object.assign(new Error(err.message || body.Message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
     }
-    return { result: body, parts, content };
+    const result = body.Data || body;
+    return { result, parts, content };
   }
 
   // ---------------- the "before you post" popup ----------------
@@ -411,5 +430,5 @@
 
   global.BoncModeration = { serializeEditor, editorLinks, buildContent, buildArticleContent, mapIssues,
                             rangeFor, moderateArticle, moderateFields, moderateFile,
-                            hashtagWords, normalizeHashtag, showDecision };
+                            hashtagWords, normalizeHashtag, showDecision, isApproved };
 })(window);

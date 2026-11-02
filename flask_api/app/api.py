@@ -25,8 +25,102 @@ def _svc():
     return current_app.extensions["moderation"]
 
 
+def _envelope(data: dict, message: str, resp_type: str, success: bool = True) -> dict:
+    """The official `ApiResponse` shape, with the payload also flattened alongside it.
+
+    `Data` is what the .NET backend reads. The flattened copy is what every caller that
+    predates the envelope still reads - the demo page, the article surfaces, the tests - so
+    both have to be present and say the same thing.
+
+    The envelope keys are written last on purpose: a payload field named `Success`, `Message`
+    or `Type` would otherwise shadow the envelope and the response would lie about itself.
+    """
+    return {
+        **data,
+        "Success": success,
+        "Message": message,
+        "Type": resp_type,
+        "Data": data,
+    }
+
+
 def _error(status: int, code: str, message: str, **extra):
-    return jsonify({"error": {"code": code, "message": message, **extra}}), status
+    err_obj = {"code": code, "message": message, **extra}
+    return jsonify({
+        **extra,
+        "Success": False,
+        "Message": message,
+        "Type": "error",
+        "Data": None,
+        "Error": err_obj,
+        "error": err_obj,  # preserved for backward compatibility
+    }), status
+
+
+def _format_moderation_data(result: dict) -> dict:
+    raw = result.get("decision", "allow")
+    is_approved = (raw in ("allow", "approved"))
+    # The .NET server operates on two responses: "approved" and "reject"
+    action = "approved" if is_approved else "reject"
+
+    data = dict(result)
+    data["Action"] = action
+    data["Decision"] = action
+    data["action"] = action
+    data["verdict"] = action
+    data["approval_status"] = action
+    data["legacy_decision"] = raw
+    # "approved" when allowed; retain "revise" if internal pipeline produced a revise band
+    data["decision"] = "approved" if is_approved else raw
+    if "status" not in data:
+        data["status"] = "completed"
+
+    fb = result.get("feedback")
+    if fb and isinstance(fb, dict):
+        data["Note"] = fb.get("message") or fb.get("title")
+    elif not is_approved:
+        matches = result.get("gate_matches") or []
+        if matches:
+            data["Note"] = f"Violation of policy rule: {matches[0].get('rule_id', 'content_policy')}"
+        else:
+            data["Note"] = f"Content rejected by moderation risk score: {result.get('risk_score', 1.0)}"
+    else:
+        data["Note"] = None
+
+    return data
+
+
+def _approved_message(data: dict) -> str:
+    """What an approval is allowed to claim.
+
+    "Content approved for publication" has to mean something looked and found nothing. Two
+    paths publish without that: a surface an admin switched moderation off for, and a file
+    nothing could read - a PDF, a video, writing OCR could not make out. The rest of this
+    service takes care that neither can be read as a clean result (`decided_by: "disabled"`,
+    `risk_score: null`, `media.checked: false`), and the envelope's own sentence - the one
+    line a .NET caller is most likely to log or show an operator - must not undo that.
+    """
+    if data.get("decided_by") == "disabled":
+        return "Published without being checked: moderation is switched off for this surface."
+    media = data.get("media")
+    if isinstance(media, dict) and media.get("checked") is False:
+        return "Published, but nothing in this file could be read or checked."
+    return "Content approved for publication."
+
+
+def _api_response(result: dict, message: str | None = None, status: int = 200, extra: dict | None = None):
+    merged = {**result, **(extra or {})}
+    data = _format_moderation_data(merged)
+    is_approved = (data["Action"] == "approved")
+    if message:
+        msg = message
+    elif is_approved:
+        msg = _approved_message(data)
+    else:
+        msg = data.get("Note") or "Content rejected by moderation policy."
+    resp_type = "success" if is_approved else "warning"
+
+    return jsonify(_envelope(data, msg, resp_type)), status
 
 
 # The endpoints a member submits through. Listed rather than matched on a path prefix because
@@ -157,7 +251,7 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
         # Nothing runs - not the model, not the gate. Published and recorded as unchecked.
         result = {**svc.pipeline.not_moderated_result(req), "moderation": policy.as_dict()}
         _emit(result)
-        return jsonify({**result, **(extra or {})}), 200
+        return _api_response(result, extra=extra)
 
     # An explicit override wins over the feature's level. The only caller that passes one is
     # text read out of a picture, where the higher bar is a correctness measure against OCR
@@ -180,7 +274,7 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
     if gate.blocked:
         result = stamp(pipeline.gate_only_result(req, gate, gate_ms))
         _emit(result)
-        return jsonify({**result, **(extra or {})}), 200
+        return _api_response(result, extra=extra)
 
     if svc.settings.mode == "async":
         try:
@@ -188,15 +282,18 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
         except Exception:
             log.exception("enqueue failed for request %s", req.request_id)
             return _error(503, "queue_unavailable", "moderation queue unavailable, retry later")
-        return jsonify({
+        async_data = {
             "request_id": req.request_id,
             "status": "pending",
+            "Action": "pending",
             "content_id": req.content_id,
             "content_type": req.content_type.value,
             "status_url": f"/v1/moderate/{req.request_id}",
             "moderation": policy.as_dict(),
             **(extra or {}),
-        }), 202
+        }
+        return jsonify(_envelope(async_data, "Content queued for asynchronous moderation.",
+                                 "info")), 202
 
     try:
         result = pipeline.moderate(req, gate=gate, gate_ms=gate_ms)
@@ -207,7 +304,7 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
         return _error(500, "inference_failed", "model inference failed", request_id=req.request_id)
     result = stamp(result)
     _emit(result)
-    return jsonify({**result, **(extra or {})}), 200
+    return _api_response(result, extra=extra)
 
 
 @bp.post("/v1/moderate")
@@ -278,8 +375,7 @@ def moderate_media():
                           "cannot be published. Paste the text, or attach an image instead.",
                           kind=kind)
         block.update(text_found=False, visual_content_checked=False, checked=False)
-        return jsonify({**_allowed_without_text(upload.filename, content_type, content_id),
-                        "media": block}), 200
+        return _api_response(_allowed_without_text(upload.filename, content_type, content_id), extra={"media": block})
 
     elif kind == "image":
         try:
@@ -338,9 +434,9 @@ def moderate_media():
                               "cannot be checked. Upload a clearer picture, or put the words "
                               "in the post itself.", kind=kind, text_readable=False)
             block.update(checked=False)
-            return jsonify({**_allowed_without_text(upload.filename, content_type, content_id), **extra}), 200
+            return _api_response(_allowed_without_text(upload.filename, content_type, content_id), extra=extra)
         if not text.strip():
-            return jsonify({**_allowed_without_text(upload.filename, content_type, content_id), **extra}), 200
+            return _api_response(_allowed_without_text(upload.filename, content_type, content_id), extra=extra)
 
     elif kind == "video":
         # NOTHING LISTENS TO A VIDEO ANY MORE. The audio check and its Whisper dependency were
@@ -353,8 +449,7 @@ def moderate_media():
                           "video cannot be checked by this service, so it cannot be published. "
                           "Upload a still image instead.", kind=kind)
         block.update(text_found=False, visual_content_checked=False, checked=False)
-        return jsonify({**_allowed_without_text(upload.filename, content_type, content_id),
-                        "media": block}), 200
+        return _api_response(_allowed_without_text(upload.filename, content_type, content_id), extra={"media": block})
 
     else:
         return _error(422, "media_unsupported",
@@ -449,7 +544,7 @@ def _visual_reject(filename: str, looked, content_type: ContentType,
     match = GateMatch(rule_id=rule_id, category=category, action="block", spans=())
     result = svc.pipeline.gate_only_result(req, GateResult((match,)), 0.0)
     _emit(result)
-    return jsonify({**result, **extra}), 200
+    return _api_response(result, extra=extra)
 
 
 def _allowed_without_text(filename: str, content_type: ContentType, content_id: str | None) -> dict:
@@ -470,7 +565,12 @@ def moderation_status(request_id: str):
     if svc.fetch_result is None:
         return _error(404, "not_supported", "status lookup is only available in async mode")
     result = svc.fetch_result(request_id)
-    return jsonify(result), 200
+    if not isinstance(result, dict):
+        return _error(500, "invalid_status", "unexpected result from status lookup")
+    if result.get("status") == "completed":
+        return _api_response(result)
+    return jsonify(_envelope(result, f"Moderation status: {result.get('status', 'pending')}",
+                             "info")), 200
 
 
 @bp.get("/demo")
@@ -529,7 +629,7 @@ def api_docs():
 
 @bp.get("/health")
 def health():
-    return jsonify({"status": "ok"}), 200
+    return jsonify(_envelope({"status": "ok"}, "Service is healthy.", "success")), 200
 
 
 @bp.get("/ready")
@@ -552,8 +652,9 @@ def ready():
         body.update(model_ready=svc.models.ready, model_version=svc.models.version,
                     model_backend=svc.settings.model_backend, model_error=svc.models.last_error)
         if not svc.models.ready:
-            return jsonify({"status": "not_ready", **body}), 503
-    return jsonify({"status": "ready", **body}), 200
+            return jsonify(_envelope({"status": "not_ready", **body},
+                                     "Service models not ready.", "error", success=False)), 503
+    return jsonify(_envelope({"status": "ready", **body}, "Service is ready.", "success")), 200
 
 
 def _require_admin():

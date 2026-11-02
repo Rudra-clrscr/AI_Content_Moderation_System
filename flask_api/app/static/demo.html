@@ -253,6 +253,11 @@ async function submit(send) {
   try {
     const r = await send();
     const body = await r.json();
+    // The service now answers the .NET verdicts - "approved" rather than "allow" - and keeps
+    // the pipeline's own word in `legacy_decision`. This page is about the pipeline: its badge
+    // and pill CSS classes, its allow/revise/reject counters and its wording are all keyed on
+    // that vocabulary, so read it back before anything here touches `decision`.
+    if (body.legacy_decision) body.decision = body.legacy_decision;
     const roundTrip = performance.now() - t0;
     if (!r.ok) return showError(r.status, body);
     if (body.status === "pending") return showPending(body);

@@ -87,14 +87,14 @@ def test_a_stricter_level_refuses_what_the_global_bar_allows(make_settings, sink
 def test_a_looser_level_publishes_what_the_global_bar_would_not(make_settings, sink, levels_file):
     c = client_with(make_settings, sink, levels_file, risk=0.8)
     assert post(c, content_type="video").get_json()["decision"] == "reject"    # 0.8 > 0.7
-    assert post(c, content_type="proposal").get_json()["decision"] == "allow"  # 0.8 <= 0.85
+    assert post(c, content_type="proposal").get_json()["decision"] == "approved"  # 0.8 <= 0.85
 
 
 def test_a_raw_rating_is_honoured_without_a_named_level(make_settings, sink, levels_file):
     """The admin UI offers three buttons; an expert types a number. Both reach the same place."""
     c = client_with(make_settings, sink, levels_file, risk=0.6)
     body = post(c, content_type="product_listing").get_json()
-    assert body["decision"] == "allow"                        # 0.60 <= 0.62
+    assert body["decision"] == "approved"                        # 0.60 <= 0.62
     assert body["moderation"] == {"enabled": True, "allow_max": 0.62, "reject_min": 0.62}
     assert "level" not in body["moderation"]                  # a number was given, not a name
 
@@ -104,11 +104,15 @@ def test_a_raw_rating_is_honoured_without_a_named_level(make_settings, sink, lev
 def test_a_disabled_feature_publishes_without_checking_anything(make_settings, sink, levels_file):
     c = client_with(make_settings, sink, levels_file, risk=0.99)
     body = post(c, content="pay in crypto to double your money", content_type="post").get_json()
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["decided_by"] == "disabled"
     assert body["risk_score"] is None                 # nothing was scored
     assert body["gate_matches"] == []                 # the gate did not run either
     assert body["moderation"] == {"enabled": False}
+    # The envelope's one line is the part a .NET caller logs or shows an operator, and it is
+    # the one place this result could still be read as "checked and found clean".
+    assert body["Message"] == ("Published without being checked: "
+                               "moderation is switched off for this surface.")
 
 
 def test_disabled_is_distinguishable_from_checked_and_clean(make_settings, sink, levels_file):
@@ -117,7 +121,7 @@ def test_disabled_is_distinguishable_from_checked_and_clean(make_settings, sink,
     c = client_with(make_settings, sink, levels_file, risk=0.01)
     off = post(c, content_type="post").get_json()
     on = post(c, content_type="video").get_json()
-    assert off["decision"] == on["decision"] == "allow"
+    assert off["decision"] == on["decision"] and off["decision"] == "approved"
     assert (off["decided_by"], on["decided_by"]) == ("disabled", "model")
     assert off["risk_score"] is None and on["risk_score"] is not None
 
@@ -183,7 +187,7 @@ def test_the_rating_can_be_set_live(make_settings, sink, levels_file):
     ok = {"X-Admin-Token": "secret"}
     assert post(c, content_type="article").get_json()["decision"] == "reject"   # strict 0.25
     c.put("/v1/admin/moderation-levels/article", json={"reject_min": 0.9}, headers=ok)
-    assert post(c, content_type="article").get_json()["decision"] == "allow"
+    assert post(c, content_type="article").get_json()["decision"] == "approved"
 
 
 @pytest.mark.parametrize("body", [
