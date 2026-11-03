@@ -104,6 +104,20 @@ For admin calls prefer `AdminToken` over logging in: a session cookie also requi
 `X-Requested-With: bonc-admin` header on every non-GET, which Swagger UI cannot add from a
 security scheme.
 
+### If "Try it out" says "Failed to fetch"
+
+Check the **Servers** dropdown above the operations. It must be on
+`/ - This instance`, the relative entry.
+
+The service sends no CORS headers, deliberately: adding them would relax the browser's
+protection on the unauthenticated submission endpoints for the sake of a developer
+convenience. So "Try it out" only works against the page's own origin. Pick the absolute
+`http://localhost:8000` entry while the page itself is open on `127.0.0.1` and the browser
+blocks the request - same service, different origin string - and Swagger UI reports it as the
+unhelpfully vague "Failed to fetch".
+
+The relative entry is first and selected by default, so this only happens if it was changed.
+
 ### If the page comes up blank
 
 "Unable to render this definition" means Swagger UI did not recognise the spec's `openapi:`

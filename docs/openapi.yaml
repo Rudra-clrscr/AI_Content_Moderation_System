@@ -53,8 +53,20 @@ info:
     url: https://github.com/Rudra-clrscr/BONC/blob/main/docs/API_REFERENCE.md
 
 servers:
+  # RELATIVE ON PURPOSE, AND FIRST. Swagger UI sends "Try it out" to the selected server, so
+  # an absolute URL here is the origin the browser calls - and this service sends no CORS
+  # headers, by design, because adding them would relax the browser's protection on the
+  # unauthenticated submission endpoints for the sake of a developer convenience.
+  #
+  # So an absolute `http://localhost:8000` breaks "Try it out" for anyone who opened the page
+  # at 127.0.0.1, or on a LAN address, or through a tunnel: same service, different origin
+  # string, request blocked, and the UI reports it as the unhelpful "Failed to fetch".
+  # A relative URL resolves against whatever origin the page itself came from, which is the
+  # one origin that is always right.
+  - url: /
+    description: This instance - whatever host and port you opened this page on.
   - url: http://localhost:8000
-    description: Local development
+    description: Local development, for reading this document outside the service.
   - url: https://moderation.internal.boncnetwork.com
     description: |
       The AI/ML host. This service runs on its own machine, beside the models rather than
