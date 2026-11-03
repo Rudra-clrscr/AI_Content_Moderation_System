@@ -56,6 +56,75 @@ curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
 
 For a live demonstration, set up with [DEMO_GUIDE_POWERSHELL.md](DEMO_GUIDE_POWERSHELL.md) or [DEMO_GUIDE_CMD.md](DEMO_GUIDE_CMD.md), then follow [DEMO_GUIDE.md](DEMO_GUIDE.md) for the run of show and tested sentences.
 
+## Opening the Swagger UI
+
+Start the service, then open **<http://127.0.0.1:8000/docs>**. That is all of it: the page is
+served by the service itself, so there is nothing separate to run and no CORS to configure,
+and "Try it out" calls the instance you just started.
+
+PowerShell:
+
+```powershell
+cd flask_api
+$env:MODEL_BACKEND = "stub"          # dev only; omit this line to load the real model
+.venv/Scripts/python.exe wsgi.py
+```
+
+bash:
+
+```bash
+cd flask_api
+MODEL_BACKEND=stub python wsgi.py
+```
+
+Wait for `Running on http://127.0.0.1:8000`, then open the URL in a browser.
+
+| URL | |
+|---|---|
+| `/docs` | The Swagger UI. |
+| `/openapi.yaml` | The document it renders, served from the repository's `docs/openapi.yaml` - so the page and the file in git cannot drift. |
+
+`API_DOCS=0` turns both off; they answer `404` then, which is what a deployment that should
+not publish its own contract sets.
+
+### Authorising in the page
+
+**Authorize**, top right:
+
+| Scheme | Value | Covers |
+|---|---|---|
+| `Bearer` | the `SERVICE_TOKEN` value | `/v1/moderate`, `/v1/moderate/media`, `/v1/moderate/{request_id}` |
+| `AdminToken` | the `ADMIN_TOKEN` value | `/v1/admin/*` |
+
+A padlock on an operation means it is gated. **With `SERVICE_TOKEN` unset the moderation
+endpoints are open**, so "Try it out" works on them without authorising at all - `GET /ready`
+reports `service_auth: "open"` when that is the case, and `"enforced"` when it is not.
+
+For admin calls prefer `AdminToken` over logging in: a session cookie also requires the
+`X-Requested-With: bonc-admin` header on every non-GET, which Swagger UI cannot add from a
+security scheme.
+
+### If "Try it out" says "Failed to fetch"
+
+Check the **Servers** dropdown above the operations. It must be on
+`/ - This instance`, the relative entry.
+
+The service sends no CORS headers, deliberately: adding them would relax the browser's
+protection on the unauthenticated submission endpoints for the sake of a developer
+convenience. So "Try it out" only works against the page's own origin. Pick the absolute
+`http://localhost:8000` entry while the page itself is open on `127.0.0.1` and the browser
+blocks the request - same service, different origin string - and Swagger UI reports it as the
+unhelpfully vague "Failed to fetch".
+
+The relative entry is first and selected by default, so this only happens if it was changed.
+
+### If the page comes up blank
+
+"Unable to render this definition" means Swagger UI did not recognise the spec's `openapi:`
+version. That version and the renderer pinned in `app/static/docs.html` are one decision, not
+two - see the comment on the pin. Nothing server-side is wrong, and no test here catches it,
+so after changing either one, open this page and look at it.
+
 ## Wiring up a dashboard surface
 
 Every tab that publishes member-written text uses the same endpoint and the same client.
