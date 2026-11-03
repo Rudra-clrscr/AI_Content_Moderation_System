@@ -441,7 +441,7 @@
       try {
         const result = await M.moderateFile(a.file, { contentType: current });
         const media = result.media || {};
-        if (result.decision !== "allow") {
+        if (!M.isApproved(result)) {
           a.state = "bad";
           a.detail = result.feedback?.message || "Can't be published.";
         } else if (result.decided_by === "disabled") {
@@ -517,7 +517,7 @@
       }
 
       const { result, parts, content } = await M.moderateFields(values, { contentType: current });
-      if (result.decision === "allow") {
+      if (M.isApproved(result)) {
         publish(values, result);
         return;
       }
@@ -552,7 +552,7 @@
 
   function record(values, result) {
     const fb = result.feedback || {};
-    const status = result.decision === "allow" ? "published"
+    const status = M.isApproved(result) ? "published"
                  : result.decision === "reject" ? "rejected" : "needs_changes";
     (items[current] = items[current] || []).unshift({
       id: uid(),

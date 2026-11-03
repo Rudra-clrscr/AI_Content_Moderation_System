@@ -147,7 +147,7 @@ def test_off_publishes_and_on_moderates_every_surface(admin, scorer, ctype):
     assert moderate(admin, ctype).get_json()["decision"] == "reject"
     admin.put("/v1/admin/moderation-settings", json={"enabled": False, "level": "strict"}, headers=HDR)
     off = moderate(admin, ctype).get_json()
-    assert off["decision"] == "allow" and off.get("decided_by") == "disabled"
+    assert off["decision"] == "approved" and off.get("decided_by") == "disabled"
     admin.put("/v1/admin/moderation-settings", json={"enabled": True, "level": "strict"}, headers=HDR)
     assert moderate(admin, ctype).get_json()["decision"] == "reject"
 
@@ -158,9 +158,9 @@ def test_each_level_is_enforced_on_every_surface(admin, scorer, ctype):
         admin.put("/v1/admin/moderation-settings", json={"enabled": True, "level": level}, headers=HDR)
         scorer.risk = risk
         return moderate(admin, ctype).get_json()["decision"]
-    assert decide("lenient", 0.60) == "allow"       # lenient bar 0.85
+    assert decide("lenient", 0.60) == "approved"       # lenient bar 0.85
     assert decide("medium", 0.60) == "reject"       # medium bar 0.50
-    assert decide("medium", 0.40) == "allow"
+    assert decide("medium", 0.40) == "approved"
     assert decide("strict", 0.40) == "reject"       # strict bar 0.25
     assert decide("lenient", 0.99) == "reject"      # even lenient refuses clear abuse
 
@@ -208,7 +208,7 @@ def test_settings_survive_a_restart(make_settings, sink, mailer, tmp_path, score
     app3 = create_app(make_settings(admin_token=None), scorer=scorer, sink=sink,
                       admin_store=AdminStore(db), mailer=mailer, mail_async=False)
     scorer.risk = 0.99
-    assert moderate(app3.test_client(), "video").get_json()["decision"] == "allow"    # OFF still off
+    assert moderate(app3.test_client(), "video").get_json()["decision"] == "approved"    # OFF still off
 
 
 def test_old_per_surface_endpoint_is_saved_too(make_settings, sink, mailer, tmp_path, scorer):
@@ -219,7 +219,7 @@ def test_old_per_surface_endpoint_is_saved_too(make_settings, sink, mailer, tmp_
     assert c.put("/v1/admin/moderation-levels/article", json={"enabled": False},
                  headers={"X-Admin-Token": "secret"}).status_code == 200
     scorer.risk = 0.99
-    assert moderate(mk().test_client(), "article").get_json()["decision"] == "allow"
+    assert moderate(mk().test_client(), "article").get_json()["decision"] == "approved"
     assert moderate(mk().test_client(), "video").get_json()["decision"] == "reject"
 
 

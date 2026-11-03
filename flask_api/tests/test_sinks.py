@@ -90,7 +90,7 @@ def test_invalid_sink_setting(make_settings):
 def test_db_outage_does_not_break_moderation(make_settings, scorer):
     # No DB_SERVER configured -> every write fails; requests must still get decisions.
     c = create_app(make_settings(result_sink="sql"), scorer=scorer).test_client()
-    for content, decision in [("Steel pipes for sale", "allow"), ("badword", "reject")]:
+    for content, decision in [("Steel pipes for sale", "approved"), ("badword", "reject")]:
         r = c.post("/v1/moderate", json={"content": content, "content_type": "post"})
         assert r.status_code == 200 and r.get_json()["decision"] == decision
 

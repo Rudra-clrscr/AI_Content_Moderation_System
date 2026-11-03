@@ -253,7 +253,7 @@ def test_middle_band_sentence_asks_for_revision(make_settings):
 def test_middle_band_revise_can_be_turned_off(make_settings):
     s = make_settings(sentence_scan=SentenceScan(revise_on_middle=False))
     body = post(create_app(s, scorer=ShortSentenceScorer(risk=0.5)).test_client(), TEXT)
-    assert body["decision"] == "allow" and len(body["sentence_scores"]) == 2
+    assert body["decision"] == "approved" and len(body["sentence_scores"]) == 2
 
 
 def test_single_sentence_post_is_not_rescanned(make_settings):
@@ -273,7 +273,7 @@ def test_scan_is_capped(make_settings):
 def test_scan_can_be_disabled(make_settings):
     s = make_settings(sentence_scan=SentenceScan(enabled=False))
     body = post(create_app(s, scorer=ShortSentenceScorer()).test_client(), TEXT)
-    assert body["decision"] == "allow" and body["sentence_scores"] == []
+    assert body["decision"] == "approved" and body["sentence_scores"] == []
 
 
 def test_skipped_when_already_rejected(make_settings, tmp_path):

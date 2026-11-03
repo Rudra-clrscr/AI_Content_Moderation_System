@@ -22,10 +22,21 @@ def png(colour=(200, 200, 200), size=(64, 64)) -> bytes:
 
 
 class FakeVisual:
-    """Stands in for the real check so a test can choose what it found."""
+    """Stands in for the real check so a test can choose what it found.
 
-    def __init__(self, result: VisualResult, reject: bool = False):
+    `config` is real, not a stub, because `_visual_reject` asks the RESULT which channel
+    refused it and hands it this config to decide against. Without it that call raised, was
+    swallowed by the defensive `except`, and every refusal fell through to being named after
+    the top label - so a stub could never show the difference between naming the label and
+    naming the cause. That gap is how a PDF page refused by an exemplar came to be logged as
+    `visual.safe` with a green test suite.
+    """
+
+    def __init__(self, result: VisualResult, reject: bool = False, config=None):
+        from app.clip import VisualConfig
+
         self.result, self.reject, self.calls = result, reject, 0
+        self.config = config or VisualConfig(enabled=True)
 
     def classify(self, image):
         self.calls += 1
@@ -257,12 +268,60 @@ def test_a_picture_that_breaks_policy_is_rejected_like_a_blocked_phrase(make_set
     assert len(sink.results) == 1, "a refused picture is still recorded"
 
 
+def test_a_refusal_names_its_cause_even_when_the_top_label_is_safe(make_settings, scorer, sink):
+    """The case no stub could previously express: label and cause DISAGREE.
+
+    An exemplar refuses the picture while the best-matching label is `safe` at 0.46 - a real
+    cloud-and-rainbow result. Naming the rule after the label gives `visual.safe`, an audit row
+    that sends whoever reads it to the one place the cause is not. The old scanned-PDF test
+    asserted `visual.weapon` against a stub whose label was already `weapon`, so naming it from
+    the label and from the cause produced the same string and the test passed either way.
+    """
+    looked = VisualResult(checked=True, label="safe", category="", score=0.4633,
+                          unsafe_score=0.05, scores={"safe": 0.4633},
+                          exemplar_block=0.8283,
+                          exemplar_match={"id": 3666, "category": "rainbow", "score": 0.8283})
+    client = app_with_visual(make_settings, scorer, sink, FakeVisual(looked, reject=True))
+    body = post_image(client).get_json()
+
+    assert body["decision"] == "reject"
+    rules = [m["rule_id"] for m in body["gate_matches"]]
+    assert rules == ["visual.exemplar#3666"], (
+        f"named {rules} - an exemplar refusal must name the exemplar, not the top label")
+    assert "visual.safe" not in rules
+
+
+def test_a_probe_refusal_names_the_probe_not_the_label(make_settings, scorer, sink):
+    """The other channel with the same failure mode. `visual.probe.<label>` says which one
+    objected; `visual.<label>` would claim the written policy refused it, sending an admin to
+    edit prompts that had nothing to do with it."""
+    looked = VisualResult(checked=True, label="safe", category="", score=0.52,
+                          unsafe_score=0.10, scores={"safe": 0.52},
+                          probe_scores={"safe": 0.12, "gore": 0.88}, probe_unsafe=0.88)
+    client = app_with_visual(make_settings, scorer, sink, FakeVisual(looked, reject=True))
+    body = post_image(client).get_json()
+
+    assert [m["rule_id"] for m in body["gate_matches"]] == ["visual.probe.safe"]
+
+
+def test_the_caller_cannot_name_the_rule_itself(make_settings, scorer, sink):
+    """`_visual_reject` must not accept a rule_id. It used to, defaulting to "" behind
+    `if not rule_id:`, and the PDF path passed its own - which is precisely how the bug the
+    two tests above pin was reintroduced after being fixed. Pinned as a signature so it cannot
+    come back as a convenience."""
+    import inspect
+
+    from app.api import _visual_reject
+
+    assert "rule_id" not in inspect.signature(_visual_reject).parameters
+
+
 def test_a_clean_picture_is_allowed_and_says_it_was_looked_at(make_settings, scorer, sink):
     looked = VisualResult(checked=True, label="safe", score=0.99, scores={"safe": 0.99})
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(looked))
     body = post_image(client).get_json()
 
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["media"]["visual_content_checked"] is True
     assert body["media"]["visual"]["label"] == "safe"
 
@@ -272,7 +331,7 @@ def test_with_the_check_off_an_image_is_allowed_but_says_nobody_looked(make_sett
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(VisualResult(checked=False)))
     body = post_image(client).get_json()
 
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["media"]["visual_content_checked"] is False
     assert "visual" not in body["media"]
 
@@ -506,8 +565,8 @@ def client_scoring(make_settings, sink, risk, ocr, **kw):
 
 
 @pytest.mark.parametrize("risk, decision", [
-    (0.93, "allow"),    # the worst real BONC listing measured
-    (0.98, "allow"),    # garbled signage, still under the bar
+    (0.93, "approved"),    # the worst real BONC listing measured
+    (0.98, "approved"),    # garbled signage, still under the bar
     (0.999, "reject"),  # where scam flyers actually land
 ])
 def test_image_text_is_judged_at_the_higher_bar(make_settings, sink, ocr, risk, decision):
@@ -520,7 +579,7 @@ def test_image_text_has_no_revise_band(make_settings, sink, ocr):
     """A revise says "edit the highlighted part", which cannot be done to words baked into a
     photograph - the author can only replace the picture. So there is one boundary, not two."""
     body = upload_to(client_scoring(make_settings, sink, 0.80, ocr), image_with_text()).get_json()
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["thresholds"]["allow_max"] == body["thresholds"]["reject_min"]
 
 

@@ -71,7 +71,7 @@ def test_low_syntax_span_does_not_escalate_on_a_middling_score(make_settings):
     """Why the filter was added: a fragment scoring in the middle band is noise, not a verdict."""
     client = create_app(make_settings(max_chars=50_000), scorer=RiskyNoiseScorer(0.72)).test_client()
     body = post(client, CLEAN_SENTENCE * 3 + NOISE)
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     [entry] = [s for s in body["sentence_scores"] if s.get("low_syntax")]
     assert entry["risk_score"] == pytest.approx(0.72)      # recorded, but ignored
 

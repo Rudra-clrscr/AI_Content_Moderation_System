@@ -50,18 +50,30 @@ class Issue:
 SEVERITY_BANDS = ((0.80, "high"), (0.50, "medium"), (0.0, "low"))
 
 
-def severity_of(risk: float | None, decision: Decision) -> str:
+def severity_of(risk: float | None, decision: Decision, threshold: float | None = None) -> str:
     """The rating shown with the feedback.
 
     A gate block carries no model score - nothing was scored, because a rule decided on its
     own - and is reported as "high"; a gate `revise` rule on text the model was happy with is
     "medium", since the model's own score would read as "low" and understate it.
+
+    When content is REJECTED, severity must never be "low" ("a small thing to look at before
+    this goes out"): the submission was refused publication. If a surface has a strict threshold
+    (e.g. 0.10, 0.20, 0.25), a refusal scoring between that threshold and 0.50 is rated "medium"
+    (a borderline refusal for that surface), reaching "high" when risk >= 0.80 or well above threshold.
     """
     if risk is None:
         return "high" if decision is Decision.REJECT else "medium"
-    for floor, name in SEVERITY_BANDS:
-        if risk >= floor:
-            return name
+    if risk >= 0.80:
+        return "high"
+    if decision is Decision.REJECT:
+        if threshold is not None:
+            high_cutoff = min(0.80, threshold + 0.30)
+            if risk >= high_cutoff:
+                return "high"
+        return "medium"
+    if risk >= 0.50:
+        return "medium"
     return "low"
 
 
@@ -127,10 +139,11 @@ class Feedback:
                 for m in gate.matches if m.action in actions for s, e in m.spans]
 
     def build(self, decision: Decision, gate: GateResult, model_issues: list[Issue],
-              content_type: str = "post", risk: float | None = None) -> dict | None:
+              content_type: str = "post", risk: float | None = None,
+              threshold: float | None = None) -> dict | None:
         if decision is Decision.ALLOW:
             return None
-        common = {"severity": severity_of(risk, decision)}
+        common = {"severity": severity_of(risk, decision, threshold=threshold)}
         noun = self.nouns.get(content_type, "post")
         fmt = lambda text, **kw: text.format(noun=noun, **kw)  # noqa: E731
 

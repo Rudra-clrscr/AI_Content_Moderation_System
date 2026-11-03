@@ -360,7 +360,7 @@
       try {
         const result = await M.moderateFile(a.file, { contentId: editing?.id });
         const media = result.media || {};
-        if (result.decision !== "allow") {
+        if (!M.isApproved(result)) {
           a.state = "bad";
           a.detail = firstIssue(result) || (result.feedback?.message ?? "Can't be published.");
         } else if (result.decided_by === "disabled") {
@@ -446,7 +446,7 @@
       const moderation = { result, parts, content, decidedAt: result.decided_at };
       if (result.status === "pending") {
         showError("Still checking", "Your article is being checked. Please try publishing again in a moment.");
-      } else if (result.decision === "allow") {
+      } else if (M.isApproved(result)) {
         snapshot("published", { moderation, publishedAt: Date.now(), attachments: storedAttachments() });
         closeModal(); tab = "published"; render();
         toast(alreadyPublished ? "Article updated" : "Article published");

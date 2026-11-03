@@ -1715,7 +1715,19 @@ components:
 
     Decision:
       type: string
-      description: '`revise` means not published yet — the author is shown what to fix and can resubmit.'
+      description: >-
+        The verdict in the pipeline's own field. An allow is reported as `approved`, but a
+        revise band keeps `revise`, because the author-facing surfaces must tell "fix the
+        highlighted part and resubmit" apart from a flat refusal. `allow` is never sent here
+        any more and remains in the enum only for clients reading older stored responses.
+        Read `Action` for the binary .NET verdict.
+      enum: [approved, revise, reject, allow]
+
+    LegacyDecision:
+      type: string
+      description: >-
+        The pipeline's own word, always — this is what the audit log stores, so a log row and
+        the response that produced it say the verdict differently by design.
       enum: [allow, revise, reject]
 
     DecidedBy:
@@ -1850,6 +1862,18 @@ components:
         `feedback.issues` all carry character offsets into `content`, so audit rows stay
         free of duplicated text.
       properties:
+        Success: { type: boolean, example: true, description: "Official company ApiResponse envelope status." }
+        Message: { type: string, example: "Content approved for publication." }
+        Type: { type: string, enum: [success, warning, error, info], example: success }
+        Action: { type: string, enum: [approved, reject, pending], description: "Binary action outcome consumed by .NET server. Branch on this. `pending` only on the async 202." }
+        Decision: { type: string, enum: [approved, reject], description: "Alias of `Action`." }
+        action: { type: string, enum: [approved, reject], description: "Alias of `Action`." }
+        verdict: { type: string, enum: [approved, reject], description: "Alias of `Action`." }
+        approval_status: { type: string, enum: [approved, reject], description: "Alias of `Action`." }
+        legacy_decision:
+          $ref: '#/components/schemas/LegacyDecision'
+        Note: { type: string, nullable: true, description: "Moderation reason / feedback for .NET server and author." }
+        Data: { type: object, description: "Detailed moderation result payload. Carries every field listed here except the envelope's own `Success`, `Message`, `Type` and `Data`." }
         schema_version: { type: string, example: "1.9" }
         request_id: { type: string, format: uuid }
         status: { type: string, example: completed }

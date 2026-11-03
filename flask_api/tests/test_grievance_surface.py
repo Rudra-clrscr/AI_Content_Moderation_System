@@ -113,7 +113,7 @@ def test_pipeline_records_a_grievance_refusal_as_its_own_decision(monkeypatch):
     assert article["feedback"]["title"]
 
     proposal = client.post("/v1/moderate", json={**body, "content_type": "proposal"}).get_json()
-    assert proposal["decision"] == "allow"
+    assert proposal["decision"] == "approved"
     assert proposal["decided_by"] != "grievance"
 
 

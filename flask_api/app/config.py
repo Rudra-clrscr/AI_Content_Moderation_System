@@ -246,6 +246,8 @@ def load_settings(path: str | Path | None = None) -> Settings:
             reject_min=float(env("VISUAL_REJECT_MIN", vis.get("reject_min", 0.90))),
             probe_reject_min=float(env("VISUAL_PROBE_REJECT_MIN",
                                        vis.get("probe_reject_min", 0.70))),
+            exemplar_reject_min=float(vis.get("exemplar_reject_min", 0.60)),
+            exemplar_margin_min=float(vis.get("exemplar_margin_min", 0.10)),
             max_pixels=int(vis.get("max_pixels", med.get("max_pixels", 40_000_000))),
             intra_op_threads=int(vis.get("intra_op_threads", 4)),
             inter_op_threads=int(vis.get("inter_op_threads", 1)),

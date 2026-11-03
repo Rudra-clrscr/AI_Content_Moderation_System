@@ -264,7 +264,7 @@ class Pipeline:
                              label_scores={"not_grievance": round(1.0 - score, 6),
                                            "grievance": round(score, 6)},
                              model_version=version or self.grievance.version, inference_ms=0.0)
-        fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value, score)
+        fb = self.feedback.build(Decision.REJECT, gate, [], req.content_type.value, score, threshold=self.thresholds.reject_min)
         # `total` has to include the model that decided. Left to default it would report the
         # gate's 0.1 ms for a request that spent 12 ms in this model, and the one number an
         # operator reads first would be the one that is wrong.
@@ -423,7 +423,7 @@ class Pipeline:
                 decision is Decision.REVISE or (decision is Decision.REJECT and self.feedback.highlight_on_reject)):
             # Skip sentences the targeted check already highlighted (same text, more specific message).
             with stages.time("highlight"):
-                found = self._sentence_issues(req.content, view, scored, score)
+                found = self._sentence_issues(req.content, view, scored, score, decision=decision)
             model_issues += [i for i in found
                              if not any(i.start < t.end and t.start < i.end for t in model_issues)]
 
@@ -440,7 +440,7 @@ class Pipeline:
         # scan finds 0.99 in a paragraph that scores 0.1 as a whole.
         risk = None if stage is Stage.GATE else max(
             [scored.risk_score] + [i.risk_score for i in model_issues if i.risk_score is not None])
-        fb = self.feedback.build(decision, gate, model_issues, req.content_type.value, risk)
+        fb = self.feedback.build(decision, gate, model_issues, req.content_type.value, risk, threshold=self.thresholds.reject_min)
         total = gate_ms + (time.perf_counter() - t0) * 1000
         return self._build(req, decision, stage, gate, scored, gate_ms, total, segments, sentence_scores,
                            score.inference_ms, fb, word_scores, stages)
@@ -608,7 +608,7 @@ class Pipeline:
                                        issue.rule_id, issue.risk_score, spans)
         return [updated.get(id(i), i) for i in issues]
 
-    def _sentence_issues(self, content: str, view: str, whole: ScoreResult, score: _Scorer) -> list[Issue]:
+    def _sentence_issues(self, content: str, view: str, whole: ScoreResult, score: _Scorer, decision: Decision = Decision.REVISE) -> list[Issue]:
         spans = scan_spans(content)
         if len(spans) <= 1:
             s, e = spans[0] if spans else (0, len(content))
@@ -616,8 +616,13 @@ class Pipeline:
         head = spans[: self.feedback.max_highlight_sentences]
         scored = [(s, e, r.risk_score) for (s, e), r in zip(head, _span_scores(content, view, head, score))]
         flagged = [x for x in scored if x[2] > self.thresholds.allow_max]
-        # If no single sentence stands out, the combination is the problem: point at the riskiest one.
-        chosen = flagged or [max(scored, key=lambda x: x[2])]
+        # On revise, if no single sentence stands out, point at the riskiest one so the author
+        # has an edit target. On reject, never falsely accuse an innocent sentence below allow_max:
+        # if no sentence crossed the bar, the refusal is purely a whole-document aggregate issue.
+        if decision is Decision.REJECT:
+            chosen = flagged
+        else:
+            chosen = flagged or [max(scored, key=lambda x: x[2])]
         return [Issue(s, e, "model", self.feedback.model_sentence, risk_score=r) for s, e, r in chosen]
 
     def _build(self, req, decision, stage, gate, scored, gate_ms, total_ms, segments, sentence_scores,

@@ -6,6 +6,7 @@ from app.config import PROJECT_ROOT
 from app.feedback import Feedback
 from app.gate import Gate, normalize_with_map
 from app.model import ScoreResult
+from app.routing import Thresholds
 from app.targeted import SentenceScan, TargetedAbuse, WordScan, sentence_spans
 
 
@@ -233,3 +234,24 @@ def test_wording_uses_the_content_types_noun(make_settings):
     assert art["feedback"]["title"] == "Your article needs a few changes"
     assert "your article" in art["feedback"]["message"]
     assert lst["feedback"]["title"] == "Your listing can't be published"
+
+def test_whole_document_reject_with_clean_sentences_does_not_highlight_innocent_sentence(make_settings):
+    """Finding A from measuring_the_article_reject_bar.md:
+    When whole-document score triggers a rejection (e.g. at a strict reject_min like 0.10),
+    but every sentence in the text is clean and below allow_max, the highlighter must NOT
+    arbitrarily pick an innocent sentence to blame. issues must remain empty.
+    """
+    text = ("For years, AI existed purely in the digital realm. "
+            "The Autonomous Supply Chain is emerging. "
+            "Hardware and software convergence is underway.")
+    scorer = KeywordScorer({
+        text.lower(): 0.12,
+    }, default=0.003)
+    client = app_with(make_settings, scorer, thresholds=Thresholds(0.10, 0.10),
+                      sentence_scan=SentenceScan(enabled=False))
+    body = post(client, text, ctype="article")
+    assert body["decision"] == "reject"
+    assert body["risk_score"] == pytest.approx(0.12)
+    assert body["feedback"]["severity"] == "medium"
+    assert body["feedback"]["issues"] == []
+

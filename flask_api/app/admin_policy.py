@@ -65,7 +65,19 @@ BUILD_TIMEOUT_S = 600
 
 
 def _err(status: int, code: str, message: str, **extra):
-    resp = jsonify({"error": code, "message": message, **extra})
+    err_obj = {"code": code, "message": message, **extra}
+    resp = jsonify({
+        **extra,
+        "Success": False,
+        "Message": message,
+        "Type": "error",
+        "Data": None,
+        "Error": err_obj,
+        # The flat pair these admin routes have always sent. `error` is the code as a bare
+        # string here, not the object `api._error` sends - see docs/API_REFERENCE.md.
+        "error": code,
+        "message": message,
+    })
     resp.status_code = status
     return resp
 

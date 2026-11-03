@@ -138,7 +138,7 @@ def test_a_photo_with_no_writing_is_still_allowed(make_settings):
     client = build(make_settings)
     client.application.extensions["moderation"].settings.ocr.page = PageText("", 0.0, 1.0, 0)
     body = upload(client, png()).get_json()
-    assert body["decision"] == "allow"
+    assert body["decision"] == "approved"
     assert body["media"]["text_found"] is False
 
 
