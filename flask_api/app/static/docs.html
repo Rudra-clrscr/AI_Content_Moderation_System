@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BONC Moderation API</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.29.0/swagger-ui.min.css">
 <style>
   body { margin: 0; background: #fafafa; }
   .topbar { display: none; }           /* the URL bar invites loading someone else's spec */
@@ -18,11 +18,20 @@
 <body>
 <div class="bonc-note">
   Served from the API's own origin, so "Try it out" works without CORS.
+  The <code>/v1/moderate*</code> endpoints need <strong>Authorize &rarr; Bearer</strong> (the
+  <code>SERVICE_TOKEN</code> value) &mdash; unless it is unset, in which case they are open and
+  <code>GET /ready</code> says <code>service_auth: "open"</code>.
   Admin endpoints need <strong>Authorize &rarr; AdminToken</strong> (the <code>ADMIN_TOKEN</code> value).
   Check <code>GET /ready</code> first &mdash; if the model did not load, moderation answers 503.
 </div>
 <div id="swagger-ui"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui-bundle.min.js"></script>
+<!-- THIS PIN AND `openapi:` IN openapi.yaml ARE COUPLED. Swagger UI refuses a spec whose
+     version string it does not know, with "Unable to render this definition" and nothing
+     else - the page is blank but for that sentence, and no test here catches it, because a
+     Flask test client cannot run the renderer. 5.17.14 predated OpenAPI 3.0.4 and rejected
+     the spec the moment it was bumped to match the company's. If you raise the `openapi:`
+     version, open /docs in a browser and look at it. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.29.0/swagger-ui-bundle.min.js"></script>
 <script>
   // Relative URL on purpose: whatever host and port this page was served from is the host
   // the requests go to, so a tunnel or a non-default port needs no edit here.
