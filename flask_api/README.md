@@ -46,6 +46,10 @@ python scripts/fetch_model.py
 # Or without a real model (dev only):
 MODEL_BACKEND=stub python wsgi.py
 
+# The response is the company ApiResponse envelope - Success/Message/Data - and the
+# verdict is Data.Action ("approved" / "reject"). Once SERVICE_TOKEN is set, add
+#   -H "Authorization: Bearer $SERVICE_TOKEN"
+# With it unset, as here, these endpoints are open.
 curl -X POST localhost:8000/v1/moderate -H "Content-Type: application/json" \
   -d '{"content":"Bulk cotton yarn supplier","content_type":"product_listing","content_id":"LST-1"}'
 ```
@@ -61,7 +65,11 @@ Every tab that publishes member-written text uses the same endpoint and the same
 const { result, parts, content } = await BoncModeration.moderateFields(
     [{ name: "title", text: title }, { name: "description", text: description }],
     { contentType: "video", contentId: id });
-if (result.decision !== "allow") {
+// Ask, never compare to a literal: the service answers the .NET verdict ("approved") and
+// keeps "allow" only as a legacy alias, so a hardcoded comparison against either one stops
+// publishing clean content the day the other is sent. `moderateFields` has already unwrapped
+// the response envelope, so `result` is the payload.
+if (!BoncModeration.isApproved(result)) {
   showIssues(BoncModeration.mapIssues(result.feedback, parts, content));   // per-input ranges
   return;                                                                  // don't publish
 }

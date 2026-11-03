@@ -192,18 +192,14 @@ def forget(ctype: str) -> None:
 # ---- who is calling -------------------------------------------------------------------
 
 def _err(status: int, code: str, message: str, **extra):
-    err_obj = {"code": code, "message": message, **extra}
+    # The company envelope: three keys, with the machine-readable code in `Data`. The flat
+    # `{"error": "<code>", "message": ...}` pair these routes used to send is gone, and so is
+    # the long-standing split where `error` was a bare string here and an object in
+    # `api._error` - there is one shape now, and `Data.code` is it.
     resp = jsonify({
-        **extra,
         "Success": False,
         "Message": message,
-        "Type": "error",
-        "Data": None,
-        "Error": err_obj,
-        # The flat pair these admin routes have always sent. `error` is the code as a bare
-        # string here, not the object `api._error` sends - see docs/API_REFERENCE.md.
-        "error": code,
-        "message": message,
+        "Data": {"code": code, "message": message, **extra},
     })
     resp.status_code = status
     return resp

@@ -1,5 +1,15 @@
 # Swagger / API test report
 
+> ⚠️ **The response shapes recorded below predate the company envelope.** This is the record
+> of a run on 2026-11-01, kept as it was rather than rewritten — the numbers are what was
+> measured. Since then every response moved into the `ApiResponse<T>` envelope
+> (`Success` / `Message` / `Data`, payload in `Data`), the flattened root fields and the `Type`
+> field were removed, and the two error shapes became one with the code in `Data.code`. The
+> moderation endpoints also took a bearer token. Read
+> [API_REFERENCE.md](API_REFERENCE.md) and [openapi.yaml](openapi.yaml) for the current
+> contract; read this for what was verified on that date, and re-run it before quoting the
+> live-check count again.
+
 **Run date:** 2026-11-01 · **Branch:** `feature/api-contract-docs-and-two-new-surfaces`
 **Acceptance Rerun Result:** 91 live HTTP checks, **91 passed (100%)** · 1,015 unit tests, **1,015 passed (100%)** · **0 spec-to-code drift**
 *(Initial discovery run: 120 live HTTP checks, 118 passed before PDF extraction was put on hold)*

@@ -136,12 +136,18 @@ curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/jso
 curl -X POST http://127.0.0.1:8000/v1/moderate -H "Content-Type: application/json" -d "{\"content\": \"Hello\", \"content_type\": \"tweet\"}"
 ```
 
+Every response is the company envelope — `Success`, `Message`, `Data` — so what to look for
+is inside `Data`:
+
 | Request | Response |
 |---|---|
-| Allowed listing | `"decision":"allow"`, `"decided_by":"model"` |
-| Blocked by the gate | `"decision":"reject"`, `"decided_by":"gate"` |
-| Empty content | `invalid_content` |
-| Unknown type | `invalid_content_type`, with the list of allowed types |
+| Allowed listing | `"Action":"approved"`, `"decided_by":"model"` |
+| Blocked by the gate | `"Action":"reject"`, `"decided_by":"gate"` |
+| Empty content | `"Success":false`, `Data.code` `invalid_content` |
+| Unknown type | `"Success":false`, `Data.code` `invalid_content_type`, with the list of allowed types |
+
+`Data.legacy_decision` still carries the pipeline's own word (`allow` / `revise` / `reject`),
+which is what the audit log stores.
 
 In cmd, the `\"` inside the JSON is required. Copy the lines as they are.
 

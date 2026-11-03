@@ -42,12 +42,16 @@
 
 This document establishes the definitive specification connecting the **BONC Network Official Microservice APIs** (`api.boncnetwork.com`) with the **BONC Moderation Engine** (`flask_api`).
 
-Historically, the moderation engine was developed as an autonomous Python microservice returning flat JSON payloads (`{"decision": "allow" | "revise" | "reject", "risk_score": ...}`) on success and dual error envelopes (`{"error": {"code": ...}}` vs `{"error": "..."}`) on failure. In contrast, the company's official backend—built on Microsoft .NET (ASP.NET Core / IIS 10.0)—standardizes on an `ApiResponse<T>` envelope (`Success`, `Message`, `Type`, `Data`), RFC 9110 problem details, and binary content moderation actions: **`"approved"`** and **`"reject"`**.
+Historically, the moderation engine was developed as an autonomous Python microservice returning flat JSON payloads (`{"decision": "allow" | "revise" | "reject", "risk_score": ...}`) on success and dual error envelopes (`{"error": {"code": ...}}` vs `{"error": "..."}`) on failure. In contrast, the company's official backend—built on Microsoft .NET (ASP.NET Core / IIS 10.0)—standardizes on an `ApiResponse<T>` envelope (`Success`, `Message`, `Data` — three properties, with `additionalProperties: false`), RFC 9110 problem details, and binary content moderation actions: **`"approved"`** and **`"reject"`**.
 
 Following a full inspection of the official Swagger definition (`https://api.boncnetwork.com/swagger/v1/swagger.json`), our moderation APIs have been upgraded to:
 1. Encapsulate all outcomes in the company standard **`ApiResponse<T>`** envelope.
 2. Directly emit the two canonical actions required by the .NET backend: **`"approved"`** and **`"reject"`**.
-3. Retain backwards-compatibility aliases (`decision`, `legacy_decision`, flattened root fields) ensuring zero regression for existing audit sinks, web client scripts (`moderation-client.js`), and unit test suites.
+3. Retain the in-`Data` aliases (`decision`, `legacy_decision`) so the audit sinks and the
+   author-facing surfaces keep the distinctions they depend on — notably `revise`, which the
+   binary `Action` cannot carry. The flattened root fields that once served the same purpose
+   have been removed: they broke `additionalProperties: false`, and the callers that needed
+   them (`moderation-client.js`, the demo page, the test suite) read `Data` now.
 
 ---
 
@@ -139,7 +143,6 @@ In the official company backend, every API endpoint yields an envelope defined b
 {
   "Success": true,
   "Message": "Articles fetched successfully.",
-  "Type": "success",
   "Data": { ... }
 }
 ```
@@ -149,7 +152,6 @@ On operational or entity failure:
 {
   "Success": false,
   "Message": "Article not found.",
-  "Type": "error",
   "Data": null
 }
 ```
@@ -162,29 +164,31 @@ Previously, `docs/API_REFERENCE.md` documented an architectural inconsistency:
 * `_error()` in `app/api.py` generated `{ "error": { "code": "...", "message": "..." } }`.
 * `_err()` in admin modules generated `{ "error": "code", "message": "..." }`.
 
-Both shapes have been superseded by the unified company error contract:
+Both shapes are superseded by one contract — the same three-property envelope as every
+success response, with the machine-readable detail in `Data`:
 
 ```json
 {
   "Success": false,
   "Message": "body must be a JSON object",
-  "Type": "error",
-  "Data": null,
-  "Error": {
-    "code": "invalid_json",
-    "message": "body must be a JSON object"
-  },
-  "error": {
+  "Data": {
     "code": "invalid_json",
     "message": "body must be a JSON object"
   }
 }
 ```
 
-This guarantees:
+So:
 1. **.NET HttpClients** deserialize cleanly via `Success == false` and read `Message`.
-2. **RFC 7807 / ProblemDetails consumers** obtain machine-readable codes in `Error.code`.
-3. **Legacy clients & existing unit tests** continue reading `body["error"]["code"]` without breakage.
+2. **Machine-readable codes** are in `Data.code`, stable where `Message` is prose.
+3. **`Data` carries the per-error extras** a caller needs to recover — `allowed`, `limit`,
+   `request_id`, `kind`, `text_readable`, `conflicts`.
+
+> **This is a breaking change for anything reading `body.error`.** There is no top-level
+> `error` key, and no `Error` key either: both would violate `additionalProperties: false`.
+> The in-repo callers were migrated with it — `moderation-client.js`, `admin.js`, the demo
+> page and the test suite all read `Data.code` now. An external client still reading
+> `body.error` or `body.error.code` needs updating to `body.Data.code`.
 
 ### 3.4 .NET Verdict Alignment: The "approved" vs "reject" Contract
 
@@ -230,10 +234,23 @@ Every moderation endpoint returns responses encapsulated in the standard envelop
 interface ApiResponse<T> {
   Success: boolean;       // true for 200/202, false for 4xx/5xx
   Message: string;        // Human-readable summary (e.g. "Content approved for publication.")
-  Type: "success" | "warning" | "error" | "info";
-  Data: T | null;         // Detailed moderation result payload
+  Data: T | null;         // The payload. Everything is in here.
 }
 ```
+
+**Three properties, and no others.** All 23 `*ApiResponse` schemas in the company
+specification carry exactly these and declare `additionalProperties: false`, so an extra
+top-level key makes a response invalid against the contract.
+
+> **Two fields were removed from an earlier revision of this document and of the service.**
+>
+> * **`Type`** (`"success" | "warning" | "error" | "info"`) was described here as part of the
+>   company standard. It is not: the string `Type` does not appear as an envelope property
+>   anywhere in `bonc_swagger.json`. It was this service's invention and has been dropped.
+> * **The flattened root fields** — the whole payload repeated alongside `Data` — existed so
+>   that callers written before the envelope kept working. They violated
+>   `additionalProperties: false` on every response, so they are gone too, and those callers
+>   (`moderation-client.js`, the demo page, the tests) read `Data` instead.
 
 ### 4.2 Moderation Approved Response (`Action: "approved"`)
 
@@ -244,7 +261,6 @@ interface ApiResponse<T> {
 {
   "Success": true,
   "Message": "Content approved for publication.",
-  "Type": "success",
   "Data": {
     "Action": "approved",
     "Decision": "approved",
@@ -310,7 +326,6 @@ column without echoing a member's own words back at them.
 {
   "Success": true,
   "Message": "It appears to break BONC's community policies on fraud and scams. Rewrite the highlighted parts and submit your post again. If you think this is a mistake, contact support.",
-  "Type": "warning",
   "Data": {
     "Action": "reject",
     "Decision": "reject",
@@ -377,7 +392,6 @@ column without echoing a member's own words back at them.
 {
   "Success": true,
   "Message": "Content queued for asynchronous moderation.",
-  "Type": "info",
   "Data": {
     "Action": "pending",
     "status": "pending",
@@ -403,7 +417,6 @@ Handles multipart file uploads (`file`, `content_type`, `content_id`).
 {
   "Success": true,
   "Message": "Content approved for publication.",
-  "Type": "success",
   "Data": {
     "Action": "approved",
     "Decision": "approved",
@@ -444,9 +457,7 @@ Handles multipart file uploads (`file`, `content_type`, `content_id`).
 {
   "Success": false,
   "Message": "unknown 'content_type'",
-  "Type": "error",
-  "Data": null,
-  "Error": {
+  "Data": {
     "code": "invalid_content_type",
     "message": "unknown 'content_type'",
     "allowed": [
@@ -462,10 +473,6 @@ Handles multipart file uploads (`file`, `content_type`, `content_id`).
       "proposal",
       "business_proposal"
     ]
-  },
-  "error": {
-    "code": "invalid_content_type",
-    "message": "unknown 'content_type'"
   }
 }
 ```
@@ -477,7 +484,6 @@ Handles multipart file uploads (`file`, `content_type`, `content_id`).
   {
     "Success": true,
     "Message": "Service is healthy.",
-    "Type": "success",
     "Data": {
       "status": "ok"
     }
@@ -488,7 +494,6 @@ Handles multipart file uploads (`file`, `content_type`, `content_id`).
   {
     "Success": true,
     "Message": "Service is ready.",
-    "Type": "success",
     "Data": {
       "status": "ready",
       "mode": "sync",
@@ -506,6 +511,41 @@ Handles multipart file uploads (`file`, `content_type`, `content_id`).
   ```
 
 ---
+
+## 4.6 Deployment Topology and the Service Token
+
+The moderation service runs on **its own AI/ML host** — beside the models, not beside the
+caller — and the main .NET server calls it over the network. It is a policy layer in front of
+the database: the .NET side asks for a verdict, and only then writes the entity.
+
+```
+      UI  ──▶  .NET API (api.boncnetwork.com)  ──▶  SQL
+                      │
+                      │  POST /v1/moderate     Authorization: Bearer <SERVICE_TOKEN>
+                      ▼
+            Moderation service (AI/ML host)
+            gate ─▶ DeBERTa ─▶ OCR/CLIP ─▶ verdict
+```
+
+Two consequences follow from the service no longer being local to its caller.
+
+**1. The submission endpoints take a bearer token.** `Authorization: Bearer <SERVICE_TOKEN>`,
+declared exactly as the company API declares its own `Bearer` scheme — an `apiKey` in the
+`Authorization` header rather than HTTP `bearer` — so the .NET side reuses the handler it has.
+It gates `POST /v1/moderate`, `POST /v1/moderate/media` and `GET /v1/moderate/{request_id}`
+(that last one hands back a whole result to anyone who can guess a request id). `/health` and
+`/ready` stay open so a load balancer can reach them without a secret.
+
+> ⚠️ **With `SERVICE_TOKEN` unset the endpoints are open.** Local checkouts and the test suite
+> depend on that, so it stays — but from outside, a deployment that forgot the token looks
+> exactly like one that did not. `GET /ready` reports `service_auth` as `enforced` or `open`.
+> **Assert `enforced` in the deploy check**, and keep the host on a private network as well:
+> the token is the second layer, not the only one.
+
+**2. Nothing here answers CORS.** The service sends no CORS headers, deliberately — Swagger UI
+is served from the service's own origin so "Try it out" is same-origin. The browser never
+calls this service directly; the .NET server does, server to server. If a browser ever needs
+to, that is a new decision about an unauthenticated-by-default surface, not a header to add.
 
 ## 5. .NET Microservice Integration Guide & C# Implementation
 
@@ -528,8 +568,6 @@ namespace BONC.Shared.Contracts.Moderation
         [JsonPropertyName("Message")]
         public string? Message { get; set; }
 
-        [JsonPropertyName("Type")]
-        public string? Type { get; set; }
 
         [JsonPropertyName("Data")]
         public T? Data { get; set; }
@@ -537,11 +575,22 @@ namespace BONC.Shared.Contracts.Moderation
 
     public class ModerationResultDto
     {
+        // The verdict. Defaults to "reject" so a payload that failed to bind, or a field the
+        // service stopped sending, fails closed rather than publishing unchecked content.
         [JsonPropertyName("Action")]
         public string Action { get; set; } = "reject"; // "approved" or "reject"
 
-        [JsonPropertyName("Status")]
+        // The request's lifecycle, NOT the verdict - and the service sends it lower-case.
+        // `[JsonPropertyName("Status")]` would silently never bind: System.Text.Json is
+        // case-sensitive by default, so this would stay "completed" whatever arrived.
+        [JsonPropertyName("status")]
         public string Status { get; set; } = "completed";
+
+        // The pipeline's own word: "allow" | "revise" | "reject". Worth binding, because
+        // `Action` folds "revise" into "reject" and this is the only way to tell a request
+        // for edits from a flat refusal.
+        [JsonPropertyName("legacy_decision")]
+        public string? LegacyDecision { get; set; }
 
         [JsonPropertyName("Note")]
         public string? Note { get; set; }

@@ -258,7 +258,7 @@ def test_a_picture_that_breaks_policy_is_rejected_like_a_blocked_phrase(make_set
     looked = VisualResult(checked=True, label="weapon", category="weapons", score=0.97,
                           unsafe_score=0.98, scores={"weapon": 0.97})
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(looked, reject=True))
-    body = post_image(client).get_json()
+    body = post_image(client).get_json()["Data"]
 
     assert body["decision"] == "reject" and body["decided_by"] == "gate"
     assert [m["rule_id"] for m in body["gate_matches"]] == ["visual.weapon"]
@@ -282,7 +282,7 @@ def test_a_refusal_names_its_cause_even_when_the_top_label_is_safe(make_settings
                           exemplar_block=0.8283,
                           exemplar_match={"id": 3666, "category": "rainbow", "score": 0.8283})
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(looked, reject=True))
-    body = post_image(client).get_json()
+    body = post_image(client).get_json()["Data"]
 
     assert body["decision"] == "reject"
     rules = [m["rule_id"] for m in body["gate_matches"]]
@@ -299,7 +299,7 @@ def test_a_probe_refusal_names_the_probe_not_the_label(make_settings, scorer, si
                           unsafe_score=0.10, scores={"safe": 0.52},
                           probe_scores={"safe": 0.12, "gore": 0.88}, probe_unsafe=0.88)
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(looked, reject=True))
-    body = post_image(client).get_json()
+    body = post_image(client).get_json()["Data"]
 
     assert [m["rule_id"] for m in body["gate_matches"]] == ["visual.probe.safe"]
 
@@ -319,7 +319,7 @@ def test_the_caller_cannot_name_the_rule_itself(make_settings, scorer, sink):
 def test_a_clean_picture_is_allowed_and_says_it_was_looked_at(make_settings, scorer, sink):
     looked = VisualResult(checked=True, label="safe", score=0.99, scores={"safe": 0.99})
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(looked))
-    body = post_image(client).get_json()
+    body = post_image(client).get_json()["Data"]
 
     assert body["decision"] == "approved"
     assert body["media"]["visual_content_checked"] is True
@@ -329,7 +329,7 @@ def test_a_clean_picture_is_allowed_and_says_it_was_looked_at(make_settings, sco
 def test_with_the_check_off_an_image_is_allowed_but_says_nobody_looked(make_settings, scorer, sink):
     """The behaviour before this feature existed, preserved exactly - including the honesty."""
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(VisualResult(checked=False)))
-    body = post_image(client).get_json()
+    body = post_image(client).get_json()["Data"]
 
     assert body["decision"] == "approved"
     assert body["media"]["visual_content_checked"] is False
@@ -344,12 +344,12 @@ def test_a_visual_model_that_throws_refuses_the_upload(make_settings, scorer, si
     resp = post_image(client)
 
     assert resp.status_code == 503
-    assert resp.get_json()["error"]["code"] == "media_not_checkable"
+    assert resp.get_json()["Data"]["code"] == "media_not_checkable"
 
 
 def test_ready_says_whether_pictures_are_actually_being_looked_at(make_settings, scorer, sink):
     client = app_with_visual(make_settings, scorer, sink, FakeVisual(VisualResult()))
-    assert client.get("/ready").get_json()["visual"]["provider"] == "FakeProvider"
+    assert client.get("/ready").get_json()["Data"]["visual"]["provider"] == "FakeProvider"
 
 
 # ---- the policy file ---------------------------------------------------------------
@@ -571,14 +571,14 @@ def client_scoring(make_settings, sink, risk, ocr, **kw):
 ])
 def test_image_text_is_judged_at_the_higher_bar(make_settings, sink, ocr, risk, decision):
     client = client_scoring(make_settings, sink, risk, ocr)
-    body = upload_to(client, image_with_text()).get_json()
+    body = upload_to(client, image_with_text()).get_json()["Data"]
     assert body["decision"] == decision, f"risk {risk} should {decision}"
 
 
 def test_image_text_has_no_revise_band(make_settings, sink, ocr):
     """A revise says "edit the highlighted part", which cannot be done to words baked into a
     photograph - the author can only replace the picture. So there is one boundary, not two."""
-    body = upload_to(client_scoring(make_settings, sink, 0.80, ocr), image_with_text()).get_json()
+    body = upload_to(client_scoring(make_settings, sink, 0.80, ocr), image_with_text()).get_json()["Data"]
     assert body["decision"] == "approved"
     assert body["thresholds"]["allow_max"] == body["thresholds"]["reject_min"]
 
@@ -587,7 +587,7 @@ def test_a_gate_rule_still_blocks_whatever_the_bar_is(make_settings, sink, ocr):
     """The higher bar moves the MODEL's boundary. A deterministic rule either matched or it
     didn't, and a scam phrase photographed is still a scam phrase."""
     body = upload_to(client_scoring(make_settings, sink, 0.01, ocr),
-                     image_with_text(["Invest now and double your money"])).get_json()
+                     image_with_text(["Invest now and double your money"])).get_json()["Data"]
     assert body["decision"] == "reject" and body["decided_by"] == "gate"
 
 

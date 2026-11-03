@@ -188,7 +188,7 @@ def test_the_friendly_format_names_work_too(client):
 def test_an_unknown_format_is_a_message_not_a_crash(client):
     r = get(client, format="pdf")
     assert r.status_code == 400
-    assert r.get_json()["error"] == "bad_format"
+    assert r.get_json()["Data"]["code"] == "bad_format"
 
 
 def test_the_export_covers_the_whole_filtered_set_not_one_page(client):

@@ -111,20 +111,20 @@ def test_the_refusal_no_longer_fires_on_a_cleared_picture(make_settings):
     client = build(make_settings, CLEARED_BUT_TOP_LABEL_UNSAFE, reject=False)
     r = upload(client)
     assert r.status_code == 200, r.get_json()
-    assert r.get_json()["decision"] == "approved"
+    assert r.get_json()["Data"]["decision"] == "approved"
 
 
 def test_a_plainly_safe_picture_was_never_affected_and_still_publishes(make_settings):
     """The half of the rescue that always worked, pinned so the fix did not narrow it."""
     r = upload(build(make_settings, PLAINLY_SAFE, reject=False))
     assert r.status_code == 200
-    assert r.get_json()["decision"] == "approved"
+    assert r.get_json()["Data"]["decision"] == "approved"
 
 
 def test_publishing_it_never_claims_the_writing_was_checked(make_settings):
     """The narrow claim the rescue is allowed to make: we looked at the picture, we could not
     read the words. Never a clean result."""
-    body = upload(build(make_settings, CLEARED_BUT_TOP_LABEL_UNSAFE)).get_json()
+    body = upload(build(make_settings, CLEARED_BUT_TOP_LABEL_UNSAFE)).get_json()["Data"]
     assert body["media"]["checked"] is False
     assert body["media"]["text_readable"] is False
     assert body["media"]["text_found"] is True
@@ -137,7 +137,7 @@ def test_a_picture_the_check_refuses_is_still_refused(make_settings):
     """The rescue must not reach a picture decides_reject acts on - that refusal happens
     before any of this and is about the picture, not its writing."""
     r = upload(build(make_settings, CLEARED_BUT_TOP_LABEL_UNSAFE, reject=True))
-    assert r.get_json()["decision"] == "reject"
+    assert r.get_json()["Data"]["decision"] == "reject"
 
 
 def test_a_picture_nothing_looked_at_is_still_refused(make_settings):
@@ -145,14 +145,14 @@ def test_a_picture_nothing_looked_at_is_still_refused(make_settings):
     unreadable writing on an unexamined picture must not publish."""
     r = upload(build(make_settings, VisualResult(checked=False)))
     assert r.status_code == 422
-    assert r.get_json()["error"]["code"] == "media_unreadable"
+    assert r.get_json()["Data"]["code"] == "media_unreadable"
 
 
 def test_the_rescue_can_still_be_switched_off(make_settings):
     """allow_unreadable_image_when_seen is the operator's switch and still governs."""
     r = upload(build(make_settings, PLAINLY_SAFE, allow_unreadable_image_when_seen=False))
     assert r.status_code == 422
-    assert r.get_json()["error"]["code"] == "media_unreadable"
+    assert r.get_json()["Data"]["code"] == "media_unreadable"
 
 
 def test_readable_writing_is_still_read_and_judged(make_settings):
@@ -161,7 +161,7 @@ def test_readable_writing_is_still_read_and_judged(make_settings):
     client = build(make_settings, CLEARED_BUT_TOP_LABEL_UNSAFE)
     client.application.extensions["moderation"].settings.ocr.page = \
         PageText("a perfectly ordinary caption about a sofa", 0.98, 1.0, 1)
-    body = upload(client).get_json()
+    body = upload(client).get_json()["Data"]
     assert body["media"]["text_readable"] is True
     # `checked: false` is the unreadable branch's own narrow claim; the readable path never
     # sets it, because the words really were read and judged.

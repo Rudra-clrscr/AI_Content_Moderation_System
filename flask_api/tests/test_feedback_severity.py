@@ -31,7 +31,7 @@ class KeywordScorer:
 
 
 def post(client, content, ctype="post"):
-    return client.post("/v1/moderate", json={"content": content, "content_type": ctype}).get_json()
+    return client.post("/v1/moderate", json={"content": content, "content_type": ctype}).get_json()["Data"]
 
 
 def app_with(make_settings, scorer, **overrides):

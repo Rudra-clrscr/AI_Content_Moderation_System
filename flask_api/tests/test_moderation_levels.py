@@ -57,7 +57,7 @@ def test_an_unconfigured_feature_uses_the_thresholds_from_settings(make_settings
     operator's own configuration with one this feature invented.
     """
     c = client_with(make_settings, sink, levels_file, risk=0.5)
-    body = post(c, content_type="video").get_json()
+    body = post(c, content_type="video").get_json()["Data"]
     assert body["decision"] == "revise"                      # 0.3 < 0.5 < 0.7
     assert body["thresholds"] == {"allow_max": 0.3, "reject_min": 0.7}
     assert body["moderation"] == {"enabled": True}           # no level: deferring
@@ -77,8 +77,8 @@ def test_the_shipped_config_configures_no_feature(make_settings, sink):
 
 def test_a_stricter_level_refuses_what_the_global_bar_allows(make_settings, sink, levels_file):
     c = client_with(make_settings, sink, levels_file, risk=0.4)
-    assert post(c, content_type="video").get_json()["decision"] == "revise"    # global 0.3/0.7
-    article = post(c, content_type="article").get_json()                       # strict 0.25
+    assert post(c, content_type="video").get_json()["Data"]["decision"] == "revise"    # global 0.3/0.7
+    article = post(c, content_type="article").get_json()["Data"]                       # strict 0.25
     assert article["decision"] == "reject"
     assert article["moderation"] == {"enabled": True, "level": "strict",
                                      "allow_max": 0.25, "reject_min": 0.25}
@@ -86,14 +86,14 @@ def test_a_stricter_level_refuses_what_the_global_bar_allows(make_settings, sink
 
 def test_a_looser_level_publishes_what_the_global_bar_would_not(make_settings, sink, levels_file):
     c = client_with(make_settings, sink, levels_file, risk=0.8)
-    assert post(c, content_type="video").get_json()["decision"] == "reject"    # 0.8 > 0.7
-    assert post(c, content_type="proposal").get_json()["decision"] == "approved"  # 0.8 <= 0.85
+    assert post(c, content_type="video").get_json()["Data"]["decision"] == "reject"    # 0.8 > 0.7
+    assert post(c, content_type="proposal").get_json()["Data"]["decision"] == "approved"  # 0.8 <= 0.85
 
 
 def test_a_raw_rating_is_honoured_without_a_named_level(make_settings, sink, levels_file):
     """The admin UI offers three buttons; an expert types a number. Both reach the same place."""
     c = client_with(make_settings, sink, levels_file, risk=0.6)
-    body = post(c, content_type="product_listing").get_json()
+    body = post(c, content_type="product_listing").get_json()["Data"]
     assert body["decision"] == "approved"                        # 0.60 <= 0.62
     assert body["moderation"] == {"enabled": True, "allow_max": 0.62, "reject_min": 0.62}
     assert "level" not in body["moderation"]                  # a number was given, not a name
@@ -103,7 +103,8 @@ def test_a_raw_rating_is_honoured_without_a_named_level(make_settings, sink, lev
 
 def test_a_disabled_feature_publishes_without_checking_anything(make_settings, sink, levels_file):
     c = client_with(make_settings, sink, levels_file, risk=0.99)
-    body = post(c, content="pay in crypto to double your money", content_type="post").get_json()
+    envelope = post(c, content="pay in crypto to double your money", content_type="post").get_json()
+    body = envelope["Data"]
     assert body["decision"] == "approved"
     assert body["decided_by"] == "disabled"
     assert body["risk_score"] is None                 # nothing was scored
@@ -111,16 +112,16 @@ def test_a_disabled_feature_publishes_without_checking_anything(make_settings, s
     assert body["moderation"] == {"enabled": False}
     # The envelope's one line is the part a .NET caller logs or shows an operator, and it is
     # the one place this result could still be read as "checked and found clean".
-    assert body["Message"] == ("Published without being checked: "
-                               "moderation is switched off for this surface.")
+    assert envelope["Message"] == ("Published without being checked: "
+                                   "moderation is switched off for this surface.")
 
 
 def test_disabled_is_distinguishable_from_checked_and_clean(make_settings, sink, levels_file):
     """The whole point of `decided_by: disabled`. A consumer that cannot tell these apart will
     treat unchecked content as vetted, which is how a toggle becomes a breach."""
     c = client_with(make_settings, sink, levels_file, risk=0.01)
-    off = post(c, content_type="post").get_json()
-    on = post(c, content_type="video").get_json()
+    off = post(c, content_type="post").get_json()["Data"]
+    on = post(c, content_type="video").get_json()["Data"]
     assert off["decision"] == on["decision"] and off["decision"] == "approved"
     assert (off["decided_by"], on["decided_by"]) == ("disabled", "model")
     assert off["risk_score"] is None and on["risk_score"] is not None
@@ -139,7 +140,7 @@ def test_the_audit_row_records_the_level_it_was_judged_at(make_settings, sink, l
 def test_ready_reports_which_features_are_unmoderated(make_settings, sink, levels_file):
     """An operator should read this from outside, not infer it from what gets published."""
     c = client_with(make_settings, sink, levels_file)
-    assert c.get("/ready").get_json()["moderation_disabled_for"] == ["post"]
+    assert c.get("/ready").get_json()["Data"]["moderation_disabled_for"] == ["post"]
 
 
 # ---- the admin API -------------------------------------------------------------------
@@ -162,13 +163,13 @@ def test_admin_endpoints_are_absent_when_no_token_is_configured(make_settings, s
 def test_a_toggle_takes_effect_on_the_next_request(make_settings, sink, levels_file):
     c = client_with(make_settings, sink, levels_file, risk=0.99)
     ok = {"X-Admin-Token": "secret"}
-    assert post(c, content_type="article").get_json()["decision"] == "reject"
+    assert post(c, content_type="article").get_json()["Data"]["decision"] == "reject"
     r = c.put("/v1/admin/moderation-levels/article", json={"enabled": False}, headers=ok)
     assert r.status_code == 200 and r.get_json()["enabled"] is False
-    assert post(c, content_type="article").get_json()["decided_by"] == "disabled"
+    assert post(c, content_type="article").get_json()["Data"]["decided_by"] == "disabled"
     r = c.put("/v1/admin/moderation-levels/article", json={"enabled": True}, headers=ok)
     assert r.status_code == 200
-    assert post(c, content_type="article").get_json()["decision"] == "reject"
+    assert post(c, content_type="article").get_json()["Data"]["decision"] == "reject"
 
 
 def test_switching_back_on_restores_the_level_it_had(make_settings, sink, levels_file):
@@ -179,15 +180,15 @@ def test_switching_back_on_restores_the_level_it_had(make_settings, sink, levels
     body = c.put("/v1/admin/moderation-levels/article", json={"enabled": True},
                  headers=ok).get_json()
     assert body["level"] == "strict" and body["reject_min"] == 0.25
-    assert post(c, content_type="article").get_json()["decision"] == "reject"
+    assert post(c, content_type="article").get_json()["Data"]["decision"] == "reject"
 
 
 def test_the_rating_can_be_set_live(make_settings, sink, levels_file):
     c = client_with(make_settings, sink, levels_file, risk=0.4)
     ok = {"X-Admin-Token": "secret"}
-    assert post(c, content_type="article").get_json()["decision"] == "reject"   # strict 0.25
+    assert post(c, content_type="article").get_json()["Data"]["decision"] == "reject"   # strict 0.25
     c.put("/v1/admin/moderation-levels/article", json={"reject_min": 0.9}, headers=ok)
-    assert post(c, content_type="article").get_json()["decision"] == "approved"
+    assert post(c, content_type="article").get_json()["Data"]["decision"] == "approved"
 
 
 @pytest.mark.parametrize("body", [
@@ -203,7 +204,7 @@ def test_invalid_changes_are_refused(make_settings, sink, levels_file, body):
     c = client_with(make_settings, sink, levels_file, risk=0.4)
     ok = {"X-Admin-Token": "secret"}
     assert c.put("/v1/admin/moderation-levels/article", json=body, headers=ok).status_code == 400
-    assert post(c, content_type="article").get_json()["decision"] == "reject"   # still strict
+    assert post(c, content_type="article").get_json()["Data"]["decision"] == "reject"   # still strict
 
 
 # ---- loading ---------------------------------------------------------------------------

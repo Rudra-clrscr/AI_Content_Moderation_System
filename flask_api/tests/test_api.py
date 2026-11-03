@@ -27,16 +27,17 @@ def test_allow(client, sink):
     r = post(client, content_id=42)
     body = r.get_json()
     assert r.status_code == 200
+    # THREE KEYS, NO MORE. Every *ApiResponse schema in the company specification declares
+    # additionalProperties: false, so one stray top-level field makes this response invalid
+    # against the contract it is meant to satisfy. That is what this line is here to catch.
+    assert set(body) == {"Success", "Message", "Data"}
     assert body["Success"] is True
-    assert body["Type"] == "success"
-    assert body["Action"] == "approved"
-    assert body["decision"] == "approved" and body["decided_by"] == "model"
-    assert body["content_id"] == "42"
-    # Every documented field is in `Data` for the .NET client and flattened alongside the
-    # envelope for the callers that predate it. Both, or one of the two is a broken contract.
-    assert REQUIRED_KEYS <= set(body)
-    assert REQUIRED_KEYS <= set(body["Data"])
-    assert body["Data"]["decision"] == "approved"
+    assert body["Message"] == "Content approved for publication."
+    data = body["Data"]
+    assert data["Action"] == "approved"
+    assert data["decision"] == "approved" and data["decided_by"] == "model"
+    assert data["content_id"] == "42"
+    assert REQUIRED_KEYS <= set(data)
     # The recorded copy is the response plus the caller's address: the audit log needs it and
     # the public body deliberately does not carry it (see api._emit and test_client_address).
     recorded = sink.results[0]
@@ -44,19 +45,19 @@ def test_allow(client, sink):
     assert (client["ip"], client["network"]) == ("127.0.0.1", "127.0.0.0/24")
     # The audit trail keeps the pipeline's own vocabulary - "allow", not "approved" - so the
     # admin log filters and every row written before the envelope still read the same. Apart
-    # from that one word and the keys the envelope adds, the row is still the response.
-    assert recorded["decision"] == "allow" and body["legacy_decision"] == "allow"
-    assert {k: v for k, v in body["Data"].items() if k not in ENVELOPE_KEYS} ==         {**recorded, "decision": "approved"}
+    # from that one word and the keys the envelope adds, the row is still the payload.
+    assert recorded["decision"] == "allow" and data["legacy_decision"] == "allow"
+    assert {k: v for k, v in data.items() if k not in ENVELOPE_KEYS} == {**recorded, "decision": "approved"}
 
 
 def test_revise_and_reject_by_score(make_settings, sink):
     for risk, expected in [(0.5, "revise"), (0.9, "reject")]:
         c = create_app(make_settings(), scorer=FixedScorer(risk), sink=sink).test_client()
-        assert post(c).get_json()["decision"] == expected
+        assert post(c).get_json()["Data"]["decision"] == expected
 
 
 def test_gate_block_skips_model(client, scorer, sink):
-    body = post(client, content="buy now badword").get_json()
+    body = post(client, content="buy now badword").get_json()["Data"]
     assert body["decision"] == "reject" and body["decided_by"] == "gate"
     assert body["risk_score"] is None and body["model_version"] is None
     assert body["gate_matches"][0]["rule_id"] == "test.block_term"
@@ -65,7 +66,7 @@ def test_gate_block_skips_model(client, scorer, sink):
 
 
 def test_gate_flag_is_recorded_only(client):
-    body = post(client, content="details at bit.ly/xyz").get_json()
+    body = post(client, content="details at bit.ly/xyz").get_json()["Data"]
     assert body["decision"] == "approved" and body["decided_by"] == "model"
     m = body["gate_matches"][0]
     assert m["action"] == "flag" and m["spans"] == [[11, 21]]   # "bit.ly/xyz"
@@ -74,7 +75,7 @@ def test_gate_flag_is_recorded_only(client):
 
 def test_invalid_json(client):
     r = client.post("/v1/moderate", data="nope", content_type="application/json")
-    assert r.status_code == 400 and r.get_json()["error"]["code"] == "invalid_json"
+    assert r.status_code == 400 and r.get_json()["Data"]["code"] == "invalid_json"
 
 
 def test_empty_content(client):
@@ -88,7 +89,7 @@ def test_non_string_content(client):
 def test_unknown_content_type(client):
     r = post(client, content_type="tweet")
     assert r.status_code == 400
-    assert "business_profile" in r.get_json()["error"]["allowed"]
+    assert "business_profile" in r.get_json()["Data"]["allowed"]
 
 
 def test_content_too_long(client):
@@ -102,10 +103,10 @@ def test_model_not_ready_returns_503(make_settings, monkeypatch):
     monkeypatch.setattr(ModelRegistry, "load", boom)
     c = create_app(make_settings(model_backend="onnx")).test_client()
     r = post(c)
-    assert r.status_code == 503 and r.get_json()["error"]["code"] == "model_not_ready"
+    assert r.status_code == 503 and r.get_json()["Data"]["code"] == "model_not_ready"
     assert c.get("/ready").status_code == 503
     # gate still works without a model
-    assert post(c, content="badword").get_json()["decision"] == "reject"
+    assert post(c, content="badword").get_json()["Data"]["decision"] == "reject"
 
 
 def test_inference_error_returns_500(make_settings):
@@ -115,13 +116,19 @@ def test_inference_error_returns_500(make_settings):
             raise RuntimeError("onnx exploded")
     c = create_app(make_settings(), scorer=Broken()).test_client()
     r = post(c)
-    assert r.status_code == 500 and "request_id" in r.get_json()["error"]
+    assert r.status_code == 500 and "request_id" in r.get_json()["Data"]
 
 
 def test_health_and_ready(client):
-    assert client.get("/health").status_code == 200
+    health = client.get("/health")
+    assert health.status_code == 200
+    # The simplest endpoint there is, pinned exactly: three keys, the payload in Data. If the
+    # envelope ever grows a fourth, this is the cheapest place to find out.
+    assert health.get_json() == {"Success": True, "Message": "Service is healthy.",
+                                 "Data": {"status": "ok"}}
     body = client.get("/ready").get_json()
-    assert body["status"] == "ready" and body["model_version"] == "fixed-1"
+    assert body["Success"] is True and body["Message"] == "Service is ready."
+    assert body["Data"]["status"] == "ready" and body["Data"]["model_version"] == "fixed-1"
 
 
 def test_async_mode_returns_pending(make_settings, sink):
@@ -129,17 +136,17 @@ def test_async_mode_returns_pending(make_settings, sink):
     c = create_app(make_settings(mode="async"), sink=sink, enqueue=queued.append,
                    fetch_result=lambda rid: {"request_id": rid, "status": "pending"}).test_client()
     r = post(c)
-    body = r.get_json()
+    body = r.get_json()["Data"]
     assert r.status_code == 202 and body["status"] == "pending"
     assert queued[0].request_id == body["request_id"]
     assert sink.results == []  # worker emits, not Flask
-    assert c.get(body["status_url"]).get_json()["status"] == "pending"
+    assert c.get(body["status_url"]).get_json()["Data"]["status"] == "pending"
 
 
 def test_async_mode_gate_block_is_immediate(make_settings, sink):
     queued = []
     c = create_app(make_settings(mode="async"), sink=sink, enqueue=queued.append).test_client()
-    body = post(c, content="badword").get_json()
+    body = post(c, content="badword").get_json()["Data"]
     assert body["status"] == "completed" and body["decision"] == "reject"
     assert queued == [] and len(sink.results) == 1
 

@@ -35,7 +35,7 @@ class BurnScorer:
 def body(make_settings):
     client = create_app(make_settings(), scorer=BurnScorer()).test_client()
     return client.post("/v1/moderate",
-                       json={"content": CONTENT, "content_type": "business_profile"}).get_json()
+                       json={"content": CONTENT, "content_type": "business_profile"}).get_json()["Data"]
 
 
 def test_the_body_sentence_is_rejected(body):

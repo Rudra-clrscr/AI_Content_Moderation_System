@@ -111,12 +111,12 @@ def test_unreadable_image_is_refused_not_allowed(make_settings):
     r = upload(build(make_settings), png())
     assert r.status_code == 422
     body = r.get_json()
-    assert body["error"]["code"] == "media_unreadable"
-    assert body["error"]["text_readable"] is False
+    assert body["Data"]["code"] == "media_unreadable"
+    assert body["Data"]["text_readable"] is False
 
 
 def test_the_refusal_message_tells_the_author_what_to_do(make_settings):
-    message = upload(build(make_settings), png()).get_json()["error"]["message"]
+    message = upload(build(make_settings), png()).get_json()["Data"]["message"]
     assert "could not be read" in message
     assert "clearer picture" in message
 
@@ -126,7 +126,7 @@ def test_unreadable_image_can_be_published_but_never_as_checked(make_settings):
     the same way unwatched video does. It must not look like a clean result."""
     r = upload(build(make_settings, allow_unreadable_image=True), png())
     assert r.status_code == 200
-    media = r.get_json()["media"]
+    media = r.get_json()["Data"]["media"]
     assert media["checked"] is False
     assert media["text_readable"] is False
     assert media["text_found"] is True                 # there IS writing, we just can't read it
@@ -137,7 +137,7 @@ def test_a_photo_with_no_writing_is_still_allowed(make_settings):
     """The asymmetry is deliberate: no text at all is ordinary for a product photo."""
     client = build(make_settings)
     client.application.extensions["moderation"].settings.ocr.page = PageText("", 0.0, 1.0, 0)
-    body = upload(client, png()).get_json()
+    body = upload(client, png()).get_json()["Data"]
     assert body["decision"] == "approved"
     assert body["media"]["text_found"] is False
 
@@ -146,7 +146,7 @@ def test_readable_text_in_an_image_is_moderated_normally(make_settings):
     client = build(make_settings)
     client.application.extensions["moderation"].settings.ocr.page = \
         PageText("We will burn your shop down, we know where you live", 0.98, 1.0, 1)
-    body = upload(client, png()).get_json()
+    body = upload(client, png()).get_json()["Data"]
     assert body["decision"] == "reject"
     assert body["media"]["text_readable"] is True
 
@@ -166,7 +166,7 @@ def test_ocr_failure_is_refused_as_our_problem_not_the_authors(make_settings):
     client = create_app(settings, scorer=KeywordScorer()).test_client()
     r = upload(client, png())
     assert r.status_code == 503                       # retryable, not a verdict on the file
-    error = r.get_json()["error"]
+    error = r.get_json()["Data"]
     assert error["code"] == "media_not_checkable"
     assert "try again" in error["message"].lower()
     assert "could not be read" not in error["message"]   # we never saw whether there was text

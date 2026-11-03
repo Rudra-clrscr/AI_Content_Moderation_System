@@ -33,7 +33,7 @@ def test_a_decision_lands_in_the_audit_log(make_settings, scorer, sink):
     r = client.post("/v1/moderate", json={"content": "An ordinary sentence about nothing.",
                                           "content_type": "article", "content_id": "c-1"})
     assert r.status_code == 200
-    request_id = r.get_json()["request_id"]
+    request_id = r.get_json()["Data"]["request_id"]
 
     page = _store(app).get_moderation_logs()
     assert page["total"] == 1
@@ -41,7 +41,7 @@ def test_a_decision_lands_in_the_audit_log(make_settings, scorer, sink):
     assert row["request_id"] == request_id
     # The log row keeps the pipeline's own word, which the response now returns as
     # `legacy_decision` - `decision` on the wire is the .NET verdict.
-    assert row["decision"] == r.get_json()["legacy_decision"]
+    assert row["decision"] == r.get_json()["Data"]["legacy_decision"]
     assert row["content_type"] == "article"
     assert row["content_preview"].startswith("An ordinary sentence")
     # The primary sink still saw it too.
@@ -53,7 +53,7 @@ def test_the_detail_endpoint_finds_the_row_the_list_returned(make_settings, scor
     client = app.test_client()
     r = client.post("/v1/moderate", json={"content": "Another ordinary sentence.",
                                           "content_type": "article"})
-    request_id = r.get_json()["request_id"]
+    request_id = r.get_json()["Data"]["request_id"]
 
     detail = _store(app).get_moderation_log_by_request_id(request_id)
     assert detail is not None

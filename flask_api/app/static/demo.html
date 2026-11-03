@@ -220,7 +220,8 @@ $("go").addEventListener("click", moderate);
 
 async function loadStatus() {
   try {
-    const r = await fetch("/ready"); const s = await r.json();
+    // Success/Message/Data, as every endpoint here answers now: the payload is Data.
+    const r = await fetch("/ready"); const s = (await r.json()).Data || {};
     thresholds = s.thresholds || thresholds;
     const chips = [
       `<span class="chip ${s.status === "ready" ? "" : "bad"}">status <b>${esc(s.status)}</b></span>`,
@@ -252,25 +253,26 @@ async function submit(send) {
   const t0 = performance.now();
   try {
     const r = await send();
-    const body = await r.json();
-    // The service now answers the .NET verdicts - "approved" rather than "allow" - and keeps
-    // the pipeline's own word in `legacy_decision`. This page is about the pipeline: its badge
-    // and pill CSS classes, its allow/revise/reject counters and its wording are all keyed on
-    // that vocabulary, so read it back before anything here touches `decision`.
+    const envelope = await r.json();
+    if (!r.ok || envelope.Success === false) return showError(r.status, envelope);
+    const body = envelope.Data || {};
+    // The service answers the .NET verdicts - "approved" rather than "allow" - and keeps the
+    // pipeline's own word in `legacy_decision`. This page is about the pipeline: its badge and
+    // pill CSS classes, its allow/revise/reject counters and its wording are all keyed on that
+    // vocabulary, so read it back before anything here touches `decision`.
     if (body.legacy_decision) body.decision = body.legacy_decision;
     const roundTrip = performance.now() - t0;
-    if (!r.ok) return showError(r.status, body);
     if (body.status === "pending") return showPending(body);
     updateCount();
     lastResult = body;
     showResult(body, roundTrip);
     history.unshift({ ...body, roundTrip }); renderHistory();
-  } catch (e) { showError(0, { error: { message: String(e) } }); }
+  } catch (e) { showError(0, { Data: { message: String(e) } }); }
   finally { $("go").disabled = false; }
 }
 
 function showError(status, body) {
-  const e = body.error || {};
+  const e = body.Data || {};
   // media_not_checkable is a decision, not a malfunction: nothing was published because nothing
   // could read the file.
   const refused = e.code === "media_not_checkable" || e.code === "media_unreadable";
