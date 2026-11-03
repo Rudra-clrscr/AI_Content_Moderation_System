@@ -58,6 +58,13 @@ Full walkthroughs: [SETUP_IMAGE_MODEL.md](flask_api/SETUP_IMAGE_MODEL.md) ·
 `business_proposal`. It doesn't change the
 score; it selects the wording the author sees and is stored with the decision.
 
+**Try it in a browser.** Start the service and open
+**<http://127.0.0.1:8000/docs>** - Swagger UI, served by the service itself, so "Try it out"
+calls your own instance and needs no CORS. `/openapi.yaml` beside it is the document it
+renders, read straight from [docs/openapi.yaml](docs/openapi.yaml). Which token goes in
+**Authorize**, and what to do if the page comes up blank:
+[flask_api/README.md](flask_api/README.md#opening-the-swagger-ui).
+
 The response shape is specified in [contracts/moderation_result.md](contracts/moderation_result.md).
 A reference front-end client lives in
 [flask_api/app/static/articles/moderation-client.js](flask_api/app/static/articles/moderation-client.js)
