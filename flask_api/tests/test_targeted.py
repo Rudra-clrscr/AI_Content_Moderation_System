@@ -170,7 +170,7 @@ class SegmentScorer:
 
 
 def post(client, content):
-    return client.post("/v1/moderate", json={"content": content, "content_type": "post"}).get_json()
+    return client.post("/v1/moderate", json={"content": content, "content_type": "post"}).get_json()["Data"]
 
 
 TEXT = "Great valves and fast delivery from this supplier. But he will regret cheating us."

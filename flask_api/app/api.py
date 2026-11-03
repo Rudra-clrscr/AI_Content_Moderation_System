@@ -25,36 +25,31 @@ def _svc():
     return current_app.extensions["moderation"]
 
 
-def _envelope(data: dict, message: str, resp_type: str, success: bool = True) -> dict:
-    """The official `ApiResponse` shape, with the payload also flattened alongside it.
+def _envelope(data, message: str, success: bool = True) -> dict:
+    """The company's `ApiResponse<T>`: `Success`, `Message`, `Data`, and nothing else.
 
-    `Data` is what the .NET backend reads. The flattened copy is what every caller that
-    predates the envelope still reads - the demo page, the article surfaces, the tests - so
-    both have to be present and say the same thing.
+    Every one of the 23 `*ApiResponse` schemas in the company specification carries exactly
+    these three properties and declares `additionalProperties: false`, so the payload belongs
+    in `Data` and nowhere else.
 
-    The envelope keys are written last on purpose: a payload field named `Success`, `Message`
-    or `Type` would otherwise shadow the envelope and the response would lie about itself.
+    An earlier version of this envelope also added a `Type` field and repeated the whole
+    payload alongside `Data`. `Type` is not in the company contract at any point, and the
+    repeated copy made every response invalid against it, so both are gone: `Data` is the
+    payload. Callers read `Data`.
     """
-    return {
-        **data,
-        "Success": success,
-        "Message": message,
-        "Type": resp_type,
-        "Data": data,
-    }
+    return {"Success": success, "Message": message, "Data": data}
 
 
 def _error(status: int, code: str, message: str, **extra):
-    err_obj = {"code": code, "message": message, **extra}
-    return jsonify({
-        **extra,
-        "Success": False,
-        "Message": message,
-        "Type": "error",
-        "Data": None,
-        "Error": err_obj,
-        "error": err_obj,  # preserved for backward compatibility
-    }), status
+    """A refusal, in the same envelope as everything else.
+
+    `Success: false` and `Message` are what a .NET `HttpClient` branches on. `Data.code` is
+    the machine-readable name of the refusal, for a caller that has to tell one from another -
+    it is stable, where `Message` is prose and may be reworded. There is no top-level `error`
+    key any more; the company envelope has no room for one.
+    """
+    return jsonify(_envelope({"code": code, "message": message, **extra},
+                             message, success=False)), status
 
 
 def _format_moderation_data(result: dict) -> dict:
@@ -118,9 +113,8 @@ def _api_response(result: dict, message: str | None = None, status: int = 200, e
         msg = _approved_message(data)
     else:
         msg = data.get("Note") or "Content rejected by moderation policy."
-    resp_type = "success" if is_approved else "warning"
 
-    return jsonify(_envelope(data, msg, resp_type)), status
+    return jsonify(_envelope(data, msg)), status
 
 
 # The endpoints a member submits through. Listed rather than matched on a path prefix because
@@ -132,6 +126,12 @@ def _api_response(result: dict, message: str | None = None, status: int = 200, e
 # blocking that accepts every submission and reports nothing wrong.
 SUBMISSION_ENDPOINTS = {f"{bp.name}.{fn}" for fn in
                         ("moderate", "moderate_media", "transcribe_media_file")}
+
+# What the bearer token gates: the submissions, plus the status lookup, which hands back a
+# whole moderation result to anyone who can guess a request id. NOT the probes - a load
+# balancer has to reach /health and /ready without a secret - and not the admin screens,
+# which have their own session-or-X-Admin-Token boundary in admin_auth.check_admin.
+SERVICE_ENDPOINTS = SUBMISSION_ENDPOINTS | {f"{bp.name}.moderation_status"}
 
 
 _FORWARDED_WARNED = False
@@ -175,6 +175,12 @@ def _resolve_client():
     svc = current_app.extensions["moderation"]
     g.client = client_address.from_request(request, svc.settings.trust_proxy_hops)
     _warn_once_about_forwarded(svc.settings.trust_proxy_hops, g.client)
+    # Authentication first: an unauthenticated caller is turned away before the blocklist,
+    # which is a moderation convenience and says so about itself below.
+    if request.endpoint in SERVICE_ENDPOINTS:
+        refusal = _require_service_token()
+        if refusal is not None:
+            return refusal
     if request.endpoint not in SUBMISSION_ENDPOINTS:
         return None
     try:
@@ -191,6 +197,30 @@ def _resolve_client():
         # it exactly how wide the block is and which address to come back from.
         return _error(403, "client_blocked",
                       "submissions from this connection are not being accepted.")
+    return None
+
+
+def _require_service_token():
+    """None if the caller may call the moderation endpoints, else a refusal.
+
+    A bearer token in `Authorization`, which is the scheme, header and spelling the company
+    API already declares (`Bearer`, `apiKey` in `Authorization`), so the .NET side reuses the
+    handler it has rather than learning a second convention for this one service.
+
+    WITH `SERVICE_TOKEN` UNSET THESE ENDPOINTS ARE OPEN. Every local setup and the whole test
+    suite rely on that, so it stays - but it is a hole to close on deployment rather than a
+    default to lean on, and it is the one setting that matters now that this service answers
+    on its own host instead of beside the caller. `/ready` reports `service_auth` so a deploy
+    check can assert it came out `enforced` rather than discover it did not.
+    """
+    token = _svc().settings.service_token
+    if not token:
+        return None
+    scheme, _, value = request.headers.get("Authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(value.strip(), token):
+        # No detail. Which half was wrong is the one thing worth knowing to someone guessing.
+        return _error(401, "unauthorized",
+                      "a valid bearer token is required to call this endpoint")
     return None
 
 
@@ -292,8 +322,8 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
             "moderation": policy.as_dict(),
             **(extra or {}),
         }
-        return jsonify(_envelope(async_data, "Content queued for asynchronous moderation.",
-                                 "info")), 202
+        return jsonify(_envelope(async_data,
+                                 "Content queued for asynchronous moderation.")), 202
 
     try:
         result = pipeline.moderate(req, gate=gate, gate_ms=gate_ms)
@@ -569,8 +599,8 @@ def moderation_status(request_id: str):
         return _error(500, "invalid_status", "unexpected result from status lookup")
     if result.get("status") == "completed":
         return _api_response(result)
-    return jsonify(_envelope(result, f"Moderation status: {result.get('status', 'pending')}",
-                             "info")), 200
+    return jsonify(_envelope(result,
+                             f"Moderation status: {result.get('status', 'pending')}")), 200
 
 
 @bp.get("/demo")
@@ -629,7 +659,7 @@ def api_docs():
 
 @bp.get("/health")
 def health():
-    return jsonify(_envelope({"status": "ok"}, "Service is healthy.", "success")), 200
+    return jsonify(_envelope({"status": "ok"}, "Service is healthy.")), 200
 
 
 @bp.get("/ready")
@@ -647,14 +677,18 @@ def ready():
         # Which surfaces are currently unmoderated. An operator should be able to read that
         # from outside rather than infer it from what gets published.
         "moderation_disabled_for": svc.levels.disabled_features(),
+        # Whether the submission endpoints are behind the bearer token. Reported because the
+        # service fails OPEN when SERVICE_TOKEN is unset, and a deploy that forgot it looks
+        # exactly like a deploy that did not - from the outside, until someone finds it.
+        "service_auth": "enforced" if svc.settings.service_token else "open",
     }
     if svc.settings.mode == "sync":
         body.update(model_ready=svc.models.ready, model_version=svc.models.version,
                     model_backend=svc.settings.model_backend, model_error=svc.models.last_error)
         if not svc.models.ready:
             return jsonify(_envelope({"status": "not_ready", **body},
-                                     "Service models not ready.", "error", success=False)), 503
-    return jsonify(_envelope({"status": "ready", **body}, "Service is ready.", "success")), 200
+                                     "Service models not ready.", success=False)), 503
+    return jsonify(_envelope({"status": "ready", **body}, "Service is ready.")), 200
 
 
 def _require_admin():

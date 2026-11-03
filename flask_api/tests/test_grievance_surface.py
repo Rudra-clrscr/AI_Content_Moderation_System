@@ -106,13 +106,13 @@ def test_pipeline_records_a_grievance_refusal_as_its_own_decision(monkeypatch):
                                        version="test", scorer=_AlwaysSure()))
 
     body = {"content": "Nobody has replied about my refund in two weeks.", "content_id": "g1"}
-    article = client.post("/v1/moderate", json={**body, "content_type": "article"}).get_json()
+    article = client.post("/v1/moderate", json={**body, "content_type": "article"}).get_json()["Data"]
     assert article["decision"] == "reject"
     assert article["decided_by"] == "grievance"
     assert article["risk_score"] == 1.0
     assert article["feedback"]["title"]
 
-    proposal = client.post("/v1/moderate", json={**body, "content_type": "proposal"}).get_json()
+    proposal = client.post("/v1/moderate", json={**body, "content_type": "proposal"}).get_json()["Data"]
     assert proposal["decision"] == "approved"
     assert proposal["decided_by"] != "grievance"
 
@@ -135,12 +135,12 @@ def test_grievance_bypassed_on_permissive_levels(monkeypatch):
     # Under strict/baseline level (reject_min <= 0.50)
     svc.levels.set_feature("article", reject_min=0.50, allow_max=0.50)
     body = {"content": "Nobody has replied about my refund in two weeks.", "content_type": "article"}
-    res_l5 = client.post("/v1/moderate", json=body).get_json()
+    res_l5 = client.post("/v1/moderate", json=body).get_json()["Data"]
     assert res_l5["decision"] == "reject"
     assert res_l5["decided_by"] == "grievance"
 
     # Under permissive level (reject_min > 0.50, e.g. level_10 reject_min = 1.0)
     svc.levels.set_feature("article", reject_min=1.00, allow_max=1.00)
-    res_l10 = client.post("/v1/moderate", json=body).get_json()
+    res_l10 = client.post("/v1/moderate", json=body).get_json()["Data"]
     assert res_l10["decided_by"] != "grievance"
 

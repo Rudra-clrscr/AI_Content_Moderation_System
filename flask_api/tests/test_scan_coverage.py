@@ -44,7 +44,7 @@ class RiskyNoiseScorer:
 
 
 def post(client, content):
-    return client.post("/v1/moderate", json={"content": content, "content_type": "article"}).get_json()
+    return client.post("/v1/moderate", json={"content": content, "content_type": "article"}).get_json()["Data"]
 
 
 def test_the_filter_still_recognises_noise():

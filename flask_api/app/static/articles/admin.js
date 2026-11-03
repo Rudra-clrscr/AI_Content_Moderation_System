@@ -149,11 +149,14 @@
     // decisions for the admin rather than things that went wrong - a policy conflict needs
     // the clashing rules so the caller can ask which one stands - and a bare message string
     // throws that away, leaving the UI able only to print the text and give up.
-    const err = new Error(data.message || (data.error && data.error.message)
-                          || `Something went wrong (${res.status}).`);
-    err.code = data.error || (data.error && data.error.code) || `http_${res.status}`;
+    // Success/Message/Data, the same envelope the company API uses: the code and anything
+    // extra a caller needs to recover - the clashing rules, the limit that was exceeded -
+    // are inside Data, so that is what `detail` is.
+    const d = data.Data || {};
+    const err = new Error(data.Message || d.message || `Something went wrong (${res.status}).`);
+    err.code = d.code || `http_${res.status}`;
     err.status = res.status;
-    err.detail = data;
+    err.detail = d;
     throw err;
   }
 
@@ -173,9 +176,9 @@
       let data = {};
       try { data = await res.json(); } catch { /* a failure need not be JSON */ }
       if (res.status === 401) throw new SessionExpired("Your session has ended. Please log in again.");
-      const err = new Error(data.message || (data.error && data.error.message)
-                            || `The download failed (${res.status}).`);
-      err.code = data.error || `http_${res.status}`;
+      const d = data.Data || {};
+      const err = new Error(data.Message || d.message || `The download failed (${res.status}).`);
+      err.code = d.code || `http_${res.status}`;
       err.status = res.status;
       throw err;
     }

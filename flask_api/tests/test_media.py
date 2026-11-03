@@ -135,7 +135,7 @@ def test_scam_in_an_attached_image_is_caught(make_settings, ocr):
     """The bypass this exists to close: a clean article with the scam in the picture."""
     body = upload(client(make_settings, ocr=ocr),
                   text_image(["Earn 50000 per week from home.",
-                              "Pay a small registration fee to join."]), "flyer.png").get_json()
+                              "Pay a small registration fee to join."]), "flyer.png").get_json()["Data"]
     assert body["decision"] == "reject"
     assert body["media"]["kind"] == "image" and body["media"]["text_found"] is True
 
@@ -143,7 +143,7 @@ def test_scam_in_an_attached_image_is_caught(make_settings, ocr):
 def test_photo_without_text_is_allowed_but_says_it_was_not_looked_at(make_settings, ocr):
     """A product photo carries no words. Refusing those would break the feature for every
     honest seller — but the caller must be able to see the picture was never classified."""
-    body = upload(client(make_settings, ocr=ocr), png(), "product.png").get_json()
+    body = upload(client(make_settings, ocr=ocr), png(), "product.png").get_json()["Data"]
     assert body["decision"] == "approved"
     assert body["media"]["text_found"] is False
     assert body["media"]["visual_content_checked"] is False
@@ -151,7 +151,7 @@ def test_photo_without_text_is_allowed_but_says_it_was_not_looked_at(make_settin
 
 def test_clean_text_in_an_image_is_allowed(make_settings, ocr):
     body = upload(client(make_settings, ocr=ocr),
-                  text_image(["Cotton bedsheets in king and queen sizes."]), "sizes.png").get_json()
+                  text_image(["Cotton bedsheets in king and queen sizes."]), "sizes.png").get_json()["Data"]
     assert body["decision"] == "approved" and body["media"]["text_found"] is True
 
 
@@ -160,12 +160,12 @@ def test_video_is_refused_when_the_flag_is_off(make_settings):
     not go out unwatched."""
     r = upload(client(make_settings), fake_video(), "clip.mp4")
     assert r.status_code == 422
-    assert r.get_json()["error"]["code"] == "media_not_checkable"
+    assert r.get_json()["Data"]["code"] == "media_not_checkable"
 
 
 def test_video_can_be_allowed_unchecked_when_that_is_the_policy(make_settings):
     c = client(make_settings, media=MediaLimits(allow_unchecked_video=True))
-    body = upload(c, fake_video(), "clip.mp4").get_json()
+    body = upload(c, fake_video(), "clip.mp4").get_json()["Data"]
     assert body["decision"] == "approved"
     assert body["media"]["checked"] is False and body["media"]["visual_content_checked"] is False
 
@@ -180,19 +180,20 @@ def test_shipped_policy_publishes_video_unchecked_and_says_so():
 
 def test_unknown_type_is_refused(make_settings):
     r = upload(client(make_settings), b"MZ\x90\x00 executable", "setup.exe")
-    assert r.status_code == 422 and r.get_json()["error"]["code"] == "media_unsupported"
+    assert r.status_code == 422 and r.get_json()["Data"]["code"] == "media_unsupported"
 
 
 def test_oversized_image_is_refused(make_settings):
     c = client(make_settings, media=MediaLimits(max_bytes=50))
     r = upload(c, png(200, 200), "big.png")
-    assert r.status_code == 413 and r.get_json()["error"]["code"] == "media_too_large"
+    assert r.status_code == 413 and r.get_json()["Data"]["code"] == "media_too_large"
 
 
 def test_a_pdf_is_published_unread(make_settings):
     """PDF checking was taken out while the scanned path is reworked. What is left is the video
     rule with the opposite default: publish it, and say plainly that nothing read it."""
-    body = upload(client(make_settings), pdf_bytes(), "cat.pdf").get_json()
+    envelope = upload(client(make_settings), pdf_bytes(), "cat.pdf").get_json()
+    body = envelope["Data"]
     assert body["decision"] == "approved"
     assert body["media"]["kind"] == "pdf"
     # The honesty of the record is the whole of what is left. An allow nothing looked at must
@@ -201,7 +202,7 @@ def test_a_pdf_is_published_unread(make_settings):
     assert body["media"]["visual_content_checked"] is False
     assert body["media"]["text_found"] is False
     # Including in the envelope's summary line, which is all a .NET caller may keep.
-    assert body["Message"] == "Published, but nothing in this file could be read or checked."
+    assert envelope["Message"] == "Published, but nothing in this file could be read or checked."
     # The old contract's page map is gone with the extractor that filled it.
     assert "pdf" not in body
 
@@ -210,7 +211,7 @@ def test_a_pdf_can_be_refused_instead(make_settings):
     c = client(make_settings, media=MediaLimits(allow_unchecked_pdf=False))
     r = upload(c, pdf_bytes(), "cat.pdf")
     assert r.status_code == 422
-    assert r.get_json()["error"]["code"] == "media_not_checkable"
+    assert r.get_json()["Data"]["code"] == "media_not_checkable"
 
 
 def test_the_old_pdf_route_is_gone(make_settings):
@@ -288,5 +289,5 @@ def test_a_real_avif_is_moderated_rather_than_waved_through(make_settings, ocr):
     Image.new("RGB", (64, 64), (200, 30, 30)).save(buf, format="AVIF")
     data = buf.getvalue()
     assert detect_kind(data) == "image"
-    body = upload(client(make_settings, ocr=ocr), data, "photo.avif").get_json()
+    body = upload(client(make_settings, ocr=ocr), data, "photo.avif").get_json()["Data"]
     assert body["media"]["kind"] == "image"

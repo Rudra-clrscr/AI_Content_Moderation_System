@@ -141,8 +141,8 @@ try { Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/moderate -Con
 
 | Request | Response |
 |---|---|
-| Allowed listing | `decision : allow`, `decided_by : model` |
-| Blocked by the gate | `decision : reject`, `decided_by : gate` |
+| Allowed listing | `Data.Action : approved`, `Data.decided_by : model` |
+| Blocked by the gate | `Data.Action : reject`, `Data.decided_by : gate` |
 | Empty content | `invalid_content` |
 | Unknown type | `invalid_content_type`, with the list of allowed types |
 

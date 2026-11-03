@@ -20,7 +20,7 @@ class ShortSentenceScorer:
 
 
 def post(client, content):
-    return client.post("/v1/moderate", json={"content": content, "content_type": "post"}).get_json()
+    return client.post("/v1/moderate", json={"content": content, "content_type": "post"}).get_json()["Data"]
 
 
 TEXT = "Handmade leather wallets and belts. Earn 50000 per week from home."

@@ -24,7 +24,7 @@ def test_the_api_accepts_the_surface(client, content_type):
     r = client.post("/v1/moderate", json={"content": "Our mill ships nationwide.",
                                           "content_type": content_type})
     assert r.status_code == 200, r.get_data(as_text=True)
-    assert r.get_json()["content_type"] == content_type
+    assert r.get_json()["Data"]["content_type"] == content_type
 
 
 @pytest.mark.parametrize("content_type", NEW)
@@ -54,7 +54,7 @@ def test_group_post_is_distinguishable_from_post_in_the_result(client):
     for ct in ("post", "group_post"):
         bodies[ct] = client.post("/v1/moderate",
                                  json={"content": "Join our group for bulk cotton rates.",
-                                       "content_type": ct}).get_json()
+                                       "content_type": ct}).get_json()["Data"]
     assert bodies["post"]["content_type"] == "post"
     assert bodies["group_post"]["content_type"] == "group_post"
 

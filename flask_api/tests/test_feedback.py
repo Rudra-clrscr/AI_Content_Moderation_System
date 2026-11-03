@@ -26,7 +26,7 @@ class KeywordScorer:
 
 
 def post(client, content, ctype="post"):
-    return client.post("/v1/moderate", json={"content": content, "content_type": ctype}).get_json()
+    return client.post("/v1/moderate", json={"content": content, "content_type": ctype}).get_json()["Data"]
 
 
 def app_with(make_settings, scorer, **overrides):
@@ -216,7 +216,7 @@ def test_every_dashboard_surface_has_its_own_wording(make_settings, content_type
     assert ContentType(content_type)                       # the API accepts it
     c = app_with(make_settings, KeywordScorer())
     body = c.post("/v1/moderate", json={"content": "double your money now",
-                                        "content_type": content_type}).get_json()
+                                        "content_type": content_type}).get_json()["Data"]
     assert body["feedback"]["title"] == f"Your {noun} can't be published"
 
 
@@ -229,8 +229,8 @@ def test_shipped_messages_cover_every_content_type():
 
 def test_wording_uses_the_content_types_noun(make_settings):
     c = app_with(make_settings, KeywordScorer())
-    art = c.post("/v1/moderate", json={"content": "You can pay in crypto here", "content_type": "article"}).get_json()
-    lst = c.post("/v1/moderate", json={"content": "double your money now", "content_type": "product_listing"}).get_json()
+    art = c.post("/v1/moderate", json={"content": "You can pay in crypto here", "content_type": "article"}).get_json()["Data"]
+    lst = c.post("/v1/moderate", json={"content": "double your money now", "content_type": "product_listing"}).get_json()["Data"]
     assert art["feedback"]["title"] == "Your article needs a few changes"
     assert "your article" in art["feedback"]["message"]
     assert lst["feedback"]["title"] == "Your listing can't be published"

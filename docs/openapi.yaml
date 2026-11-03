@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.0.4
 
 info:
   title: BONC Moderation API
@@ -12,12 +12,27 @@ info:
 
     ### Reading a response
 
-    A refusal is **not** an HTTP error. `decision: "reject"` comes back `200`. Branch on
-    the `decision` field; reserve error handling for 4xx and 5xx.
+    Every response is the company `ApiResponse<T>` envelope — `Success`, `Message`, `Data`,
+    and nothing else. **The payload is in `Data`.** It is not repeated at the top level:
+    the company's own envelopes declare `additionalProperties: false`, so an extra key
+    would make the response invalid against the contract this service exists to satisfy.
+
+    A refusal is **not** an HTTP error. `Data.Action: "reject"` comes back `200` with
+    `Success: true` — the request succeeded, the content was refused. Branch on
+    `Data.Action`, and reserve error handling for 4xx and 5xx, where `Success` is `false`
+    and `Data.code` names the failure.
+
+    `Data.Action` is binary (`approved` / `reject`) because the .NET publishing workflow
+    is. `Data.decision` is not: a revise band keeps the word `revise` there, so the
+    author-facing surfaces can tell "edit the highlighted part and resubmit" from "this
+    will not be published". A caller reading `decision` must treat `revise` as a refusal.
 
     ### Authentication
 
-    - The three `/v1/moderate*` submission endpoints and the two probes are **open**.
+    - The `/v1/moderate*` endpoints take a **bearer token** (`Bearer`) when `SERVICE_TOKEN`
+      is set, and are **open** when it is not — see that scheme for why both exist and what
+      `GET /ready` reports about it. The two probes are always open, so a load balancer can
+      reach them without a secret.
     - Admin endpoints accept **either** an `X-Admin-Token` header **or** a logged-in
       session cookie (`bonc_admin`). With the cookie, every non-GET request must also
       carry `X-Requested-With: bonc-admin` or it is refused `403` — that is the CSRF
@@ -40,6 +55,12 @@ info:
 servers:
   - url: http://localhost:8000
     description: Local development
+  - url: https://moderation.internal.boncnetwork.com
+    description: |
+      The AI/ML host. This service runs on its own machine, beside the models rather than
+      beside the caller, and the main .NET server reaches it over the network — so the
+      bearer token and the network boundary in front of it are both load-bearing. Replace
+      this URL with the real host.
 
 # Order matters: Swagger UI lists sections in this order, and the moderation and admin
 # endpoints are the ones that get deployed and tested. The dev pages come last.
@@ -72,6 +93,10 @@ paths:
       tags: [Moderation]
       summary: Moderate text
       operationId: moderateText
+      # Gated by the bearer token when SERVICE_TOKEN is set, and open when it is not.
+      # Declared optional ([] alongside Bearer) because both are real deployments: the
+      # token is how this is meant to run, and open is what a local checkout does.
+      security: [{ Bearer: [] }, {}]
       description: |
         The endpoint the platform calls on every piece of member-written text.
 
@@ -125,12 +150,12 @@ paths:
           description: A decision was reached — allow, revise **or** reject.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ModerationResult' }
+              schema: { $ref: '#/components/schemas/ModerationResultApiResponse' }
         "202":
           description: Async mode only — queued for scoring.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PendingResult' }
+              schema: { $ref: '#/components/schemas/PendingResultApiResponse' }
         "400":
           description: '`invalid_json`, `invalid_content`, `invalid_content_type`, `invalid_content_id`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -152,6 +177,10 @@ paths:
       tags: [Moderation]
       summary: Moderate an uploaded image
       operationId: moderateMedia
+      # Gated by the bearer token when SERVICE_TOKEN is set, and open when it is not.
+      # Declared optional ([] alongside Bearer) because both are real deployments: the
+      # token is how this is meant to run, and open is what a local checkout does.
+      security: [{ Bearer: [] }, {}]
       description: |
         Post **one** file per request — each gets its own decision and its own audit row.
         The kind is detected from the file's bytes, never its name.
@@ -192,7 +221,7 @@ paths:
             A PDF or a video carries `checked: false` in it and nothing else was read.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MediaModerationResult' }
+              schema: { $ref: '#/components/schemas/MediaModerationResultApiResponse' }
         "400":
           description: '`invalid_file`, `invalid_content_type`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -217,6 +246,10 @@ paths:
       tags: [Moderation]
       summary: Fetch an async result
       operationId: moderationStatus
+      # Gated by the bearer token when SERVICE_TOKEN is set, and open when it is not.
+      # Declared optional ([] alongside Bearer) because both are real deployments: the
+      # token is how this is meant to run, and open is what a local checkout does.
+      security: [{ Bearer: [] }, {}]
       description: |
         Only meaningful in async mode. **In sync mode this returns `404 not_supported`**,
         because there is nothing to poll.
@@ -232,8 +265,8 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - { $ref: '#/components/schemas/ModerationResult' }
-                  - { $ref: '#/components/schemas/PendingResult' }
+                  - { $ref: '#/components/schemas/ModerationResultApiResponse' }
+                  - { $ref: '#/components/schemas/PendingResultApiResponse' }
         "404":
           description: '`not_supported` — status lookup is async-mode only.'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -250,9 +283,7 @@ paths:
           description: The process is alive.
           content:
             application/json:
-              schema:
-                type: object
-                properties: { status: { type: string, example: ok } }
+              schema: { $ref: '#/components/schemas/HealthApiResponse' }
 
   /ready:
     get:
@@ -272,12 +303,12 @@ paths:
           description: Ready to serve.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ReadyStatus' }
+              schema: { $ref: '#/components/schemas/ReadyStatusApiResponse' }
         "503":
           description: 'The model is not loaded. Same body, `status: "not_ready"`.'
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ReadyStatus' }
+              schema: { $ref: '#/components/schemas/ReadyStatusApiResponse' }
 
   /demo:
     get:
@@ -1587,6 +1618,22 @@ paths:
 components:
 
   securitySchemes:
+    Bearer:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: |
+        `Authorization: Bearer <SERVICE_TOKEN>` — the token the main .NET server sends when
+        it calls the moderation endpoints across the network.
+
+        Declared exactly as the company API declares its own `Bearer` scheme (an `apiKey`
+        in the `Authorization` header, not HTTP `bearer`), so the calling side reuses the
+        handler it already has rather than learning a second convention for this service.
+
+        **If `SERVICE_TOKEN` is unset the moderation endpoints are open.** That is what
+        local runs and the test suite depend on, and it is the one setting to get right when
+        deploying this service onto its own host. `GET /ready` reports `service_auth` as
+        `enforced` or `open` so a deploy check can assert which one it got.
     AdminToken:
       type: apiKey
       in: header
@@ -1648,51 +1695,68 @@ components:
 
   schemas:
 
+    ApiResponse:
+      type: object
+      description: |
+        The company `ApiResponse<T>` envelope, as declared in the official specification:
+        `Success`, `Message`, `Data`, and nothing else.
+
+        Every response from this service is one of these. The payload is in `Data` — it is
+        not repeated at the top level, because the company's own envelopes all declare
+        `additionalProperties: false` and an extra key would make the response invalid
+        against the contract it is meant to satisfy.
+
+        `Type` is **not** part of this envelope. An earlier revision of this service sent
+        one; the company specification has no such field on any of its 23 `*ApiResponse`
+        schemas, so it was removed rather than documented as standard.
+      required: [Success, Message]
+      properties:
+        Success: { type: boolean, example: true }
+        Message:
+          type: string
+          nullable: true
+          description: |
+            A human-readable summary — prose, and subject to rewording. Branch on
+            `Success` and on `Data.code`, never on this.
+          example: Content approved for publication.
+        Data:
+          nullable: true
+          description: The payload. Shape depends on the endpoint.
+      additionalProperties: false
+
     Error:
       type: object
       description: |
-        **The nested envelope**, produced by `_error()` in `app/api.py`. Used by the
-        moderation endpoints, the probes, `/v1/admin/moderation-levels/*` and
-        `/v1/admin/model/reload`.
+        A refusal, in the same envelope as everything else: `Success: false`, a `Message`,
+        and the machine-readable detail in `Data`.
 
-        `error.code` is stable and machine-readable — branch on it, not on `message`.
-        Extra keys (`allowed`, `limit`, `request_id`, `kind`) appear per error where they
-        help the caller recover.
+        **`Data.code` is the stable name of the refusal** — branch on it, not on `Message`.
+        Extra keys (`allowed`, `limit`, `request_id`, `kind`, `text_readable`, `conflicts`)
+        appear inside `Data` per error, where they help the caller recover.
 
-        > **This API has two error shapes.** See `AdminError`. A client cannot assume one
-        > of them.
+        There is no top-level `error` key any more, and no second shape: the split where
+        `error` was a bare string on the admin routes and an object on the moderation
+        routes is gone. `AdminError` is kept as a name for the same schema.
+      required: [Success, Message]
       properties:
-        error:
+        Success: { type: boolean, example: false }
+        Message: { type: string, example: unknown 'content_type' }
+        Data:
           type: object
           required: [code, message]
           properties:
             code: { type: string, example: invalid_content_type }
             message: { type: string, example: unknown 'content_type' }
           additionalProperties: true
+      additionalProperties: false
 
     AdminError:
-      type: object
       description: |
-        **The flat envelope**, produced by `_err()` in `app/admin_auth.py`,
-        `app/admin_images.py` and `app/admin_policy.py`. Used by every admin endpoint
-        those three blueprints own — auth, moderation-settings, the audit log, blocked
-        clients, images and visual policy.
-
-        Here the code is `error` itself (a string, not an object) and the message is a
-        sibling key. Extra keys (`conflicts`, `this_verdict`, `text_readable`) appear per
-        error.
-
-        > **Also returned by `check_admin()`**, which guards endpoints defined in
-        > `app/api.py`. So `GET /v1/admin/moderation-levels` answers `401` in **this**
-        > shape, while its own `404 no_such_surface` uses the nested `Error` — one
-        > endpoint, both shapes, depending on which layer refused.
-        >
-        > A robust client reads
-        > `typeof body.error === "string" ? body.error : body.error?.code`.
-      properties:
-        error: { type: string, example: unauthorized }
-        message: { type: string, example: please log in }
-      additionalProperties: true
+        The same envelope as `Error`. Kept as a separate name only because the admin
+        endpoints referenced it while the two error shapes really did differ; they no
+        longer do, and new references should use `Error`.
+      allOf:
+        - $ref: '#/components/schemas/Error'
 
     ContentType:
       type: string
@@ -1852,28 +1916,64 @@ components:
             **An allow with `checked: false` is not a clean result.**
         visual: { type: object, description: The visual check's scores and winning label. }
 
+    ModerationResultApiResponse:
+      type: object
+      description: |
+        `ApiResponse<ModerationResult>` — what `POST /v1/moderate` and
+        `POST /v1/moderate/media` answer. Named the way the company specification names its
+        own typed envelopes (`ArticleDtoApiResponse`, `InviteDtoApiResponse`, …).
+      required: [Success, Message]
+      properties:
+        Success: { type: boolean, example: true }
+        Message:
+          type: string
+          description: |
+            Prose, and deliberately honest about what happened. An approval that nothing
+            actually checked — moderation switched off for the surface, or a file nothing
+            could read — says so here instead of claiming it was approved on inspection.
+          example: Content approved for publication.
+        Data:
+          $ref: '#/components/schemas/ModerationResult'
+      additionalProperties: false
+
     ModerationResult:
       type: object
       description: |
-        Produced by `Pipeline._build`. The same object is returned to the caller and
-        handed to the sink for the audit log.
+        The payload, carried in `Data`. Produced by `Pipeline._build`; the same object is
+        handed to the sink for the audit log, with the caller's address added and the
+        verdict in the pipeline's own vocabulary.
 
         Offsets, not copies: `targeted_segments`, `sentence_scores`, `word_scores` and
         `feedback.issues` all carry character offsets into `content`, so audit rows stay
         free of duplicated text.
       properties:
-        Success: { type: boolean, example: true, description: "Official company ApiResponse envelope status." }
-        Message: { type: string, example: "Content approved for publication." }
-        Type: { type: string, enum: [success, warning, error, info], example: success }
-        Action: { type: string, enum: [approved, reject, pending], description: "Binary action outcome consumed by .NET server. Branch on this. `pending` only on the async 202." }
-        Decision: { type: string, enum: [approved, reject], description: "Alias of `Action`." }
-        action: { type: string, enum: [approved, reject], description: "Alias of `Action`." }
-        verdict: { type: string, enum: [approved, reject], description: "Alias of `Action`." }
-        approval_status: { type: string, enum: [approved, reject], description: "Alias of `Action`." }
+        Action:
+          type: string
+          enum: [approved, reject]
+          description: |
+            **The verdict to branch on.** Binary, matching the `Action` field of the
+            company's own `AdminArticleActionDto` and `ArticleAdminActionDto`.
+
+            > The company specification declares that `Action` as an unconstrained
+            > `string` — it carries no enum and no pattern — so these two spellings are
+            > this service's choice, not something the specification pins down. The one
+            > place the company API *does* constrain a comparable field it uses
+            > `^(Accept|Reject|Message)$`, in PascalCase. **Confirm the casing the .NET
+            > side expects before relying on it**: a mismatch does not error, it simply
+            > never matches, and content stays in draft.
+        Decision: { type: string, enum: [approved, reject], description: Alias of `Action`. }
+        action: { type: string, enum: [approved, reject], description: Alias of `Action`. }
+        verdict: { type: string, enum: [approved, reject], description: Alias of `Action`. }
+        approval_status: { type: string, enum: [approved, reject], description: Alias of `Action`. }
         legacy_decision:
           $ref: '#/components/schemas/LegacyDecision'
-        Note: { type: string, nullable: true, description: "Moderation reason / feedback for .NET server and author." }
-        Data: { type: object, description: "Detailed moderation result payload. Carries every field listed here except the envelope's own `Success`, `Message`, `Type` and `Data`." }
+        Note:
+          type: string
+          nullable: true
+          description: |
+            The author-facing reason, for an entity's remark column. Policy wording from
+            `config/feedback_messages.yaml` — **never the submitted text**, which is only
+            ever in `content`. `null` when approved.
         schema_version: { type: string, example: "1.9" }
         request_id: { type: string, format: uuid }
         status: { type: string, example: completed }
@@ -1907,6 +2007,50 @@ components:
             stages: { type: object }
         decided_at: { type: string, format: date-time }
 
+    MediaModerationResultApiResponse:
+      type: object
+      description: '`ApiResponse<MediaModerationResult>` — `POST /v1/moderate/media`.'
+      required: [Success, Message]
+      properties:
+        Success: { type: boolean, example: true }
+        Message: { type: string, example: "Published, but nothing in this file could be read or checked." }
+        Data: { $ref: '#/components/schemas/MediaModerationResult' }
+      additionalProperties: false
+
+    PendingResultApiResponse:
+      type: object
+      description: '`ApiResponse<PendingResult>` — the async `202`.'
+      required: [Success, Message]
+      properties:
+        Success: { type: boolean, example: true }
+        Message: { type: string, example: Content queued for asynchronous moderation. }
+        Data: { $ref: '#/components/schemas/PendingResult' }
+      additionalProperties: false
+
+    ReadyStatusApiResponse:
+      type: object
+      description: |
+        `ApiResponse<ReadyStatus>` — `GET /ready`. `Success` is `false` on the `503`, so a
+        probe can read it without parsing `Data`.
+      required: [Success, Message]
+      properties:
+        Success: { type: boolean, example: true }
+        Message: { type: string, example: Service is ready. }
+        Data: { $ref: '#/components/schemas/ReadyStatus' }
+      additionalProperties: false
+
+    HealthApiResponse:
+      type: object
+      description: '`ApiResponse` — `GET /health`.'
+      required: [Success, Message]
+      properties:
+        Success: { type: boolean, example: true }
+        Message: { type: string, example: Service is healthy. }
+        Data:
+          type: object
+          properties: { status: { type: string, example: ok } }
+      additionalProperties: false
+
     MediaModerationResult:
       allOf:
         - { $ref: '#/components/schemas/ModerationResult' }
@@ -1929,6 +2073,14 @@ components:
       properties:
         status: { type: string, enum: [ready, not_ready] }
         mode: { type: string, enum: [sync, async] }
+        service_auth:
+          type: string
+          enum: [enforced, open]
+          description: |
+            Whether the moderation endpoints are behind the bearer token. Reported because
+            this service fails **open** when `SERVICE_TOKEN` is unset, and from the outside
+            a deployment that forgot the token looks exactly like one that did not. Assert
+            `enforced` in a deploy check.
         gate_version: { type: integer }
         gate_rules: { type: integer }
         thresholds: { $ref: '#/components/schemas/Thresholds' }

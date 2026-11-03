@@ -92,7 +92,7 @@ def test_db_outage_does_not_break_moderation(make_settings, scorer):
     c = create_app(make_settings(result_sink="sql"), scorer=scorer).test_client()
     for content, decision in [("Steel pipes for sale", "approved"), ("badword", "reject")]:
         r = c.post("/v1/moderate", json={"content": content, "content_type": "post"})
-        assert r.status_code == 200 and r.get_json()["decision"] == decision
+        assert r.status_code == 200 and r.get_json()["Data"]["decision"] == decision
 
 
 def test_connection_string_windows_auth(make_settings):

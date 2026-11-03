@@ -243,10 +243,11 @@
     }
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok || body.Success === false) {
-      const err = body.Error || body.error || {};
-      throw Object.assign(new Error(err.message || body.Message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
+      // The envelope is Success/Message/Data only, so a refusal puts its code in Data.
+      const err = body.Data || {};
+      throw Object.assign(new Error(body.Message || err.message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
     }
-    const result = body.Data || body;
+    const result = body.Data;
     return { result, parts, content };
   }
 
@@ -272,10 +273,11 @@
     }
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok || body.Success === false) {
-      const err = body.Error || body.error || {};
-      throw Object.assign(new Error(err.message || body.Message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
+      // The envelope is Success/Message/Data only, so a refusal puts its code in Data.
+      const err = body.Data || {};
+      throw Object.assign(new Error(body.Message || err.message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
     }
-    return body.Data || body;
+    return body.Data;
   }
 
   /**
@@ -306,10 +308,11 @@
     }
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok || body.Success === false) {
-      const err = body.Error || body.error || {};
-      throw Object.assign(new Error(err.message || body.Message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
+      // The envelope is Success/Message/Data only, so a refusal puts its code in Data.
+      const err = body.Data || {};
+      throw Object.assign(new Error(body.Message || err.message || `HTTP ${resp.status}`), { code: err.code || `http_${resp.status}` });
     }
-    const result = body.Data || body;
+    const result = body.Data;
     return { result, parts, content };
   }
 

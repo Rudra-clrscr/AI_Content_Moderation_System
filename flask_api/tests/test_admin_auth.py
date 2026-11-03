@@ -144,12 +144,12 @@ def test_bad_settings_bodies_change_nothing(admin):
 @pytest.mark.parametrize("ctype", ALL_SURFACES)
 def test_off_publishes_and_on_moderates_every_surface(admin, scorer, ctype):
     scorer.risk = 0.99
-    assert moderate(admin, ctype).get_json()["decision"] == "reject"
+    assert moderate(admin, ctype).get_json()["Data"]["decision"] == "reject"
     admin.put("/v1/admin/moderation-settings", json={"enabled": False, "level": "strict"}, headers=HDR)
-    off = moderate(admin, ctype).get_json()
+    off = moderate(admin, ctype).get_json()["Data"]
     assert off["decision"] == "approved" and off.get("decided_by") == "disabled"
     admin.put("/v1/admin/moderation-settings", json={"enabled": True, "level": "strict"}, headers=HDR)
-    assert moderate(admin, ctype).get_json()["decision"] == "reject"
+    assert moderate(admin, ctype).get_json()["Data"]["decision"] == "reject"
 
 
 @pytest.mark.parametrize("ctype", ALL_SURFACES)
@@ -157,7 +157,7 @@ def test_each_level_is_enforced_on_every_surface(admin, scorer, ctype):
     def decide(level, risk):
         admin.put("/v1/admin/moderation-settings", json={"enabled": True, "level": level}, headers=HDR)
         scorer.risk = risk
-        return moderate(admin, ctype).get_json()["decision"]
+        return moderate(admin, ctype).get_json()["Data"]["decision"]
     assert decide("lenient", 0.60) == "approved"       # lenient bar 0.85
     assert decide("medium", 0.60) == "reject"       # medium bar 0.50
     assert decide("medium", 0.40) == "approved"
@@ -173,10 +173,10 @@ def test_off_does_not_switch_off_authentication_or_validation(admin, anon):
 
 def test_rejected_and_revise_are_never_allow_when_on(admin, scorer, make_settings):
     scorer.risk = 0.9
-    assert moderate(admin, "article").get_json()["decision"] in ("reject", "revise")
-    r = moderate(admin, "article", "badword here").get_json()      # the gate's own block rule
+    assert moderate(admin, "article").get_json()["Data"]["decision"] in ("reject", "revise")
+    r = moderate(admin, "article", "badword here").get_json()["Data"]      # the gate's own block rule
     assert r["decision"] == "reject"
-    r = moderate(admin, "proposal", "you can pay in crypto").get_json()   # the gate's revise rule
+    r = moderate(admin, "proposal", "you can pay in crypto").get_json()["Data"]   # the gate's revise rule
     assert r["decision"] in ("revise", "reject")
 
 
@@ -203,12 +203,12 @@ def test_settings_survive_a_restart(make_settings, sink, mailer, tmp_path, score
     app2 = create_app(make_settings(admin_token=None), scorer=scorer, sink=sink,
                       admin_store=AdminStore(db), mailer=mailer, mail_async=False)   # "restart"
     scorer.risk = 0.40
-    assert moderate(app2.test_client(), "video").get_json()["decision"] == "reject"   # strict still on
+    assert moderate(app2.test_client(), "video").get_json()["Data"]["decision"] == "reject"   # strict still on
     c.put("/v1/admin/moderation-settings", json={"enabled": False, "level": "strict"}, headers=HDR)
     app3 = create_app(make_settings(admin_token=None), scorer=scorer, sink=sink,
                       admin_store=AdminStore(db), mailer=mailer, mail_async=False)
     scorer.risk = 0.99
-    assert moderate(app3.test_client(), "video").get_json()["decision"] == "approved"    # OFF still off
+    assert moderate(app3.test_client(), "video").get_json()["Data"]["decision"] == "approved"    # OFF still off
 
 
 def test_old_per_surface_endpoint_is_saved_too(make_settings, sink, mailer, tmp_path, scorer):
@@ -219,8 +219,8 @@ def test_old_per_surface_endpoint_is_saved_too(make_settings, sink, mailer, tmp_
     assert c.put("/v1/admin/moderation-levels/article", json={"enabled": False},
                  headers={"X-Admin-Token": "secret"}).status_code == 200
     scorer.risk = 0.99
-    assert moderate(mk().test_client(), "article").get_json()["decision"] == "approved"
-    assert moderate(mk().test_client(), "video").get_json()["decision"] == "reject"
+    assert moderate(mk().test_client(), "article").get_json()["Data"]["decision"] == "approved"
+    assert moderate(mk().test_client(), "video").get_json()["Data"]["decision"] == "reject"
 
 
 # ---- forgot password ------------------------------------------------------------------
@@ -242,7 +242,7 @@ def test_code_is_six_digits_hashed_and_expires(anon, mailer, app):
     assert re.fullmatch(r"\d{6}", code) and code not in row["code_hash"]
     app.extensions["admin"].store._mem.execute("UPDATE reset_code SET expires_at = 1")
     r = anon.post("/v1/admin/auth/password/verify", json={"email": EMAIL, "code": code})
-    assert r.status_code == 400 and "expired" in r.get_json()["message"]
+    assert r.status_code == 400 and "expired" in r.get_json()["Message"]
 
 
 def test_wrong_code_then_locked_after_five(anon, mailer):

@@ -114,21 +114,21 @@ def test_an_ordinary_submission_is_recorded_with_its_address(client):
 def test_the_address_is_not_added_to_the_public_response(client):
     """It is the caller's own address, so it tells them nothing - and putting it in the body
     would make an audit column part of the API's shape."""
-    assert "client" not in post(client).get_json()
+    assert "client" not in post(client).get_json()["Data"]
 
 
 def test_a_blocked_address_cannot_submit(client):
     client.application.config["_store"].block_client("203.0.113.7", "ip", reason="repeat spam")
     r = post(client)
     assert r.status_code == 403
-    assert r.get_json()["error"]["code"] == "client_blocked"
+    assert r.get_json()["Data"]["code"] == "client_blocked"
 
 
 def test_the_refusal_does_not_say_how_wide_the_block_is(client):
     """Naming the address or the scope tells someone probing it exactly which address to come
     back from."""
     client.application.config["_store"].block_client("203.0.113.0/24", "network")
-    msg = post(client).get_json()["error"]["message"]
+    msg = post(client).get_json()["Data"]["message"]
     assert "203.0.113" not in msg and "network" not in msg
 
 

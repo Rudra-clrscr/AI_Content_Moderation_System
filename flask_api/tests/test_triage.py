@@ -103,7 +103,7 @@ TEXT = "Handmade leather wallets. Belts in all sizes. Earn 50000 per week from h
 
 
 def post(client, content=TEXT):
-    return client.post("/v1/moderate", json={"content": content, "content_type": "post"}).get_json()
+    return client.post("/v1/moderate", json={"content": content, "content_type": "post"}).get_json()["Data"]
 
 
 def app_with(make_settings, triage, scorer, **kw):

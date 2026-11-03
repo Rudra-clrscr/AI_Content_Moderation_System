@@ -32,93 +32,133 @@ GraphQL and no gRPC anywhere in this project.
 
 ## 1. Conventions
 
-### Official Company Envelope & Unified Response Standard
+### The company envelope
 
-All endpoints now follow the **BONC Network Official Microservice Standard** (`ApiResponse<T>`) as specified in the official Swagger (`https://api.boncnetwork.com/swagger/index.html`):
+Every endpoint answers the **BONC Network `ApiResponse<T>`** envelope from the official
+Swagger (`https://api.boncnetwork.com/swagger/index.html`) — three keys, and no others:
 
 ```json
 {
   "Success": true,
   "Message": "Content approved for publication.",
-  "Type": "success",
-  "Data": { ... }
+  "Data": { "...": "the payload" }
 }
 ```
 
-#### .NET Server Binary Verdicts: "approved" and "reject"
+**The payload is in `Data`, and only in `Data`.** All 23 `*ApiResponse` schemas in the
+company specification declare `additionalProperties: false`, so a fourth top-level key makes
+the response invalid against the contract this service exists to satisfy. An earlier revision
+of this service also sent a `Type` field and repeated the whole payload at the top level;
+`Type` appears nowhere in the company specification, and the repeated copy broke the
+`additionalProperties` rule, so both are gone.
 
-For full integration with the company's ASP.NET Core backend (e.g. `AdminArticleActionDto`, `ArticleAdminActionDto`), moderation decisions explicitly map to two canonical actions:
-* **`"approved"`**: Content passed checks. `.NET` server immediately publishes the entity.
-* **`"reject"`**: Content refused or flagged. `.NET` server retains draft/rejected status and logs `Note`.
+`Message` is prose and may be reworded — branch on `Success` and on `Data`, never on it. It is
+deliberately honest about what happened: an approval that nothing actually checked (moderation
+switched off for the surface, or a file nothing could read) says so instead of claiming the
+content was approved on inspection.
+
+#### The verdict: "approved" and "reject"
+
+The .NET backend's publishing DTOs — `AdminArticleActionDto` and `ArticleAdminActionDto` —
+take an `Action` and a `Note`, so `Data` carries both under those names:
+
+* **`"approved"`** — the content passed. The .NET server publishes the entity.
+* **`"reject"`** — refused. The .NET server keeps the draft and stores `Note`.
+
+> ⚠️ **The two spellings are this service's choice, not the specification's.** The company
+> spec declares `Action` as an unconstrained `string` — no enum, no pattern — and the words
+> `approved` and `reject` appear in it nowhere. The one place the company API *does* constrain
+> a comparable field, it uses `^(Accept|Reject|Message)$`, in **PascalCase**. Confirm the
+> casing the .NET side expects before relying on it: a mismatch does not raise an error, it
+> simply never matches, and content stays in draft.
 
 Inside `Data`:
-* `Action`: `"approved"` | `"reject"` — and `"pending"` on the async `202`. **Branch on this one.**
-* `Decision`, `action`, `verdict`, `approval_status`: the same verdict under the names different
-  callers already look for. All four always agree with `Action`.
-* `decision`: `"approved"` | `"revise"` | `"reject"`. Not a second name for `Action`: an allow
-  becomes `"approved"`, but a **`"revise"` stays `"revise"`** here, because the author-facing
-  surfaces need to tell "fix the highlighted part and resubmit" apart from a flat refusal. A
-  `.NET` caller reading `decision` instead of `Action` must treat `"revise"` as a rejection.
-* `legacy_decision`: the pipeline's own word — `"allow"` | `"revise"` | `"reject"` — always.
-  This is what the audit log stores, so a log row and a response say it differently by design.
-* `status`: the request's lifecycle, `"completed"` or `"pending"` — *not* the verdict.
-* `Note`: rejection explanation or policy instruction (or `null` when approved).
+
+| Key | Value |
+|---|---|
+| `Action` | `"approved"` \| `"reject"` — and `"pending"` on the async `202`. **Branch on this one.** |
+| `Decision`, `action`, `verdict`, `approval_status` | the same verdict under the names different callers look for. All four always agree with `Action`. |
+| `decision` | `"approved"` \| `"revise"` \| `"reject"`. Not a second name for `Action`: an allow becomes `"approved"`, but a **`"revise"` stays `"revise"`**, because the author-facing surfaces must tell "fix the highlighted part and resubmit" apart from a flat refusal. A caller reading `decision` must treat `"revise"` as a refusal. |
+| `legacy_decision` | the pipeline's own word — `"allow"` \| `"revise"` \| `"reject"` — always. This is what the audit log stores, so a log row and the response that produced it say the verdict differently by design. |
+| `status` | the request's lifecycle, `"completed"` or `"pending"` — *not* the verdict. |
+| `Note` | the author-facing reason, for a remark column. **Policy wording** from `config/feedback_messages.yaml`, never the submitted text — that is only ever in `Data.content`. `null` when approved. |
 
 There is no `Status` key. `Action` is the verdict; `status` (lower case) is the lifecycle.
+(`Status` *is* a real company field, but on `AdminJobActionDTO`, where the Job surface uses
+`Status` + `Note` where the article surfaces use `Action` + `Note`.)
 
-#### Error Envelope
+#### Errors — one shape, at last
 
-Every error response, on the moderation routes and the admin routes alike, now carries the
-`ApiResponse` failure fields — `Success: false`, `Message`, `Type: "error"`, `Data: null` and a
-structured `Error` object. Branch on those and the two families are finally the same shape:
+A refusal is the same envelope with `Success: false`, and the machine-readable detail in
+`Data`:
 
 ```json
 {
   "Success": false,
   "Message": "unknown 'content_type'",
-  "Type": "error",
-  "Data": null,
-  "Error": {
+  "Data": {
     "code": "invalid_content_type",
     "message": "unknown 'content_type'",
     "allowed": ["business_profile", "product_listing", "..."]
-  },
-  "error": {
-    "code": "invalid_content_type",
-    "message": "unknown 'content_type'"
   }
 }
 ```
 
-`Error` is the one to read: `Error.code` is stable and machine-readable on every route.
+**`Data.code` is the stable name of the refusal** — branch on it, not on `Message`. Extra keys
+(`allowed`, `limit`, `request_id`, `kind`, `text_readable`, `conflicts`) appear inside `Data`
+per error, where they help the caller recover.
 
-**The legacy `error` key is still the old two shapes, and that has not changed.** It is kept
-only so clients written before the envelope keep working, and they disagree:
+This replaces the two incompatible error shapes this API used to have, where `error` was a
+bare string from `_err()` on the admin routes and an object from `_error()` on the moderation
+routes — so that `GET /v1/admin/moderation-levels` answered `401` in one shape and its own
+`404 no_such_surface` in the other. **There is no top-level `error` key any more.** A client
+still reading `body.error` or `body.error.code` needs updating to `body.Data.code`.
 
-| Where | Legacy `error` |
-|---|---|
-| `_error()` in `app/api.py` — `/v1/moderate*`, `/health`, `/ready`, `/docs`, and the own errors of `/v1/admin/moderation-levels/*` and `/v1/admin/model/reload` | the **object** above, `{code, message, ...}` |
-| `_err()` in `app/admin_auth.py`, `app/admin_images.py`, `app/admin_policy.py` — and **any `401`/`403`/admin-disabled `404` from `check_admin()`, including on the routes in the row above** | the code as a **bare string**, with `message` as a sibling key |
+A refusal of *content* is not an error: `Data.Action: "reject"` comes back `200` with
+`Success: true`. The request succeeded; the content was refused.
 
-So `GET /v1/admin/moderation-levels` still answers `401` with `"error": "unauthorized"` and its
-own `404 no_such_surface` with `"error": {"code": ...}` — one endpoint, both legacy shapes. New
-code should read `Error.code` and ignore `error` entirely; old code reading `error` needs the
-defensive form it always needed:
+Unhandled Werkzeug `HTTPException`s are funnelled into the same envelope by `_http_error`, so
+a 404 or a 405 never returns Flask's HTML error page.
 
-```js
-const code = typeof body.error === "string" ? body.error : body.error?.code;
-```
+#### What is *not* enveloped
 
-Unhandled Werkzeug `HTTPException`s are funnelled into the `app/api.py` envelope by
-`_http_error`, so a 404 or a 405 never returns Flask's HTML error page.
+The **admin endpoints' success responses** are unchanged and return their payload bare. They
+are the dashboard's own API, called by `admin.js` from the same origin and not by the .NET
+server, so wrapping them would be churn with no consumer. Their *errors* do use the envelope
+above, like everything else.
 
-### Authentication — three tiers
+### Authentication — four tiers
 
 | Tier | Endpoints | How |
 |---|---|---|
-| **Open** | `/v1/moderate*`, `/health`, `/ready`, `/demo`, `/articles` | none |
+| **Service** | `/v1/moderate`, `/v1/moderate/media`, `/v1/moderate/{request_id}` | `Authorization: Bearer <SERVICE_TOKEN>` — **or open, if `SERVICE_TOKEN` is unset** |
+| **Open** | `/health`, `/ready`, `/demo`, `/articles` | none |
 | **Admin** | most of `/v1/admin/*` | session cookie **or** `X-Admin-Token` |
 | **Token only** | `POST /v1/admin/model/reload` | `X-Admin-Token` only |
+
+#### The service tier
+
+This service runs on its own AI/ML host, beside the models rather than beside the caller, and
+the main .NET server reaches it over the network. So the submission endpoints take a bearer
+token in `Authorization` — declared exactly as the company API declares its own `Bearer`
+scheme (an `apiKey` in the `Authorization` header, not HTTP `bearer`), so the calling side
+reuses the handler it already has.
+
+The status lookup is in this tier too: it hands back a whole moderation result to anyone who
+can guess a request id. The two probes are deliberately left open so a load balancer can reach
+them without a secret.
+
+> ⚠️ **With `SERVICE_TOKEN` unset, these endpoints are open.** Local checkouts and the test
+> suite depend on that, so it stays — but it is a hole to close on deployment, not a default
+> to lean on. From outside, a deployment that forgot the token looks exactly like one that did
+> not, so `GET /ready` reports `service_auth` as `enforced` or `open`. **Assert `enforced` in
+> your deploy check.**
+
+Enforced in `_require_service_token()` (`app/api.py`), from the `before_request` hook that
+already resolves the caller's address — so a new endpoint added to `SERVICE_ENDPOINTS` is
+covered without remembering a decorator. The comparison is `hmac.compare_digest`, and a
+refusal says only `unauthorized`: which half of the header was wrong is the one thing worth
+knowing to someone guessing.
 
 `check_admin()` in `app/admin_auth.py` implements the admin tier:
 

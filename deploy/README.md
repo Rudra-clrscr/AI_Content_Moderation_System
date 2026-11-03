@@ -205,8 +205,20 @@ It does **not** write `.env` and will not touch an existing one. Create
 
 ```
 ADMIN_TOKEN=...
+SERVICE_TOKEN=...
 DB_SERVER=...   DB_NAME=...   DB_USER=...   DB_PASSWORD=...
 ```
+
+`SERVICE_TOKEN` is what the main .NET server sends as `Authorization: Bearer <token>`. This
+service runs on its own AI/ML host now, so the submission endpoints are no longer protected by
+being unreachable from anywhere else. **Omit it and they are open** — that is the default the
+test suite needs, not a safe one. Verify it took, because nothing else will tell you:
+
+```
+curl -s https://<host>/ready | jq -r .Data.service_auth    # must print: enforced
+```
+
+Keep the host on a private network as well. The token is the second layer, not the only one.
 
 `chmod 600` it. Secrets stay out of the systemd unit on purpose: unit files are world-readable
 and `systemctl show` prints `Environment=` back to any user, which is why the unit uses
