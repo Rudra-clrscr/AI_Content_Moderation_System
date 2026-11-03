@@ -12,7 +12,7 @@ from app import client_address
 from app.gate import GateMatch, GateResult
 from app.media import MediaError, detect_kind, read_image
 from app.model import ModelNotReady
-from app.pipeline import ContentType, ModerationRequest, Stage
+from app.pipeline import SCHEMA_VERSION, ContentType, ModerationRequest, Stage
 from app.routing import Decision, Thresholds
 
 log = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ def _api_response(result: dict, message: str | None = None, status: int = 200, e
 # and a hardcoded prefix that does not match turns every check below into a silent no-op -
 # blocking that accepts every submission and reports nothing wrong.
 SUBMISSION_ENDPOINTS = {f"{bp.name}.{fn}" for fn in
-                        ("moderate", "moderate_media", "transcribe_media_file")}
+                        ("moderate", "moderate_media", "moderate_unified", "transcribe_media_file")}
 
 # What the bearer token gates: the submissions, plus the status lookup, which hands back a
 # whole moderation result to anyone who can guess a request id. NOT the probes - a load
@@ -265,53 +265,33 @@ def _parse_request() -> ModerationRequest | tuple:
     return ModerationRequest(content, content_type, None if content_id is None else str(content_id))
 
 
-def _moderate(req: ModerationRequest, extra: dict | None = None,
-              thresholds: "Thresholds | None" = None):
-    """Gate, then queue or score. Shared by the JSON and the upload endpoints, so writing read
-    off a picture is judged by exactly the same rules. `extra` is merged into the response.
-
-    `thresholds` raises the bar for one request - used for text OCR'd out of a picture, which
-    is noisier than anything a member types. The gate is unaffected either way: a rule either
-    matched or it didn't, and a scam phrase in a photograph is still a scam phrase.
-    """
+def _execute_moderation(req: ModerationRequest,
+                        thresholds: "Thresholds | None" = None) -> tuple[dict | None, tuple | None]:
     svc = _svc()
-    # The admin's setting for this surface: whether it is moderated at all, and at what bar.
     policy = svc.levels.for_type(req.content_type.value)
     if not policy.enabled:
-        # Nothing runs - not the model, not the gate. Published and recorded as unchecked.
         result = {**svc.pipeline.not_moderated_result(req), "moderation": policy.as_dict()}
         _emit(result)
-        return _api_response(result, extra=extra)
+        return result, None
 
-    # An explicit override wins over the feature's level. The only caller that passes one is
-    # text read out of a picture, where the higher bar is a correctness measure against OCR
-    # noise rather than a policy preference - applying a `strict` feature bar to word-salad
-    # would bring back exactly the false positives that override exists to prevent.
     effective = thresholds or policy.thresholds
     pipeline = svc.pipeline if effective is None else svc.pipeline.with_thresholds(effective)
 
     def stamp(result: dict) -> dict:
-        """Record the level this was judged at ON the result, not merely in the response.
-
-        The sink is what anyone reads months later to ask why something was published. If an
-        admin had set this surface to `lenient`, or switched it off, that is the first thing
-        they need to see - and merging it into the HTTP body alone would leave the audit row
-        silent about it.
-        """
         return {**result, "moderation": policy.as_dict()}
-    # Layer 1 always runs inline — it's cheap, and a block needs no model or queue.
+
     gate, gate_ms = pipeline.run_gate(req)
     if gate.blocked:
         result = stamp(pipeline.gate_only_result(req, gate, gate_ms))
         _emit(result)
-        return _api_response(result, extra=extra)
+        return result, None
 
     if svc.settings.mode == "async":
         try:
             svc.enqueue(req)
         except Exception:
             log.exception("enqueue failed for request %s", req.request_id)
-            return _error(503, "queue_unavailable", "moderation queue unavailable, retry later")
+            return None, _error(503, "queue_unavailable", "moderation queue unavailable, retry later")
         async_data = {
             "request_id": req.request_id,
             "status": "pending",
@@ -320,21 +300,28 @@ def _moderate(req: ModerationRequest, extra: dict | None = None,
             "content_type": req.content_type.value,
             "status_url": f"/v1/moderate/{req.request_id}",
             "moderation": policy.as_dict(),
-            **(extra or {}),
         }
-        return jsonify(_envelope(async_data,
-                                 "Content queued for asynchronous moderation.")), 202
+        return None, (jsonify(_envelope(async_data,
+                                        "Content queued for asynchronous moderation.")), 202)
 
     try:
         result = pipeline.moderate(req, gate=gate, gate_ms=gate_ms)
     except ModelNotReady as exc:
-        return _error(503, "model_not_ready", str(exc))
+        return None, _error(503, "model_not_ready", str(exc))
     except Exception:
         log.exception("inference failed for request %s", req.request_id)
-        return _error(500, "inference_failed", "model inference failed", request_id=req.request_id)
+        return None, _error(500, "inference_failed", "model inference failed", request_id=req.request_id)
     result = stamp(result)
     _emit(result)
-    return _api_response(result, extra=extra)
+    return result, None
+
+
+def _moderate(req: ModerationRequest, extra: dict | None = None,
+              thresholds: "Thresholds | None" = None):
+    res, err = _execute_moderation(req, thresholds)
+    if err is not None:
+        return err
+    return _api_response(res, extra=extra)
 
 
 @bp.post("/v1/moderate")
@@ -343,6 +330,103 @@ def moderate():
     if isinstance(req, tuple):
         return req
     return _moderate(req)
+
+
+def _execute_media_moderation(upload, content_type: ContentType,
+                             content_id: str | None) -> tuple[dict | None, tuple | None]:
+    svc = _svc()
+    media = svc.settings.media
+
+    if upload is None or not upload.filename:
+        return None, _error(400, "invalid_file", "attach a file as the 'file' field of a multipart form")
+
+    try:
+        upload.seek(0)
+    except Exception:
+        pass
+
+    data = upload.read(media.max_bytes + 1)
+    if len(data) > media.max_bytes:
+        return None, _error(413, "media_too_large", f"the file is larger than {media.max_bytes} bytes",
+                            limit=media.max_bytes)
+
+    kind = detect_kind(data, upload.filename)
+    block = {"filename": upload.filename, "kind": kind}
+
+    if kind == "pdf":
+        if not media.allow_unchecked_pdf:
+            return None, _error(422, "media_not_checkable",
+                                "PDFs cannot be checked by this service at the moment, so this one "
+                                "cannot be published. Paste the text, or attach an image instead.",
+                                kind=kind)
+        block.update(text_found=False, visual_content_checked=False, checked=False)
+        allowed = _allowed_without_text(upload.filename, content_type, content_id)
+        return {**allowed, "media": block}, None
+
+    elif kind == "image":
+        try:
+            seen = read_image(data, svc.settings.ocr, media, svc.settings.visual)
+        except MediaError as exc:
+            return None, _error(413 if exc.code == "media_too_large" else 422, exc.code, exc.message, **exc.extra)
+        read, looked = seen.text, seen.visual
+        text = read.text
+
+        block.update(text_found=read.has_text, ocr_confidence=round(read.confidence, 4),
+                     text_readable=read.readable, **looked.as_dict())
+        extra = {"media": block}
+        if looked.failed:
+            return None, _error(503, "media_not_checkable",
+                                "this image could not be checked just now. Please try again in a "
+                                "moment.", kind=kind)
+        if svc.settings.visual.decides_reject(looked):
+            res = _build_visual_reject_result(upload.filename, looked, content_type, content_id, extra)
+            return res, None
+        if read.failed:
+            return None, _error(503, "media_not_checkable",
+                                "this image could not be checked just now. Please try again in a "
+                                "moment.", kind=kind)
+        if read.has_text and not read.readable:
+            seen_and_clear = media.allow_unreadable_image_when_seen and looked.checked
+            if not (media.allow_unreadable_image or seen_and_clear):
+                return None, _error(422, "media_unreadable",
+                                    "there is writing in this image that could not be read, so it "
+                                    "cannot be checked. Upload a clearer picture, or put the words "
+                                    "in the post itself.", kind=kind, text_readable=False)
+            block.update(checked=False)
+            allowed = _allowed_without_text(upload.filename, content_type, content_id)
+            return {**allowed, "media": block}, None
+        if not text.strip():
+            allowed = _allowed_without_text(upload.filename, content_type, content_id)
+            return {**allowed, "media": block}, None
+
+    elif kind == "video":
+        if not media.allow_unchecked_video:
+            return None, _error(422, "media_not_checkable",
+                                "video cannot be checked by this service, so it cannot be published. "
+                                "Upload a still image instead.", kind=kind)
+        block.update(text_found=False, visual_content_checked=False, checked=False)
+        allowed = _allowed_without_text(upload.filename, content_type, content_id)
+        return {**allowed, "media": block}, None
+
+    else:
+        return None, _error(422, "media_unsupported",
+                            "this file type cannot be checked. Attach an image, a video or a PDF.",
+                            kind=kind)
+
+    char_limit = svc.settings.max_chars
+    if len(text) > char_limit:
+        return None, _error(413, "content_too_long",
+                            f"the file's text is {len(text)} characters, over the "
+                            f"{char_limit} character limit")
+
+    thresholds = None
+    if kind == "image":
+        thresholds = Thresholds(allow_max=media.ocr_text_reject_min,
+                                reject_min=media.ocr_text_reject_min)
+    res, err = _execute_moderation(ModerationRequest(text, content_type, content_id), thresholds)
+    if err is not None:
+        return None, err
+    return {**res, "media": block}, None
 
 
 @bp.post("/v1/moderate/media")
@@ -366,9 +450,6 @@ def moderate_media():
         Whisper dependency, so `media.allow_unchecked_video` decides: refuse it, or publish it
         and record `checked: false` so nothing reads the allow as "we looked at it".
     """
-    svc = _svc()
-    media = svc.settings.media
-
     upload = request.files.get("file")
     if upload is None or not upload.filename:
         return _error(400, "invalid_file", "attach a file as the 'file' field of a multipart form")
@@ -379,192 +460,237 @@ def moderate_media():
         return _error(400, "invalid_content_type", "unknown 'content_type'", allowed=_CONTENT_TYPES)
     content_id = request.form.get("content_id") or None
 
-    data = upload.read(media.max_bytes + 1)
-    if len(data) > media.max_bytes:
-        return _error(413, "media_too_large", f"the file is larger than {media.max_bytes} bytes",
-                      limit=media.max_bytes)
-
-    kind = detect_kind(data, upload.filename)
-    block = {"filename": upload.filename, "kind": kind}
-
-    if kind == "pdf":
-        # NOTHING READS A PDF ANY MORE. Extraction, its OCR of scanned pages and the per-page
-        # visual check were taken out while the scanned path is reworked: a scan of an ordinary
-        # business document was being refused by an exemplar that matches flat, document-like
-        # pages, and the refusal was logged against the wrong rule. See
-        # private_notes/pdf_on_hold/ on the machines that have it, and the commit that removed
-        # app/pdf.py.
-        #
-        # What is left is the same rule video follows - publish it and say plainly that it was
-        # not checked, or refuse it. Shipped `true`, which is FAIL-OPEN and deliberate: a scam
-        # brochure or a scanned threat publishes unread. `checked: false` is what keeps the
-        # audit row honest about that, so nothing downstream may read the allow as "we looked".
-        if not media.allow_unchecked_pdf:
-            return _error(422, "media_not_checkable",
-                          "PDFs cannot be checked by this service at the moment, so this one "
-                          "cannot be published. Paste the text, or attach an image instead.",
-                          kind=kind)
-        block.update(text_found=False, visual_content_checked=False, checked=False)
-        return _api_response(_allowed_without_text(upload.filename, content_type, content_id), extra={"media": block})
-
-    elif kind == "image":
-        try:
-            seen = read_image(data, svc.settings.ocr, media, svc.settings.visual)
-        except MediaError as exc:
-            return _error(413 if exc.code == "media_too_large" else 422, exc.code, exc.message, **exc.extra)
-        read, looked = seen.text, seen.visual
-        text = read.text
-        # A photograph with no writing on it is ordinary, so no text is not a refusal here.
-        # `visual_content_checked` then carries the weight: true means the picture itself was
-        # scored, false means nobody looked at it and the caller must not read it as clean.
-        block.update(text_found=read.has_text, ocr_confidence=round(read.confidence, 4),
-                     text_readable=read.readable, **looked.as_dict())
-        extra = {"media": block}
-        if looked.failed:
-            # The visual model is present and threw. Same rule as OCR falling over: refuse,
-            # because publishing a picture nothing looked at is the hole this check exists to
-            # close, and the author did nothing wrong so offer a retry.
-            return _error(503, "media_not_checkable",
-                          "this image could not be checked just now. Please try again in a "
-                          "moment.", kind=kind)
-        if svc.settings.visual.decides_reject(looked):
-            # The picture itself breaks policy, whatever the words say. This is a decision about
-            # content, not an upload error, so it goes through the pipeline as a gate block:
-            # same feedback wording, same audit row, same sink as a blocked sentence.
-            return _visual_reject(upload.filename, looked, content_type, content_id, extra)
-        if read.failed:
-            # The checker broke, which is ours to fix and nothing the author did. Still refused:
-            # an image nothing looked at must not publish as clean.
-            return _error(503, "media_not_checkable",
-                          "this image could not be checked just now. Please try again in a "
-                          "moment.", kind=kind)
-        if read.has_text and not read.readable:
-            # There IS writing here and OCR could not read it, so its WORDS are unchecked.
-            # Answering "allow" is how a Devanagari threat once published with a clean result.
-            #
-            # What has changed is that the picture itself is no longer unexamined: when the
-            # visual check ran and cleared it, the only thing left unknown is the writing, and
-            # refusing on that alone was turning away 13% of real listings over logos, number
-            # plates and watermarks. The record still says checked: false - this is a narrower
-            # claim ("we looked at it, we could not read it"), never a clean result.
-            #
-            # "CLEARED" IS THE TEST THAT ALREADY RAN. decides_reject said no three lines above
-            # - that IS "we looked at it and it is fine". The extra `not looked.unsafe` that
-            # used to stand beside this re-derived a far stricter one: VisualResult.unsafe is
-            # true whenever the BEST-MATCHING label happens to be an unsafe one, at ANY
-            # confidence, so it fires on a blank white image (top label `unrest` at 0.07) and,
-            # measured over the 3,496 stored pictures, on 9.5% of the ones filed under `safe`.
-            # The rescue was therefore switched off for about one picture in ten - the very
-            # listings it was written for - and they were refused with a message blaming their
-            # writing, which was not what had stopped them.
-            seen_and_clear = media.allow_unreadable_image_when_seen and looked.checked
-            if not (media.allow_unreadable_image or seen_and_clear):
-                return _error(422, "media_unreadable",
-                              "there is writing in this image that could not be read, so it "
-                              "cannot be checked. Upload a clearer picture, or put the words "
-                              "in the post itself.", kind=kind, text_readable=False)
-            block.update(checked=False)
-            return _api_response(_allowed_without_text(upload.filename, content_type, content_id), extra=extra)
-        if not text.strip():
-            return _api_response(_allowed_without_text(upload.filename, content_type, content_id), extra=extra)
-
-    elif kind == "video":
-        # NOTHING LISTENS TO A VIDEO ANY MORE. The audio check and its Whisper dependency were
-        # removed; what is left is the rule that predated them, media.allow_unchecked_video -
-        # publish it and say plainly that it was not checked, or refuse it. The code default
-        # is to refuse, because accepting an unchecked video is a policy choice and not a
-        # sensible default for a moderation service.
-        if not media.allow_unchecked_video:
-            return _error(422, "media_not_checkable",
-                          "video cannot be checked by this service, so it cannot be published. "
-                          "Upload a still image instead.", kind=kind)
-        block.update(text_found=False, visual_content_checked=False, checked=False)
-        return _api_response(_allowed_without_text(upload.filename, content_type, content_id), extra={"media": block})
-
-    else:
-        return _error(422, "media_unsupported",
-                      "this file type cannot be checked. Attach an image, a video or a PDF.",
-                      kind=kind)
-
-    char_limit = svc.settings.max_chars
-    if len(text) > char_limit:
-        return _error(413, "content_too_long",
-                      f"the file's text is {len(text)} characters, over the "
-                      f"{char_limit} character limit")
-
-    # Words read off a photograph are held to a higher bar than words somebody typed. OCR of a
-    # shopfront comes back as word-salad and the model, trained on prose, scores that noise
-    # unreliably - it put four ordinary BONC listings in the reject band. Measured: legitimate
-    # signage 0.78-0.976, scam flyers 0.9997, so the two still separate.
-    # One boundary, not two. A "revise" verdict asks the author to edit the highlighted part,
-    # which is meaningless for words baked into a photograph - their only remedies are to
-    # replace the picture or leave it. So image text is allowed below the bar and refused at or
-    # above it, with nothing in between.
-    thresholds = None
-    if kind == "image":
-        thresholds = Thresholds(allow_max=media.ocr_text_reject_min,
-                                reject_min=media.ocr_text_reject_min)
-    return _moderate(ModerationRequest(text, content_type, content_id), extra, thresholds)
+    res, err = _execute_media_moderation(upload, content_type, content_id)
+    if err is not None:
+        return err
+    return _api_response(res)
 
 
-def _visual_reject(filename: str, looked, content_type: ContentType,
-                   content_id: str | None, extra: dict, page: int | None = None):
-    """A refusal decided by the picture rather than by any text.
+@bp.post("/v1/moderate/unified")
+def moderate_unified():
+    """Unified moderation endpoint: intelligently moderates text, image/media, or both.
 
-    Built as a gate block so it is indistinguishable downstream from a blocked phrase: it gets
-    the configured feedback wording for its category, an audit row through the usual sink, and
-    the same shape of result a caller already handles. The "content" is the filename, because
-    there is no text to quote - what was wrong is in `media.visual`.
-
-    THERE IS NO `rule_id` ARGUMENT, AND THERE MUST NOT BE ONE. There used to be, defaulting to
-    "" and guarded by `if not rule_id:`, so a caller could supply its own and skip the naming
-    below. The PDF path did exactly that - it passed `f"visual.{worst.label}"` - and so a
-    scanned page refused by an exemplar was logged as `visual.safe`: the identical bug the
-    comment below describes being fixed for images, reintroduced one container along by the
-    one route that could opt out. The caller cannot opt out any more. A caller that wants a
-    different name wants `refused_by` to be wrong, which is a reason to fix `refused_by`.
+    Accepts multipart/form-data or application/json.
+      - If only text is provided: runs ONLY text moderation (DeBERTa pipeline).
+      - If only image/media is provided: runs ONLY image moderation (visual check / OCR).
+      - If both are provided: runs BOTH moderation checks and combines the results.
+        If either check rejects, the final combined decision is reject.
     """
+    body = request.get_json(silent=True) or {}
+    form = request.form or {}
+    files = request.files or {}
+
+    # Extract text content
+    has_text_field = False
+    raw_content = None
+
+    if "content" in form:
+        has_text_field = True
+        raw_content = form.get("content")
+    elif "text" in form:
+        has_text_field = True
+        raw_content = form.get("text")
+    elif "content" in body:
+        has_text_field = True
+        raw_content = body.get("content")
+    elif "text" in body:
+        has_text_field = True
+        raw_content = body.get("text")
+
+    # Extract upload file
+    upload = files.get("file") or files.get("image") or files.get("media")
+    has_file = (upload is not None and bool(upload.filename))
+
+    text_provided = False
+    content = None
+    if has_text_field:
+        if not isinstance(raw_content, str) or not raw_content.strip():
+            return _error(400, "invalid_content", "'content' must be a non-empty string")
+        max_chars = _svc().settings.max_chars
+        if len(raw_content) > max_chars:
+            return _error(413, "content_too_long", f"'content' exceeds {max_chars} characters")
+        text_provided = True
+        content = raw_content
+
+    if not text_provided and not has_file:
+        return _error(400, "invalid_request", "At least one of 'content' (text) or 'file' (image/media) must be provided")
+
+    raw_ct = form.get("content_type") or body.get("content_type")
+    if raw_ct:
+        try:
+            content_type = ContentType(raw_ct)
+        except ValueError:
+            return _error(400, "invalid_content_type", "unknown 'content_type'", allowed=_CONTENT_TYPES)
+    else:
+        content_type = ContentType.ARTICLE
+
+    raw_cid = form.get("content_id") if "content_id" in form else body.get("content_id")
+    if raw_cid is not None:
+        if not isinstance(raw_cid, (str, int)):
+            return _error(400, "invalid_content_id", "'content_id' must be a string or integer")
+        content_id = str(raw_cid)
+    else:
+        content_id = None
+
+    # Case 1: Only text is provided
+    if text_provided and not has_file:
+        req = ModerationRequest(content, content_type, content_id)
+        res, err = _execute_moderation(req)
+        if err is not None:
+            return err
+        text_data = _format_moderation_data(res)
+        checks = {
+            "text": {
+                "executed": True,
+                "decision": text_data.get("decision"),
+                "result": text_data,
+            },
+            "image": {
+                "executed": False,
+                "decision": None,
+                "result": None,
+            },
+        }
+        unified_data = dict(text_data)
+        unified_data["checks"] = checks
+        msg = _approved_message(unified_data) if unified_data["Action"] == "approved" else (
+            unified_data.get("Note") or "Content rejected by moderation policy."
+        )
+        return jsonify(_envelope(unified_data, msg)), 200
+
+    # Case 2: Only image is provided
+    if has_file and not text_provided:
+        res, err = _execute_media_moderation(upload, content_type, content_id)
+        if err is not None:
+            return err
+        image_data = _format_moderation_data(res)
+        checks = {
+            "text": {
+                "executed": False,
+                "decision": None,
+                "result": None,
+            },
+            "image": {
+                "executed": True,
+                "decision": image_data.get("decision"),
+                "result": image_data,
+            },
+        }
+        unified_data = dict(image_data)
+        unified_data["checks"] = checks
+        msg = _approved_message(unified_data) if unified_data["Action"] == "approved" else (
+            image_data.get("Note") or "Content rejected by moderation policy."
+        )
+        return jsonify(_envelope(unified_data, msg)), 200
+
+    # Case 3: Both text and image are provided
+    req = ModerationRequest(content, content_type, content_id)
+    text_res, text_err = _execute_moderation(req)
+    if text_err is not None:
+        return text_err
+
+    image_res, image_err = _execute_media_moderation(upload, content_type, content_id)
+    if image_err is not None:
+        return image_err
+
+    text_data = _format_moderation_data(text_res)
+    image_data = _format_moderation_data(image_res)
+
+    text_dec = text_data.get("decision", "approved")
+    image_dec = image_data.get("decision", "approved")
+    text_raw = text_data.get("legacy_decision", text_dec)
+    image_raw = image_data.get("legacy_decision", image_dec)
+
+    text_rejected = (text_dec == "reject" or text_raw == "reject")
+    image_rejected = (image_dec == "reject" or image_raw == "reject")
+    text_revise = (text_dec == "revise" or text_raw == "revise")
+    image_revise = (image_dec == "revise" or image_raw == "revise")
+
+    if text_rejected or image_rejected:
+        final_decision = "reject"
+        final_action = "reject"
+        final_legacy = "reject"
+    elif text_revise or image_revise:
+        final_decision = "revise"
+        final_action = "reject"
+        final_legacy = "revise"
+    else:
+        final_decision = "approved"
+        final_action = "approved"
+        final_legacy = "allow"
+
+    notes = []
+    if text_rejected or text_revise:
+        notes.append(text_data.get("Note") or "Text violates moderation policy.")
+    if image_rejected or image_revise:
+        notes.append(image_data.get("Note") or "Image violates moderation policy.")
+    note = " | ".join(notes) if notes else None
+
+    gate_matches = (text_data.get("gate_matches") or []) + (image_data.get("gate_matches") or [])
+    scores = [s for s in (text_data.get("risk_score"), image_data.get("risk_score")) if s is not None]
+    combined_risk = max(scores) if scores else None
+
+    checks = {
+        "text": {
+            "executed": True,
+            "decision": text_dec,
+            "result": text_data,
+        },
+        "image": {
+            "executed": True,
+            "decision": image_dec,
+            "result": image_data,
+        },
+    }
+
+    unified_data = {
+        "schema_version": SCHEMA_VERSION,
+        "request_id": text_data.get("request_id") or image_data.get("request_id"),
+        "status": "completed",
+        "content_id": content_id,
+        "content_type": content_type.value,
+        "content": content,
+        "decision": final_decision,
+        "Action": final_action,
+        "Decision": final_action,
+        "action": final_action,
+        "verdict": final_action,
+        "approval_status": final_action,
+        "legacy_decision": final_legacy,
+        "risk_score": combined_risk,
+        "media": image_data.get("media"),
+        "gate_matches": gate_matches,
+        "feedback": text_data.get("feedback") or image_data.get("feedback"),
+        "Note": note,
+        "checks": checks,
+        "moderation": text_data.get("moderation") or image_data.get("moderation"),
+        "decided_at": text_data.get("decided_at") or image_data.get("decided_at"),
+    }
+
+    msg = "Content approved for publication." if final_action == "approved" else (
+        note or "Content rejected by moderation policy."
+    )
+    return jsonify(_envelope(unified_data, msg)), 200
+
+
+def _build_visual_reject_result(filename: str, looked, content_type: ContentType,
+                               content_id: str | None, extra: dict, page: int | None = None) -> dict:
     svc = _svc()
-    # Name the page when there is one, so the author is told where to look in a 40-page scan.
     where = f"[{filename}]" if page is None else f"[{filename}, page {page}]"
     req = ModerationRequest(where, content_type, content_id)
-    # Name the channel that actually refused, not the best-matching label. An exemplar
-    # refusal was being logged as `visual.safe` - the label with the highest score, which for
-    # a cloud refused by a rainbow exemplar was literally `safe` at 0.46. An audit row saying
-    # a picture was blocked by the safe rule is worse than no audit row: it sends whoever
-    # reads it to the one place the cause is not.
-    # Defensive because `looked` and the visual check are both injectable: a stub scorer in a
-    # test, or an older bundle's result object, may carry neither. Naming the cause is a
-    # diagnostic, and a diagnostic that can break the refusal it describes is worse than none.
     try:
         cause = looked.refused_by(svc.settings.visual.config)
     except Exception:
         cause = None
     if cause == "exemplar":
         m = getattr(looked, "exemplar_match", None) or {}
-        # The image id is what makes this actionable: it is the row to go and change.
         rule_id = f"visual.exemplar#{m.get('id')}" if m.get("id") else "visual.exemplar"
     elif cause == "probe":
         rule_id = f"visual.probe.{looked.label}"
     else:
         rule_id = f"visual.{looked.label}"
-    # The exemplar's OWN category, not the best-matching label's. A cloud refused by a rainbow
-    # exemplar was being filed under `weapons`, because that is what the prompts happened to
-    # rank highest once the probe had spoken - a category with no bearing on why it was
-    # refused, and the one an operator would chase first.
     category = getattr(looked, "category", "")
     if cause == "exemplar":
-        # The marked picture's category is its DATASET folder - `physique`, `minor`, `unrest`,
-        # and also `toy`, `cloud` and `safe` - which is a different vocabulary from the one the
-        # policy publishes. Untranslated it reached the author verbatim: "...community policies
-        # on physique" where the policy would have said "personal physique photos", and for a
-        # mark on a picture from the allowed set, "...on safe". The folder names ARE the
-        # policy's label names, so the policy's own label -> category map is the translation.
-        #
-        # A folder that names no policy leaves this BLANK on purpose, and the author gets the
-        # generic wording. The alternative is the best-matching label's category - which is
-        # the very thing the note above this was written about, a cloud refused by a rainbow
-        # exemplar and reported "on weapons".
         marked = (getattr(looked, "exemplar_match", None) or {}).get("category") or ""
         try:
             category = svc.settings.visual.policy_category(marked)
@@ -574,7 +700,14 @@ def _visual_reject(filename: str, looked, content_type: ContentType,
     match = GateMatch(rule_id=rule_id, category=category, action="block", spans=())
     result = svc.pipeline.gate_only_result(req, GateResult((match,)), 0.0)
     _emit(result)
-    return _api_response(result, extra=extra)
+    return {**result, **(extra or {})}
+
+
+def _visual_reject(filename: str, looked, content_type: ContentType,
+                   content_id: str | None, extra: dict, page: int | None = None):
+    res = _build_visual_reject_result(filename, looked, content_type, content_id, extra, page)
+    return _api_response(res)
+
 
 
 def _allowed_without_text(filename: str, content_type: ContentType, content_id: str | None) -> dict:

@@ -131,7 +131,7 @@ above, like everything else.
 
 | Tier | Endpoints | How |
 |---|---|---|
-| **Service** | `/v1/moderate`, `/v1/moderate/media`, `/v1/moderate/{request_id}` | `Authorization: Bearer <SERVICE_TOKEN>` — **or open, if `SERVICE_TOKEN` is unset** |
+| **Service** | `/v1/moderate`, `/v1/moderate/media`, `/v1/moderate/unified`, `/v1/moderate/{request_id}` | `Authorization: Bearer <SERVICE_TOKEN>` — **or open, if `SERVICE_TOKEN` is unset** |
 | **Open** | `/health`, `/ready`, `/demo`, `/articles` | none |
 | **Admin** | most of `/v1/admin/*` | session cookie **or** `X-Admin-Token` |
 | **Token only** | `POST /v1/admin/model/reload` | `X-Admin-Token` only |
@@ -665,6 +665,47 @@ Present on `/v1/moderate/media` responses.
 > **`visual_content_checked: false` is not a clean result.** It means the visual model was
 > off, missing, or could not run. Treat it as "unexamined", and decide by policy whether
 > unexamined media may publish.
+
+---
+
+## `POST /v1/moderate/unified`
+
+**Auth:** Bearer token when `SERVICE_TOKEN` is set; open when unset.
+**Input format:** `multipart/form-data` or `application/json`.
+
+Combines text moderation (DeBERTa model pipeline) and image/media moderation into a single unified wrapper endpoint.
+Intelligently decides which model to execute based on the received inputs:
+
+1. **Case 1: Only text is provided** (`content` or `text`)
+   - Calls **only** the DeBERTa model pipeline.
+   - Does **not** call the image moderation model.
+   - `checks.text.executed: true`, `checks.image.executed: false`.
+2. **Case 2: Only image/media is provided** (`file`, `image`, or `media`)
+   - Calls **only** the image moderation model.
+   - Does **not** call DeBERTa.
+   - `checks.image.executed: true`, `checks.text.executed: false`.
+3. **Case 3: Both text and image/media are provided**
+   - Calls **both** moderation services.
+   - Combines results into a unified response with overall `Action` and `decision`.
+   - If either moderation result is unsafe or rejected, the overall decision is `reject`.
+   - `checks.text.executed: true`, `checks.image.executed: true`.
+
+### Request parameters
+
+| Field | Source | Required | Notes |
+|---|---|---|---|
+| `content` | form / JSON | Optional* | Text content to moderate. (*At least one of `content` or `file` required). |
+| `file` | multipart file | Optional* | Uploaded media file (`image`, `pdf`, `video`). |
+| `content_type` | form / JSON | No (default `article`) | Surface name (`article`, `post`, `product_listing`, etc.). |
+| `content_id` | form / JSON | No | Identifier string or integer. |
+
+### Response structure
+
+Follows the standard `ApiResponse<T>` envelope. Inside `Data`:
+- `checks.text`: `{ "executed": bool, "decision": string | null, "result": object | null }`
+- `checks.image`: `{ "executed": bool, "decision": string | null, "result": object | null }`
+- `decision` / `Action`: Final combined verdict (`approved` / `reject`).
+- `Note`: Rejection violation explanation if rejected, or `null` if approved.
 
 ---
 

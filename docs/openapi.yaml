@@ -253,6 +253,72 @@ paths:
           description: '`media_not_checkable` — the OCR or visual model threw. Retryable.'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 
+  /v1/moderate/unified:
+    post:
+      tags: [Moderation]
+      summary: Unified moderation endpoint (text, image, or both)
+      operationId: moderateUnified
+      security: [{ Bearer: [] }, {}]
+      description: |
+        Intelligently moderates text, image/media, or both in a single unified wrapper API.
+
+        - **Text only** (Case 1): Calls ONLY the DeBERTa model pipeline; skips image model.
+        - **Image only** (Case 2): Calls ONLY the image moderation model; skips DeBERTa.
+        - **Both text and image** (Case 3): Calls both text and image moderation models.
+          If either check rejects, the final combined decision is reject.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                  description: Text content to moderate (optional if file provided).
+                file:
+                  type: string
+                  format: binary
+                  description: Image, PDF or video attachment (optional if text provided).
+                content_type:
+                  allOf: [{ $ref: '#/components/schemas/ContentType' }]
+                  default: article
+                content_id:
+                  type: string
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                  description: Text content to moderate.
+                content_type:
+                  allOf: [{ $ref: '#/components/schemas/ContentType' }]
+                  default: article
+                content_id:
+                  type: string
+      responses:
+        "200":
+          description: Moderation completed. Envelope Data includes overall decision and individual checks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnifiedModerationResultApiResponse' }
+        "400":
+          description: '`invalid_request` (neither text nor media provided), `invalid_content` (empty string), `invalid_content_type`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "403":
+          description: '`client_blocked`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "413":
+          description: '`content_too_long`, `media_too_large`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "422":
+          description: '`media_unsupported`, `media_unreadable`, `media_not_checkable`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "503":
+          description: '`model_not_ready`, `media_not_checkable`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
   /v1/moderate/{request_id}:
     get:
       tags: [Moderation]
@@ -2018,6 +2084,16 @@ components:
             total: { type: number }
             stages: { type: object }
         decided_at: { type: string, format: date-time }
+
+    UnifiedModerationResultApiResponse:
+      type: object
+      description: '`ApiResponse<UnifiedModerationResult>` — `POST /v1/moderate/unified`.'
+      required: [Success, Message]
+      properties:
+        Success: { type: boolean, example: true }
+        Message: { type: string, example: "Content approved for publication." }
+        Data: { type: object }
+      additionalProperties: false
 
     MediaModerationResultApiResponse:
       type: object
