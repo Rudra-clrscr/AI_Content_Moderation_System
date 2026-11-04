@@ -112,9 +112,48 @@ paths:
       description: |
         The endpoint the platform calls on every piece of member-written text.
 
-        Join the whole form into one `content` string — harm split across fields is still
-        harm, and moderating fields separately misses a clean title with the scam in the
-        description.
+        **Join the whole form into one `content` string** — harm split across fields is
+        still harm, and moderating fields separately misses a clean title with the scam in
+        the body.
+
+        What that means per surface, in the order the composer shows them:
+
+        | Surface | Send | Leave out |
+        |---|---|---|
+        | `article`, `network_article` | Title, Body, Hashtags, any link URLs | Article Type and Visibility — dropdowns, not member-written |
+        | `post`, `group_post` | The post text, Hashtags | — |
+        | `product_listing`, `business_profile`, … | Every free-text box on that form | Pickers, toggles, IDs |
+
+        Separate the fields with a **blank line**, and expand each hashtag into its words —
+        `#dripIrrigation` goes as `drip Irrigation`, because the model scores words and a
+        run-together tag scores nothing. `buildArticleContent` in
+        `app/static/articles/moderation-client.js` is the reference implementation of both.
+
+        **Uploads are not part of this.** Pictures and PDFs attached to the same form go to
+        `POST /v1/moderate/media`, one request each, so every attachment gets its own
+        decision and its own audit row. Both in one go: `POST /v1/moderate/unified`.
+
+        ### Which fields may be empty
+
+        **`content` may never be empty.** Blank or whitespace-only is `400 invalid_content`,
+        and a `400` is not an approval — hold the item, do not publish it.
+
+        | Composer field | Empty allowed? | What to send |
+        |---|---|---|
+        | Article **Title** | No — the composer marks it required | Join it. If it somehow arrives blank, join what is left rather than sending nothing. |
+        | Article **Body** | No — likewise | As above. |
+        | **Hashtags** | Yes | Omit the field from the join. Do not send an empty line for it. |
+        | **Post text** | Yes, when the post is media-only | Then do **not** call this endpoint — there is no text. Call `/v1/moderate/media`, or `/v1/moderate/unified`, which takes either or both. |
+        | Article Type, Visibility, Status | n/a | Never sent. They are pickers with fixed values, not member-written text. |
+        | Thumbnail, Medias, PdfBase64 | Yes | Not text. Each attachment goes to `/v1/moderate/media` on its own. |
+
+        > **The upstream DTOs do not enforce any of this.** In `bonc_swagger.json` every one
+        > of these is `nullable` with no `required` list and no `minLength` — including
+        > `Title` and `Body`, which the composer marks required with an asterisk. The UI
+        > enforces it; the contract does not. So treat every field as possibly absent, build
+        > the join from what is actually there, and decide what to do when nothing is: a
+        > submission with no text and no attachment has nothing to moderate and nothing to
+        > publish.
 
         `content_type` does not change how the text is scored. It selects the admin's
         level for that surface, the author-facing wording, and whether surface-scoped
@@ -131,7 +170,13 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 25000
-                  description: Non-empty after stripping. Limit is `limits.max_chars`.
+                  description: >-
+                    The form's free-text fields joined with a blank line between them, in the
+                    order the composer shows them. Non-empty after stripping; the limit is
+                    `limits.max_chars`, and an article with a 20,000-character body fits.
+                    Offsets in `feedback.issues` index into this exact string, so join it the
+                    same way every time if you want to highlight the field a problem came
+                    from.
                 content_type:
                   $ref: '#/components/schemas/ContentType'
                 content_id:
@@ -147,11 +192,40 @@ paths:
                   content_type: product_listing
                   content_id: LST-10293
               scam:
-                summary: Text a gate rule or the model should refuse
+                summary: Text the model should refuse (not a gate rule — the model decides)
                 value:
                   content: Pay the processing fee to this personal UPI first and I will release your consignment.
                   content_type: post
                   content_id: POST-5521
+              article:
+                summary: An article — title, body and hashtags in ONE request
+                value:
+                  content: |-
+                    Why our mill switched to drip irrigation
+
+                    We cut water use by 40% over two seasons across 120 acres, and the yield held. Here is what it cost and what we would do differently.
+
+                    drip Irrigation sustainable Farming
+                  content_type: article
+                  content_id: ART-8831
+              articleSplitHarm:
+                summary: Why joining matters — the title is clean, the body is not
+                value:
+                  content: |-
+                    Our export paperwork service
+
+                    Pay the processing fee to this personal UPI first and I will release your consignment.
+                  content_type: article
+                  content_id: ART-8832
+              post:
+                summary: A quick post — its text and hashtags
+                value:
+                  content: |-
+                    Shipping two containers of long-grain rice to Dubai this week. Message me if you need space.
+
+                    export logistics
+                  content_type: post
+                  content_id: POST-9912
               grievance:
                 summary: A public complaint — refused on article/post/advertisement only
                 value:
