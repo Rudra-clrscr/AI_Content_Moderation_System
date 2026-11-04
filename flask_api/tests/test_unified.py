@@ -507,3 +507,41 @@ def test_unified_revise_decision_handling(make_settings, sink):
     assert data["Action"] == "reject"
     assert data["legacy_decision"] == "revise"
 
+
+
+# --------------------------------------------------------------------------------
+# An approval must not claim a check that never ran - including the combined one.
+# --------------------------------------------------------------------------------
+
+def test_combined_approval_does_not_claim_an_inspection_that_did_not_happen(make_settings, sink):
+    """The both-halves path had its own hard-coded "Content approved for publication.".
+
+    Cases 1 and 2 ask `_approved_message` what an approval is allowed to say; case 3 used to
+    assert it. So with moderation switched off for the surface, the same content came back
+    honest from /v1/moderate and "approved for publication" from /v1/moderate/unified - the
+    one claim the rest of this service takes care never to make.
+    """
+    c = build_app(make_settings, sink=sink, admin_token="secret")
+    assert c.put("/v1/admin/moderation-settings", json={"enabled": False, "level": "strict"},
+                 headers={"X-Admin-Token": "secret"}).status_code == 200
+
+    res = c.post("/v1/moderate/unified",
+                 data={"content": "Bulk cotton yarn supplier, FSSAI certified.",
+                       "content_type": "post",
+                       "file": (io.BytesIO(png()), "sample.png")},
+                 content_type="multipart/form-data")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["Data"]["Action"] == "approved"
+    assert body["Message"] == ("Published without being checked: "
+                               "moderation is switched off for this surface.")
+
+    # And the combined payload carries what made that true. Without `decided_by` the honesty
+    # check upstream has nothing to read, which is how the hard-coded message survived.
+    assert body["Data"]["decided_by"] == "disabled"
+    assert body["Data"]["checks"]["text"]["result"]["decided_by"] == "disabled"
+
+    # The plain endpoint has always said it; the two must not disagree about the same content.
+    plain = c.post("/v1/moderate", json={"content": "Bulk cotton yarn supplier, FSSAI certified.",
+                                         "content_type": "post"}).get_json()
+    assert plain["Message"] == body["Message"]

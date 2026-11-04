@@ -11,6 +11,22 @@ from app.model import ScoreResult  # noqa: E402
 from app.routing import Thresholds  # noqa: E402
 from app.sinks import MemorySink  # noqa: E402
 
+@pytest.fixture(autouse=True)
+def _ignore_developer_env(monkeypatch):
+    """Keep the suite independent of `flask_api/.env`.
+
+    `app.config` calls `load_dotenv` at import, so whatever a developer keeps in their own
+    .env lands in `os.environ` - and any test that builds an app without explicit settings
+    (`create_app()` with no arguments) inherits it. A `SERVICE_TOKEN` there turns every
+    unauthenticated call in those tests into a 401.
+
+    That file is untracked, so the failure shows up on one machine and on nobody else's,
+    which is the worst way to find out. Unset it here instead: a test that wants the token
+    enforced sets it through `Settings`, as tests/test_service_token.py does.
+    """
+    monkeypatch.delenv("SERVICE_TOKEN", raising=False)
+
+
 GATE_YAML = r"""
 version: test-1
 rules:

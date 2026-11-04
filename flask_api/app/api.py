@@ -626,6 +626,13 @@ def moderate_unified():
         notes.append(image_data.get("Note") or "Image violates moderation policy.")
     note = " | ".join(notes) if notes else None
 
+    # If EITHER half is one that nothing actually looked at, the combined result is too.
+    # `_approved_message` reads `decided_by` to tell an approval that was inspected from one
+    # that was simply published, and an approval here must not claim an inspection that half
+    # of it never got. `checks` below keeps the per-half truth.
+    decided = [text_data.get("decided_by"), image_data.get("decided_by")]
+    combined_decided_by = "disabled" if "disabled" in decided else (decided[0] or decided[1])
+
     gate_matches = (text_data.get("gate_matches") or []) + (image_data.get("gate_matches") or [])
     scores = [s for s in (text_data.get("risk_score"), image_data.get("risk_score")) if s is not None]
     combined_risk = max(scores) if scores else None
@@ -651,6 +658,7 @@ def moderate_unified():
         "content_type": content_type.value,
         "content": content,
         "decision": final_decision,
+        "decided_by": combined_decided_by,
         "Action": final_action,
         "Decision": final_action,
         "action": final_action,
@@ -667,7 +675,7 @@ def moderate_unified():
         "decided_at": text_data.get("decided_at") or image_data.get("decided_at"),
     }
 
-    msg = "Content approved for publication." if final_action == "approved" else (
+    msg = _approved_message(unified_data) if final_action == "approved" else (
         note or "Content rejected by moderation policy."
     )
     return jsonify(_envelope(unified_data, msg)), 200
