@@ -168,6 +168,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PendingResultApiResponse' }
+        "401": { $ref: '#/components/responses/ServiceTokenRequired' }
         "400":
           description: '`invalid_json`, `invalid_content`, `invalid_content_type`, `invalid_content_id`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -234,6 +235,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MediaModerationResultApiResponse' }
+        "401": { $ref: '#/components/responses/ServiceTokenRequired' }
         "400":
           description: '`invalid_file`, `invalid_content_type`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -303,6 +305,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/UnifiedModerationResultApiResponse' }
+        "401": { $ref: '#/components/responses/ServiceTokenRequired' }
         "400":
           description: '`invalid_request` (neither text nor media provided), `invalid_content` (empty string), `invalid_content_type`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -345,6 +348,7 @@ paths:
                 oneOf:
                   - { $ref: '#/components/schemas/ModerationResultApiResponse' }
                   - { $ref: '#/components/schemas/PendingResultApiResponse' }
+        "401": { $ref: '#/components/responses/ServiceTokenRequired' }
         "404":
           description: '`not_supported` — status lookup is async-mode only.'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -1736,17 +1740,24 @@ components:
     BadRequest:
       description: Invalid input.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    ServiceTokenRequired:
+      description: |
+        `unauthorized` — the bearer token is missing, malformed or wrong.
+
+        Only raised while `SERVICE_TOKEN` is set. With it unset these endpoints are open and
+        this response never occurs, which is what `GET /ready` reports as
+        `service_auth: "open"`. The message names neither which half of the header was wrong
+        nor what was expected.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Unauthorized:
       description: |
         `unauthorized` — log in, or send a valid `X-Admin-Token`.
 
-        Raised by `check_admin()` in the admin blueprint, so it uses the **flat** error
-        shape even on endpoints whose other errors are nested.
+        Raised by `check_admin()` in the admin blueprint.
       content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
     CsrfMissing:
       description: |
         `forbidden` — session auth on a non-GET without `X-Requested-With: bonc-admin`.
-        Flat error shape, like the other `check_admin()` refusals.
       content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
     NotFound:
       description: Not found.
@@ -1754,7 +1765,7 @@ components:
     AdminDisabled:
       description: |
         `not_found` — `ADMIN_TOKEN` is unset and no admin account exists, so admin
-        endpoints are disabled rather than protected. Flat error shape.
+        endpoints are disabled rather than protected.
       content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
     TooLarge:
       description: Over a size limit.
@@ -1763,7 +1774,7 @@ components:
       description: Could not be processed.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     RateLimited:
-      description: '`rate_limited`. Carries `Retry-After` on login. Flat error shape.'
+      description: '`rate_limited`. Carries `Retry-After` on login.'
       headers:
         Retry-After: { schema: { type: integer }, description: Seconds to wait. }
       content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
