@@ -62,3 +62,62 @@ def test_every_level_the_spec_offers_is_actually_accepted(make_settings, scorer)
     for name in _load(SPEC)["components"]["schemas"]["LevelName"]["enum"]:
         r = c.put("/v1/admin/moderation-levels/article", json={"level": name}, headers=hdr)
         assert r.status_code == 200, f"level {name!r} is in the spec but got {r.status_code}"
+
+
+# --------------------------------------------------------------------------------
+# The spec's "which fields may be empty" table is a promise. Hold the service to it.
+# --------------------------------------------------------------------------------
+
+def _client(make_settings):
+    from app import create_app
+    from tests.conftest import FixedScorer
+
+    # A model that calls everything safe, so only the emptiness rules can refuse.
+    return create_app(make_settings(max_chars=25_000), scorer=FixedScorer(0.01)).test_client()
+
+
+def test_empty_content_is_refused_not_approved(make_settings):
+    """Blank is `400 invalid_content`, and a 400 is not an approval.
+
+    The table says so because the alternative is a caller reading a 4xx as "fine, publish it"
+    - the same misread as `Success: true` meaning approved, one level down.
+    """
+    c = _client(make_settings)
+    for blank in ("", "   ", "\n\t "):
+        r = c.post("/v1/moderate", json={"content": blank, "content_type": "post"})
+        assert r.status_code == 400, f"{blank!r} should be refused"
+        assert r.get_json()["Data"]["code"] == "invalid_content"
+        assert r.get_json()["Success"] is False
+
+
+def test_a_submission_with_nothing_in_it_is_refused(make_settings):
+    """Media-only is fine, text-only is fine, neither is not - there is nothing to judge."""
+    c = _client(make_settings)
+    r = c.post("/v1/moderate/unified", data={"content_type": "post"},
+               content_type="multipart/form-data")
+    assert r.status_code == 400
+    assert r.get_json()["Data"]["code"] == "invalid_request"
+
+
+def test_a_post_with_only_an_attachment_still_gets_a_verdict(make_settings):
+    """The row that says post text may be empty when the post is media-only.
+
+    The text endpoint would answer 400 for that post, which is why the table sends it here
+    instead: a member posting a picture and no caption must still be moderated, not waved
+    through because there was no string to check.
+    """
+    import io as _io
+
+    from PIL import Image
+
+    buf = _io.BytesIO()
+    Image.new("RGB", (64, 64), (210, 210, 210)).save(buf, format="PNG")
+    c = _client(make_settings)
+    r = c.post("/v1/moderate/unified",
+               data={"content_type": "post", "file": (_io.BytesIO(buf.getvalue()), "p.png")},
+               content_type="multipart/form-data")
+    assert r.status_code == 200
+    data = r.get_json()["Data"]
+    assert data["Action"] in ("approved", "reject")
+    assert data["checks"]["image"]["executed"] is True
+    assert data["checks"]["text"]["executed"] is False
