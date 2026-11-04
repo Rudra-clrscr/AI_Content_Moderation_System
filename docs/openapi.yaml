@@ -662,6 +662,11 @@ paths:
         Takes effect on the **next request** — nothing restarts — and is persisted, so a
         restart keeps it.
 
+        **To pick a level, use the Examples dropdown above the request body** — it lists all
+        thirteen, each with the bar it sets. A request body is a JSON editor here, so the
+        `level` field cannot be a dropdown of its own; that list is the picker. `LevelName`
+        in the Schemas section has the same names with a table of what each one means.
+
         `enabled` and the bar are independent: setting a level on a disabled surface
         stores it for when the toggle comes back on.
 
@@ -680,14 +685,54 @@ paths:
               properties:
                 enabled: { type: boolean }
                 level:
-                  type: string
-                  example: strict
-                  description: Any name defined in `moderation_levels.yaml`.
+                  $ref: '#/components/schemas/LevelName'
                 reject_min: { type: number, minimum: 0, maximum: 1 }
                 allow_max: { type: number, minimum: 0, maximum: 1 }
+            # One per level, because a request body is a JSON editor in Swagger UI and an
+            # enum on a body field is not offered as a dropdown there - this Examples list
+            # is the only thing on the page you can actually pick a level from.
             examples:
+              levelStrict:
+                summary: "Level: strict - nothing contentious (bar 0.25)"
+                value: { level: strict }
+              levelMedium:
+                summary: "Level: medium - the model's own calibration (bar 0.50)"
+                value: { level: medium }
+              levelLenient:
+                summary: "Level: lenient - only clear abuse (bar 0.85)"
+                value: { level: lenient }
+              levelLevel1:
+                summary: "Level: level_1 - bar 0.1"
+                value: { level: level_1 }
+              levelLevel2:
+                summary: "Level: level_2 - bar 0.2"
+                value: { level: level_2 }
+              levelLevel3:
+                summary: "Level: level_3 - bar 0.3"
+                value: { level: level_3 }
+              levelLevel4:
+                summary: "Level: level_4 - bar 0.4"
+                value: { level: level_4 }
+              levelLevel5:
+                summary: "Level: level_5 - bar 0.5"
+                value: { level: level_5 }
+              levelLevel6:
+                summary: "Level: level_6 - bar 0.6"
+                value: { level: level_6 }
+              levelLevel7:
+                summary: "Level: level_7 - bar 0.7"
+                value: { level: level_7 }
+              levelLevel8:
+                summary: "Level: level_8 - bar 0.8"
+                value: { level: level_8 }
+              levelLevel9:
+                summary: "Level: level_9 - bar 0.9"
+                value: { level: level_9 }
+              levelLevel10:
+                summary: "Level: level_10 - bar 1.0"
+                value: { level: level_10 }
               toggleOff: { summary: Stop moderating this surface, value: { enabled: false } }
-              namedLevel: { summary: Apply a named level, value: { level: strict } }
+              toggleOn: { summary: Start moderating it again, value: { enabled: true } }
               rawBar: { summary: Set the rating directly, value: { reject_min: 0.62 } }
       responses:
         "200":
@@ -770,7 +815,17 @@ paths:
               additionalProperties: false
               properties:
                 enabled: { type: boolean }
-                level: { type: string, example: strict }
+                level:
+                  $ref: '#/components/schemas/LevelName'
+            # Same reason as the per-surface PUT: pick one of these rather than typing the
+            # body. This endpoint writes EVERY surface at once - see the description.
+            examples:
+              allStrict: { summary: Every surface on, strict, value: { enabled: true, level: strict } }
+              allMedium: { summary: Every surface on, medium, value: { enabled: true, level: medium } }
+              allLenient: { summary: Every surface on, lenient, value: { enabled: true, level: lenient } }
+              allOff:
+                summary: Stop moderating EVERYTHING (read the description first)
+                value: { enabled: false, level: strict }
       responses:
         "200":
           description: The resulting flattened view.
@@ -1876,6 +1931,110 @@ components:
         Read `Action` for the binary .NET verdict.
       enum: [approved, revise, reject, allow]
 
+    VisualResult:
+      type: object
+      description: |
+        **What the picture itself was judged to be** — not the words in it, which are read
+        separately by OCR and scored by the text model.
+
+        Present only when `visual_content_checked` is `true`. It is absent when the check is
+        switched off (`VISUAL_CHECK=0`, or `media.visual.enabled: false`) and when the image
+        model is missing, because neither is an error: the file is published and the result
+        says plainly that nothing looked at it. `GET /ready` reports which of those a
+        deployment is in, under `visual`.
+
+        Three channels can object, and the record names the one that did — a refusal with no
+        attributable cause is what makes these impossible to debug afterwards.
+      properties:
+        label:
+          type: string
+          description: The winning category from `config/visual_policy.yaml`.
+          example: safe
+        score:
+          type: number
+          description: The winning label's own score, 0 to 1.
+          example: 0.3417
+        unsafe_score:
+          type: number
+          description: How much of the distribution sits on categories the policy refuses.
+          example: 0.5363
+        scores:
+          type: object
+          additionalProperties: { type: number }
+          description: >-
+            Every policy category and its score. The policy is that YAML file, so adding a
+            category changes this map and needs no retraining.
+          example: { safe: 0.3417, weapon: 0.0329, gore: 0.0095, sexual: 0.12 }
+        category:
+          type: string
+          description: Present when a refusing category won.
+        probe:
+          type: object
+          description: The trained probe - a second opinion over a few coarse classes.
+          properties:
+            unsafe: { type: number, example: 0.4484 }
+            scores:
+              type: object
+              additionalProperties: { type: number }
+              example: { gore: 0.1579, revealing: 0.0393, safe: 0.5516, weapon: 0.2512 }
+            withheld:
+              type: string
+              description: >-
+                The probe was stood down for this category, and why. Recorded because a
+                reading of 0.83 beside a published picture reads as a bug otherwise.
+        exemplar:
+          type: object
+          description: >-
+            Nearest-neighbour against the pictures an admin marked "refuse like this" or
+            "allow like this". `matched.id` is the dashboard row to go and change - without
+            it an exemplar refusal reads as a picture that should have been published.
+          properties:
+            block: { type: number, example: 0.6656 }
+            allow: { type: number, example: 0.5593 }
+            matched:
+              type: object
+              properties:
+                id: { type: integer, example: 3672 }
+                category: { type: string, example: parties }
+                score: { type: number, example: 0.6656 }
+
+    LevelName:
+      type: string
+      enum:
+        - strict
+        - medium
+        - lenient
+        - level_1
+        - level_2
+        - level_3
+        - level_4
+        - level_5
+        - level_6
+        - level_7
+        - level_8
+        - level_9
+        - level_10
+      description: |
+        A named level, from `levels:` in `config/moderation_levels.yaml`. Each one is just a
+        bar: content scoring at or below it is published, above it is refused, so **lower is
+        stricter**.
+
+        | Name | Bar (`reject_min`) | |
+        |---|---|---|
+        | `strict` | 0.25 | Nothing contentious. |
+        | `medium` | 0.50 | The model's own calibration point. |
+        | `lenient` | 0.85 | Only clear abuse. |
+        | `level_1` … `level_10` | 0.1 … 1.0 | The same dial in tenths; `level_5` equals `medium`, `level_10` refuses nothing. |
+
+        The list is not closed: the service accepts any key in that file, and
+        `GET /v1/admin/moderation-levels` returns the live set under `levels` — so a level
+        added to the file works here before it appears in this enum. Read that endpoint if
+        you need the current names rather than the shipped ones.
+
+        For a bar none of them hits, send `reject_min` instead: a raw number always wins
+        over a named level.
+      example: strict
+
     LegacyDecision:
       type: string
       description: >-
@@ -2003,7 +2162,8 @@ components:
             False when the file was published without being examined at all — every PDF
             and every video. Absent on an image, which is always read and scored.
             **An allow with `checked: false` is not a clean result.**
-        visual: { type: object, description: The visual check's scores and winning label. }
+        visual:
+          $ref: '#/components/schemas/VisualResult'
 
     ModerationResultApiResponse:
       type: object
