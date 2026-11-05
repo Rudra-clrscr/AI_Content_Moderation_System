@@ -21,7 +21,8 @@
   The <code>/v1/moderate*</code> endpoints need <strong>Authorize &rarr; Bearer</strong> (the
   <code>SERVICE_TOKEN</code> value) &mdash; unless it is unset, in which case they are open and
   <code>GET /ready</code> says <code>service_auth: "open"</code>.
-  Admin endpoints need <strong>Authorize &rarr; AdminToken</strong> (the <code>ADMIN_TOKEN</code> value).
+  Admin endpoints: sign in with <code>POST /v1/admin/auth/login</code> (email and password) and
+  every admin call on this page works from then on, or use <strong>Authorize &rarr; AdminToken</strong>.
   Check <code>GET /ready</code> first &mdash; if the model did not load, moderation answers 503.
 </div>
 <div id="swagger-ui"></div>
@@ -44,6 +45,17 @@
     filter: true,                     // 48 operations is more than fits on a screen
     defaultModelsExpandDepth: 0,      // schemas are reference material, not the first thing to read
     presets: [SwaggerUIBundle.presets.apis],
+    // An admin signs in with email and password, and the session cookie that sets is only
+    // honoured on a PUT/POST/DELETE that also carries this header - the CSRF defence, see
+    // check_admin in app/admin_auth.py. A security scheme cannot add a fixed header, so the
+    // page adds it to every request it sends, exactly as the dashboard does.
+    //
+    // This does not weaken the defence. The header is set by script running on this origin;
+    // a page on any other origin still cannot set it, which is the whole point of it.
+    requestInterceptor: (req) => {
+      req.headers["X-Requested-With"] = "bonc-admin";
+      return req;
+    },
   });
 </script>
 </body>
