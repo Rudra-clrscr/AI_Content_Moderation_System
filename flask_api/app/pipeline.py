@@ -56,6 +56,11 @@ class ContentType(str, Enum):
     REQUEST = "request"                       # Requests
     PROPOSAL = "proposal"                     # Proposals
     BUSINESS_PROPOSAL = "business_proposal"   # Business Proposals
+    JOB = "job"                               # a job posting - title, description, requirements,
+                                              # responsibilities, qualification, skills, benefits.
+                                              # Fee-for-job and fake-recruitment scams live here,
+                                              # and they read like ordinary hiring copy until the
+                                              # sentence asking for money.
 
 
 class Stage(str, Enum):

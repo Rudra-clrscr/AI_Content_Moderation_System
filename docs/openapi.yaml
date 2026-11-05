@@ -122,6 +122,7 @@ paths:
         |---|---|---|
         | `article`, `network_article` | Title, Body, Hashtags, any link URLs | Article Type and Visibility — dropdowns, not member-written |
         | `post`, `group_post` | The post text, Hashtags | — |
+        | `job` | Title, CompanyName, Description, Responsibilities, Requirements, Qualification, KeySkills, Benefits | EmploymentType, WorkMode, JobCategory, City/State/Country, Status — all pickers or structured values |
         | `product_listing`, `business_profile`, … | Every free-text box on that form | Pickers, toggles, IDs |
 
         Separate the fields with a **blank line**, and expand each hashtag into its words —
@@ -164,19 +165,40 @@ paths:
           application/json:
             schema:
               type: object
-              required: [content, content_type]
+              required: [content_type]
+              description: >-
+                Send the parts (`title`, `body`, `hashtags`) and let the service join them,
+                or send one pre-joined `content`. Not both - that is a `400`.
               properties:
+                title:
+                  type: string
+                  description: >-
+                    The article's title. `Title` is accepted too, since that is what
+                    `CreateArticleDto` calls it.
+                body:
+                  type: string
+                  description: The article's body, or a post's text. `Body` also accepted.
+                hashtags:
+                  description: >-
+                    A list of tags, or the single comma-separated string the company's DTOs
+                    carry. Each is expanded into its words before scoring - `#dripIrrigation`
+                    is checked as `drip Irrigation`, because a run-together tag is one
+                    unknown token and scores nothing. `Hashtags` also accepted.
+                  oneOf:
+                    - { type: array, items: { type: string } }
+                    - { type: string }
+                  example: ["#dripIrrigation", "#sustainableFarming"]
                 content:
                   type: string
                   minLength: 1
                   maxLength: 25000
                   description: >-
-                    The form's free-text fields joined with a blank line between them, in the
-                    order the composer shows them. Non-empty after stripping; the limit is
-                    `limits.max_chars`, and an article with a 20,000-character body fits.
-                    Offsets in `feedback.issues` index into this exact string, so join it the
-                    same way every time if you want to highlight the field a problem came
-                    from.
+                    The whole submission as one string, for a caller that would rather join it
+                    itself - the parts above are the easier road. Non-empty after stripping;
+                    the limit is `limits.max_chars`, and an article with a 20,000-character
+                    body fits. Offsets in `feedback.issues` index into this exact string, so
+                    join it the same way every time if you want to highlight the field a
+                    problem came from.
                 content_type:
                   $ref: '#/components/schemas/ContentType'
                 content_id:
@@ -197,8 +219,24 @@ paths:
                   content: Pay the processing fee to this personal UPI first and I will release your consignment.
                   content_type: post
                   content_id: POST-5521
+              articleParts:
+                summary: An article — send the parts, the service joins them
+                value:
+                  title: Why our mill switched to drip irrigation
+                  body: We cut water use by 40% over two seasons across 120 acres, and the yield held.
+                  hashtags: ["#dripIrrigation", "#sustainableFarming"]
+                  content_type: article
+                  content_id: ART-8831
+              articlePartsDotNet:
+                summary: The same, with the PascalCase names the .NET DTOs use
+                value:
+                  Title: Why our mill switched to drip irrigation
+                  Body: We cut water use by 40% over two seasons across 120 acres, and the yield held.
+                  Hashtags: "#dripIrrigation,#sustainableFarming"
+                  content_type: article
+                  content_id: ART-8831
               article:
-                summary: An article — title, body and hashtags in ONE request
+                summary: An article, pre-joined into one `content` string
                 value:
                   content: |-
                     Why our mill switched to drip irrigation
@@ -217,6 +255,19 @@ paths:
                     Pay the processing fee to this personal UPI first and I will release your consignment.
                   content_type: article
                   content_id: ART-8832
+              jobPosting:
+                summary: A job posting — every prose box, forwarded from CreateJobDTO
+                value:
+                  Title: Warehouse Supervisor
+                  CompanyName: Fortune Agro Exports
+                  Description: Oversee inbound and outbound shipments at our Pune facility.
+                  Responsibilities: Plan shifts, maintain stock accuracy, report weekly.
+                  Requirements: Three years in logistics.
+                  Qualification: Graduate in any discipline.
+                  KeySkills: inventory, SAP, team handling
+                  Benefits: PF, health cover, annual bonus
+                  content_type: job
+                  content_id: JOB-4412
               post:
                 summary: A quick post — its text and hashtags
                 value:
@@ -1994,6 +2045,7 @@ components:
         - request
         - proposal
         - business_proposal
+        - job
 
     Decision:
       type: string
@@ -2297,6 +2349,19 @@ components:
             The author-facing reason, for an entity's remark column. Policy wording from
             `config/feedback_messages.yaml` — **never the submitted text**, which is only
             ever in `content`. `null` when approved.
+        fields:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: integer }
+            minItems: 2
+            maxItems: 2
+          description: >-
+            Where each part landed in `content`, as `[start, end]` - present only when the
+            service did the joining, because a caller that sent its own `content` already
+            knows. Use it to map a `feedback.issues` offset back to the box the author typed
+            it in, instead of redoing that arithmetic and highlighting the wrong field.
+          example: { title: [0, 21], body: [23, 47], hashtags: [49, 84] }
         schema_version: { type: string, example: "1.9" }
         request_id: { type: string, format: uuid }
         status: { type: string, example: completed }

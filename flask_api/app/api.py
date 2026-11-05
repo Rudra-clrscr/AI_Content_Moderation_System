@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import re
 from pathlib import Path
 
 from flask import Blueprint, current_app, g, jsonify, request, send_from_directory
@@ -100,6 +101,14 @@ def _approved_message(data: dict) -> str:
     media = data.get("media")
     if isinstance(media, dict) and media.get("checked") is False:
         return "Published, but nothing in this file could be read or checked."
+    n = data.get("attachments_not_checked") or 0
+    if n:
+        # The text passed. The pictures that came with it were never looked at, and this is
+        # the one line a caller is most likely to log or show an operator.
+        return (f"Text approved for publication, but {n} "
+                f"attachment{'' if n == 1 else 's'} on this submission "
+                f"{'was' if n == 1 else 'were'} not checked - send each to "
+                f"POST /v1/moderate/media.")
     return "Content approved for publication."
 
 
@@ -241,12 +250,144 @@ def _http_error(exc: HTTPException):
     return _error(exc.code or 500, exc.name.lower().replace(" ", "_"), exc.description or exc.name)
 
 
+# The composer's fields, in the order it shows them, and the separator between them. Both
+# match buildArticleContent in app/static/articles/moderation-client.js on purpose: a caller
+# that joins its own form and a caller that sends the parts must produce the same string, or
+# the same article scores two different ways depending on which door it came in.
+# Every box a member can type prose into, in the order a reader meets them. Most surfaces
+# fill three; a job posting fills most of them, and each is optional, so a form that has no
+# `requirements` simply contributes nothing to the join.
+PART_FIELDS = ("title", "company", "body", "responsibilities", "requirements",
+               "qualification", "key_skills", "benefits", "hashtags")
+PART_SEP = "\n\n"
+
+
+def hashtag_words(tag: str) -> str:
+    """`#dripIrrigation` -> `drip Irrigation`.
+
+    The model scores words. A run-together tag is one unknown token and scores nothing, so a
+    tag is worth moderating only once its words are recoverable - the difference between
+    scoring `#firstCopyRolex` 0.000 and scoring `first copy rolex` for what it says.
+    """
+    t = re.sub(r"^#", "", str(tag))
+    t = re.sub(r"_+", " ", t)
+    t = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", t)
+    t = re.sub(r"(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _normalise_hashtags(raw) -> str:
+    """A list of tags, or the one comma-separated string the company's own DTOs carry."""
+    if raw is None:
+        return ""
+    tags = raw if isinstance(raw, (list, tuple)) else str(raw).split(",")
+    return " ".join(w for w in (hashtag_words(t) for t in tags) if w)
+
+
+def join_parts(parts: dict) -> tuple[str, dict]:
+    """Join the composer's fields into the one string the model sees.
+
+    Returns the content and, beside it, where each field landed in it - so a caller that
+    sent the parts never has to work out for itself which field a `feedback.issues` offset
+    fell in. That sum was being done by hand, differently, by every surface that called in,
+    and getting it wrong highlights the wrong box rather than failing loudly.
+    """
+    content, fields = "", {}
+    for name in PART_FIELDS:
+        value = (_normalise_hashtags(parts.get(name)) if name == "hashtags"
+                 else str(parts.get(name) or "")).strip()
+        if not value:
+            continue
+        if content:
+            content += PART_SEP
+        fields[name] = [len(content), len(content) + len(value)]
+        content += value
+    return content, fields
+
+
+# The keys a forwarded `CreateArticleDto` / `CreatePostDTO` carries its attachments under.
+# This endpoint reads text and cannot look at any of them.
+ATTACHMENT_FIELDS = ("Medias", "medias", "MediaPaths", "media_paths",
+                     "PostMedias", "post_medias", "ThumbnailUrl", "thumbnail_url",
+                     "PdfBase64", "pdf_base64")
+
+
+def _count_attachments(body: dict) -> int:
+    """How many attachments came with a request that cannot check a single one.
+
+    A .NET caller forwarding its own DTO sends the whole thing, pictures included. Reading
+    the text out of it and answering `approved` would be the exact claim this service takes
+    care never to make: that something was checked when nothing looked at it. So they are
+    counted and said out loud rather than dropped on the floor.
+    """
+    total = 0
+    for name in ATTACHMENT_FIELDS:
+        value = body.get(name)
+        if isinstance(value, (list, tuple)):
+            total += len([v for v in value if v])
+        elif isinstance(value, str) and value.strip():
+            total += 1
+    return total
+
+
+# What each company DTO calls the member-written text, so one can be forwarded whole.
+# The article DTOs say `Body`; `CreatePostDTO` says `TextContent`; `CreateGroupPostDto` says
+# `Content`. A name missing from here is not an error anyone sees - the field is simply
+# dropped and the text goes unmoderated - which is why the list is checked against the
+# company specification by tests/test_dto_field_coverage.py rather than kept by hand.
+PART_ALIASES = {
+    "title": ("title", "Title"),
+    "company": ("company", "CompanyName", "company_name"),
+    "body": ("body", "Body", "TextContent", "text_content", "Content",
+             "Description", "description"),
+    "responsibilities": ("responsibilities", "Responsibilities"),
+    "requirements": ("requirements", "Requirements"),
+    "qualification": ("qualification", "Qualification"),
+    "key_skills": ("key_skills", "KeySkills"),
+    "benefits": ("benefits", "Benefits"),
+    "hashtags": ("hashtags", "Hashtags"),
+}
+
+
+def _read_parts(body: dict) -> dict:
+    """The parts as sent, under any of the names the company's own DTOs give them.
+
+    A .NET caller forwarding its own DTO is the likeliest way to reach this endpoint, and
+    before it took these names it was also the likeliest way to be silently ignored.
+    """
+    out = {}
+    for name in PART_FIELDS:
+        value = None
+        for alias in PART_ALIASES[name]:
+            if body.get(alias) is not None:
+                value = body[alias]
+                break
+        out[name] = value
+    return out
+
+
 def _parse_request() -> ModerationRequest | tuple:
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return _error(400, "invalid_json", "body must be a JSON object")
 
+    parts = _read_parts(body)
+    sent = sorted(n for n, v in parts.items() if v is not None)
     content = body.get("content")
+
+    if sent and content is not None:
+        # Choosing one silently is the failure this endpoint exists to stop. Name both.
+        return _error(400, "invalid_request",
+                      f"send either 'content' or the parts {sent}, not both", parts=sent)
+
+    fields = {}
+    if sent:
+        content, fields = join_parts(parts)
+        if not content.strip():
+            return _error(400, "invalid_content",
+                          f"the parts {sent} are all empty; there is nothing to check",
+                          parts=sent)
+
     if not isinstance(content, str) or not content.strip():
         return _error(400, "invalid_content", "'content' must be a non-empty string")
     max_chars = _svc().settings.max_chars
@@ -262,7 +403,16 @@ def _parse_request() -> ModerationRequest | tuple:
     if content_id is not None and not isinstance(content_id, (str, int)):
         return _error(400, "invalid_content_id", "'content_id' must be a string or integer")
 
-    return ModerationRequest(content, content_type, None if content_id is None else str(content_id))
+    req = ModerationRequest(content, content_type, None if content_id is None else str(content_id))
+    # Where each part landed. Offsets into `content` only help a caller who knows how
+    # `content` was built, and when the service built it, that caller does not.
+    #
+    # ModerationRequest is frozen, and rightly so - what gets scored should not change
+    # under the pipeline. This is bookkeeping about the request rather than part of it,
+    # so it rides alongside and stays out of as_dict().
+    object.__setattr__(req, "fields", fields)
+    object.__setattr__(req, "unchecked_attachments", _count_attachments(body))
+    return req
 
 
 def _execute_moderation(req: ModerationRequest,
@@ -329,7 +479,16 @@ def moderate():
     req = _parse_request()
     if isinstance(req, tuple):
         return req
-    return _moderate(req)
+    # Reported only when the service did the joining. A caller that sent its own
+    # `content` already knows where everything is.
+    extra = {}
+    fields = getattr(req, "fields", None)
+    if fields:
+        extra["fields"] = fields
+    unchecked = getattr(req, "unchecked_attachments", 0)
+    if unchecked:
+        extra["attachments_not_checked"] = unchecked
+    return _moderate(req, extra=extra or None)
 
 
 def _execute_media_moderation(upload, content_type: ContentType,

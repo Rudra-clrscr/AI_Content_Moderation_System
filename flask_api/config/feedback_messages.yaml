@@ -14,6 +14,7 @@ nouns:
   request: request
   proposal: proposal
   business_proposal: business proposal
+  job: job posting
 
 revise:
   title: Your {noun} needs a few changes
