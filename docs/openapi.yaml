@@ -788,6 +788,9 @@ paths:
         `enabled` and the bar are independent: setting a level on a disabled surface
         stores it for when the toggle comes back on.
 
+        To set several surfaces in one call, send `{"surfaces": {"post": "lenient", ...}}`
+        to `PUT /v1/admin/moderation-settings`. That changes only the surfaces it names.
+
         **An unknown surface is `404 no_such_surface`, not `400`** — the difference between
         "there is no such page" and "that value is wrong". An admin who typed `articles`
         (the plural) needs the first.
@@ -911,17 +914,30 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: ["Admin: levels"]
-      summary: Apply one setting to EVERY surface
+      summary: Set several surfaces at once, or every surface
       operationId: putModerationSettings
       description: |
-        > **This overwrites every surface.** Any per-surface tuning done through
-        > `PUT /v1/admin/moderation-levels/{content_type}` is silently flattened by a save
-        > here. Check `mixed` on the `GET` before calling this.
+        Three shapes, all one saved change:
 
-        Writes are serialised behind a lock so two admins saving at once cannot interleave.
-        If the database write fails the in-memory levels are rolled back, so memory and
-        disk keep telling the same story, and the call returns `500 save_failed` having
-        changed nothing.
+        | Body | What changes |
+        |---|---|
+        | `{"surfaces": {"post": "lenient", "article": "medium", "job": "strict"}}` | **Only the surfaces named.** Every other surface is left exactly as it is. |
+        | `{"enabled": true, "level": "strict"}` | **Every surface.** Overwrites any per-surface setting. |
+        | `{"enabled": true, "level": "medium", "surfaces": {"job": "strict"}}` | Every surface, then the named ones on top. |
+
+        **To give post, article and job different levels, use `surfaces`.** Each entry is a
+        level name, or `{"enabled": true|false, "level": "<name>"}`. A level name alone
+        leaves that surface's on/off toggle as it was, the same as
+        `PUT /v1/admin/moderation-levels/{content_type}`. The keys are the `ContentType`
+        values, and an unknown one is `400 no_such_surface`.
+
+        > **`enabled` + `level` at the top level overwrites every surface.** A save in that
+        > shape flattens whatever was set per surface. Check `mixed` on the `GET` first.
+
+        The whole body is checked before anything is applied, so a bad entry anywhere
+        changes nothing. Writes are serialised behind a lock so two admins saving at once
+        cannot interleave. If the database write fails the in-memory levels are put back
+        exactly as they were, and the call returns `500 save_failed` having changed nothing.
       security: [{ AdminToken: [] }, { AdminSession: [] }]
       requestBody:
         required: true
@@ -929,15 +945,40 @@ paths:
           application/json:
             schema:
               type: object
-              required: [enabled, level]
+              minProperties: 1
               additionalProperties: false
+              description: >-
+                Send `surfaces`, or `enabled` and `level` together, or all three.
               properties:
-                enabled: { type: boolean }
+                enabled:
+                  type: boolean
+                  description: With `level`, applies to every surface.
                 level:
                   $ref: '#/components/schemas/LevelName'
+                surfaces:
+                  type: object
+                  minProperties: 1
+                  description: >-
+                    Only these surfaces, keyed by `ContentType` value. Applied after
+                    `enabled`/`level`, so they win.
+                  additionalProperties: { $ref: '#/components/schemas/SurfaceChange' }
+                  example: { post: lenient, article: medium, job: strict }
             # Same reason as the per-surface PUT: pick one of these rather than typing the
-            # body. This endpoint writes EVERY surface at once - see the description.
+            # body. The FIRST example is what Try it out starts with, so it is the one that
+            # touches only the surfaces it names - the everything-setting has to be chosen.
             examples:
+              threeSurfaces:
+                summary: "Post lenient, article medium, job strict (only these three)"
+                value: { surfaces: { post: lenient, article: medium, job: strict } }
+              threeSurfacesLevels:
+                summary: "Post level_7, article level_5, job level_3 (only these three)"
+                value: { surfaces: { post: level_7, article: level_5, job: level_3 } }
+              oneSurfaceOff:
+                summary: "Stop moderating job postings only, keep their level"
+                value: { surfaces: { job: { enabled: false } } }
+              everythingThenSome:
+                summary: "Every surface medium, then job strict"
+                value: { enabled: true, level: medium, surfaces: { job: strict } }
               allStrict: { summary: Every surface on, strict, value: { enabled: true, level: strict } }
               allMedium: { summary: Every surface on, medium, value: { enabled: true, level: medium } }
               allLenient: { summary: Every surface on, lenient, value: { enabled: true, level: lenient } }
@@ -946,11 +987,16 @@ paths:
                 value: { enabled: false, level: strict }
       responses:
         "200":
-          description: The resulting flattened view.
+          description: The resulting flattened view, every surface with its level.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SettingsView' }
-        "400": { $ref: '#/components/responses/BadRequest' }
+        "400":
+          description: >-
+            `invalid_request` for a malformed body or unknown level, `no_such_surface`
+            (with `Data.surfaces` listing them) for an unknown key in `surfaces`.
+            Nothing is changed either way.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/CsrfMissing' }
         "500":
@@ -2187,6 +2233,19 @@ components:
         level: { type: string, nullable: true }
         allow_max: { type: number }
         reject_min: { type: number }
+
+    SurfaceChange:
+      description: >-
+        One surface's entry in `surfaces`: a level name, or an object. A level name alone
+        leaves the surface's on/off toggle as it was.
+      oneOf:
+        - $ref: '#/components/schemas/LevelName'
+        - type: object
+          minProperties: 1
+          additionalProperties: false
+          properties:
+            enabled: { type: boolean }
+            level: { $ref: '#/components/schemas/LevelName' }
 
     LevelsTable:
       type: object

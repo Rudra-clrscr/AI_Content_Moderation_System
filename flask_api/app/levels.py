@@ -184,6 +184,22 @@ class ModerationLevels:
             self._features = {**self._features, content_type: policy}
             return policy
 
+    def snapshot(self) -> dict[str, FeaturePolicy]:
+        """The per-surface table as it stands now, for `restore` to put back.
+
+        Safe to hold: a write never edits this dict, it swaps in a new one.
+        """
+        return self._features
+
+    def restore(self, features: dict[str, FeaturePolicy]) -> None:
+        """Put back a table taken with `snapshot`, exactly.
+
+        For undoing a change that could not be saved. Replaying the saved record instead loses
+        whatever the record does not carry - a raw 0.62 came back as the default bar.
+        """
+        with self._lock:
+            self._features = dict(features)
+
     def clear_feature(self, content_type: str) -> bool:
         """Remove a per-feature override so it reverts to inheriting the default.
 

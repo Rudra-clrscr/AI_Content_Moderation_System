@@ -8,7 +8,8 @@ Routes (all JSON):
     POST /v1/admin/auth/password/verify  {email, code}                    -> {reset_token}
     POST /v1/admin/auth/password/reset   {email, reset_token, new_password}
     GET  /v1/admin/moderation-settings
-    PUT  /v1/admin/moderation-settings   {enabled, level}  applied to EVERY content type
+    PUT  /v1/admin/moderation-settings   {enabled, level}  applied to EVERY content type,
+                                         and/or {surfaces: {post: lenient, ...}} for only those
 
 Nothing here registers an administrator over HTTP. Admins are created from the command line
 (python -m app.admin_cli create-admin), so being able to reach the site is never enough.
@@ -170,13 +171,18 @@ def remember(ctype: str, body: dict) -> None:
     a: Admin = current_app.extensions["admin"]
     with a.settings_lock:
         data = a.store.load_settings()
-        rec = data.setdefault("features", {}).setdefault(ctype, {})
-        incoming = {k: v for k, v in body.items() if v is not None}
-        for key in incoming:
-            for dead in _SUPERSEDES.get(key, ()):
-                rec.pop(dead, None)
-        rec.update(incoming)
+        _merge_change(data, ctype, body)
         a.store.save_settings(data)
+
+
+def _merge_change(data: dict, ctype: str, body: dict) -> None:
+    """Fold one surface's change into a loaded settings record, in place. See `remember`."""
+    rec = data.setdefault("features", {}).setdefault(ctype, {})
+    incoming = {k: v for k, v in body.items() if v is not None}
+    for key in incoming:
+        for dead in _SUPERSEDES.get(key, ()):
+            rec.pop(dead, None)
+    rec.update(incoming)
 
 
 def forget(ctype: str) -> None:
@@ -390,7 +396,7 @@ def reset():
     return jsonify({"ok": True, "message": "Password changed. You can log in now."}), 200
 
 
-# ---- moderation settings (one setting, every content type) -----------------------------
+# ---- moderation settings (every content type, or several at once) ----------------------
 
 def _settings_view(levels) -> dict:
     pol = {t: levels.for_type(t) for t in ALL_SURFACES}
@@ -420,33 +426,94 @@ def get_settings():
     return jsonify(_settings_view(current_app.extensions["moderation"].levels)), 200
 
 
+_SURFACE_FIELDS = {"enabled", "level"}
+
+
+def _surface_changes(raw, names: list[str]):
+    """Validate a `surfaces` map. Returns (changes, None) or (None, error response).
+
+    Every entry is checked before anything is applied, so one bad name refuses the whole
+    request rather than leaving the surfaces before it changed and the ones after it not.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None, _err(400, "invalid_request",
+                          'surfaces must name at least one content type, e.g. '
+                          '{"post": "lenient", "article": "medium", "job": "strict"}')
+    unknown = sorted(str(k) for k in raw if k not in ALL_SURFACES)
+    if unknown:
+        return None, _err(400, "no_such_surface",
+                          f"no such surface {', '.join(map(repr, unknown))}; expected one of "
+                          f"{', '.join(sorted(ALL_SURFACES))}", surfaces=unknown)
+    changes = {}
+    for ct, value in raw.items():
+        change = {"level": value} if isinstance(value, str) else value
+        if (not isinstance(change, dict) or not change or set(change) - _SURFACE_FIELDS
+                or ("enabled" in change and not isinstance(change["enabled"], bool))
+                or ("level" in change and change["level"] not in names)):
+            return None, _err(400, "invalid_request",
+                              f"surfaces.{ct}: send a level name (one of {names}) or "
+                              f"{{enabled: true|false, level: <name>}}", surface=ct)
+        changes[ct] = change
+    return changes, None
+
+
 @admin_bp.put("/v1/admin/moderation-settings")
 def put_settings():
+    """Set every surface, set several named surfaces, or both, in one saved change.
+
+        {"enabled": true, "level": "strict"}                      every surface
+        {"surfaces": {"post": "lenient", "job": "strict"}}         only the ones named
+        {"enabled": true, "level": "medium", "surfaces": {...}}    every surface, then those
+
+    `surfaces` exists because the first form used to be the only way to change more than one
+    surface in a call, and it overwrites every surface. An admin who set post, article and job
+    apart and then used it lost all three, with nothing on screen to say so. A named surface
+    may be a level name or `{enabled, level}`; a level alone leaves the toggle as it was, the
+    same as the per-surface PUT. Surfaces not named are left exactly as they are.
+    """
     denied = check_admin()
     if denied:
         return denied
     data = _body()
     levels = current_app.extensions["moderation"].levels
-    if set(data) - {"enabled", "level"} or not isinstance(data.get("enabled"), bool) \
-            or data.get("level") not in levels.as_dict()["levels"]:
-        return _err(400, "invalid_request",
-                    f"send {{enabled: true|false, level: one of {sorted(levels.as_dict()['levels'])}}}")
+    names = sorted(levels.as_dict()["levels"])
+    usage = (f"send {{enabled: true|false, level: one of {names}}} to set every surface, "
+             f"and/or {{surfaces: {{<content_type>: <level>, ...}}}} to set only those")
+    everything = "enabled" in data or "level" in data
+    if set(data) - {"enabled", "level", "surfaces"} or not (everything or "surfaces" in data):
+        return _err(400, "invalid_request", usage)
+    if everything and (not isinstance(data.get("enabled"), bool) or data.get("level") not in names):
+        return _err(400, "invalid_request", usage)
+    changes: dict = {}
+    if "surfaces" in data:
+        changes, problem = _surface_changes(data["surfaces"], names)
+        if problem:
+            return problem
+
     a: Admin = current_app.extensions["admin"]
     with a.settings_lock:                       # two admins saving at once cannot interleave
-        previous = a.store.load_settings()
-        for t in ALL_SURFACES:
-            levels.set_feature(t, enabled=data["enabled"], level=data["level"])
+        before = levels.snapshot()
+        record = a.store.load_settings()
+        if everything:
+            for t in ALL_SURFACES:
+                levels.set_feature(t, enabled=data["enabled"], level=data["level"])
+            record = {**record, "features": {t: {"enabled": data["enabled"], "level": data["level"]}
+                                             for t in ALL_SURFACES}}
+        for ct, change in changes.items():      # after the everything-setting, so they win
+            levels.set_feature(ct, **change)
+            _merge_change(record, ct, change)
         try:
-            a.store.save_settings({"features": {t: {"enabled": data["enabled"], "level": data["level"]}
-                                                for t in ALL_SURFACES}})
+            a.store.save_settings(record)
         except Exception:
             log.exception("could not save moderation settings; rolling back")
-            for t in ALL_SURFACES:               # keep memory and disk telling the same story
-                rec = previous.get("features", {}).get(t, {})
-                levels.set_feature(t, enabled=rec.get("enabled", True), level=rec.get("level"))
+            levels.restore(before)              # keep memory and disk telling the same story
             return _err(500, "save_failed", "Could not save the setting, so nothing was changed.")
-    log.warning("moderation set by admin: enabled=%s level=%s for %s", data["enabled"], data["level"],
-                ", ".join(ALL_SURFACES))
+    if everything:
+        log.warning("moderation set by admin: enabled=%s level=%s for every surface",
+                    data["enabled"], data["level"])
+    if changes:
+        log.warning("moderation set by admin for %s",
+                    ", ".join(f"{ct}={c}" for ct, c in changes.items()))
     return jsonify(_settings_view(levels)), 200
 
 
