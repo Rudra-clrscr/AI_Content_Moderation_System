@@ -36,8 +36,9 @@ info:
     - Admin endpoints accept **either** an `X-Admin-Token` header **or** a logged-in
       session cookie (`bonc_admin`). With the cookie, every non-GET request must also
       carry `X-Requested-With: bonc-admin` or it is refused `403` — that is the CSRF
-      defence. Token auth is not subject to it, which makes the token the practical
-      choice for Swagger and scripts.
+      defence. This page sends the header on every request, so signing in with
+      `POST /v1/admin/auth/login` is all an admin needs here. Token auth is not subject
+      to it, which suits scripts.
     - `POST /v1/admin/model/reload` accepts the **token only**; a session is rejected.
     - If `ADMIN_TOKEN` is unset *and* no admin account exists, admin endpoints answer
       `404` ("disabled"), not `401`.
@@ -1893,8 +1894,9 @@ components:
       in: header
       name: X-Admin-Token
       description: |
-        The `ADMIN_TOKEN` value. Not subject to the CSRF header requirement, which makes
-        it the practical choice for Swagger and scripts.
+        The `ADMIN_TOKEN` value, for scripts and operations. Not subject to the CSRF
+        header requirement. Admins normally sign in with email and password instead
+        (`AdminSession`).
     AdminSession:
       type: apiKey
       in: cookie
@@ -1905,8 +1907,11 @@ components:
         once you have logged in through this same origin.
 
         With this scheme, every **non-GET** request must also carry
-        `X-Requested-With: bonc-admin` or it is refused `403`. Swagger UI cannot add that
-        header from a security scheme, so prefer `AdminToken` for write operations.
+        `X-Requested-With: bonc-admin` or it is refused `403`. That is the CSRF defence.
+
+        **This page adds that header for you**, so here you just sign in with
+        `POST /v1/admin/auth/login` and every admin call works. A client of your own that
+        uses the session cookie must send the header itself, as the dashboard does.
 
   responses:
     BadRequest:
