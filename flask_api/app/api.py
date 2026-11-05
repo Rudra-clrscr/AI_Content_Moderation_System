@@ -639,11 +639,20 @@ def moderate_unified():
     form = request.form or {}
     files = request.files or {}
 
-    # Extract text content
+    # Extract text content. The parts come first: an article arriving here is the one with a
+    # picture attached, so this is the endpoint most likely to be handed a whole DTO, and
+    # dropping its title because `content` was absent is the failure /v1/moderate already had.
     has_text_field = False
     raw_content = None
+    unified_fields = {}
 
-    if "content" in form:
+    source = {**body, **form}
+    parts = _read_parts(source)
+    if any(v is not None for v in parts.values()):
+        joined, unified_fields = join_parts(parts)
+        has_text_field = True
+        raw_content = joined
+    elif "content" in form:
         has_text_field = True
         raw_content = form.get("content")
     elif "text" in form:
@@ -712,6 +721,8 @@ def moderate_unified():
         }
         unified_data = dict(text_data)
         unified_data["checks"] = checks
+        if unified_fields:
+            unified_data["fields"] = unified_fields
         msg = _approved_message(unified_data) if unified_data["Action"] == "approved" else (
             unified_data.get("Note") or "Content rejected by moderation policy."
         )
@@ -818,6 +829,7 @@ def moderate_unified():
         "content": content,
         "decision": final_decision,
         "decided_by": combined_decided_by,
+        **({"fields": unified_fields} if unified_fields else {}),
         "Action": final_action,
         "Decision": final_action,
         "action": final_action,

@@ -177,3 +177,57 @@ def test_an_empty_medias_list_is_not_an_attachment(make_settings):
     plain = {**DTO, "Medias": [], "ThumbnailUrl": ""}
     body = client(make_settings).post("/v1/moderate", json=plain).get_json()
     assert "attachments_not_checked" not in body["Data"]
+
+
+# ---- /v1/moderate/unified takes the parts too ----------------------------------------------
+
+def test_unified_joins_the_parts_from_json(make_settings):
+    """An article with a picture arrives here, so this is the endpoint most likely to be
+    handed a whole DTO. Dropping its title because `content` was absent is the same hole."""
+    c = client(make_settings)
+    r = c.post("/v1/moderate/unified",
+               json={"Title": "A title", "Body": "A body.", "Hashtags": "#tag",
+                     "content_type": "article"})
+    data = r.get_json()["Data"]
+    assert r.status_code == 200
+    assert data["content"] == "A title\n\nA body.\n\ntag"
+    assert sorted(data["fields"]) == ["body", "hashtags", "title"]
+
+
+def test_unified_joins_the_parts_from_a_multipart_form(make_settings):
+    import io as _io
+
+    from PIL import Image
+
+    buf = _io.BytesIO()
+    Image.new("RGB", (64, 64), (205, 205, 205)).save(buf, format="PNG")
+    r = client(make_settings).post(
+        "/v1/moderate/unified",
+        data={"Title": "A title", "Body": "A body.", "content_type": "article",
+              "file": (_io.BytesIO(buf.getvalue()), "p.png")},
+        content_type="multipart/form-data")
+    data = r.get_json()["Data"]
+    assert r.status_code == 200
+    assert data["content"] == "A title\n\nA body."
+    assert sorted(data["fields"]) == ["body", "title"]
+    # Both halves ran: the text came from the parts, the picture from the file.
+    assert data["checks"]["text"]["executed"] is True
+    assert data["checks"]["image"]["executed"] is True
+
+
+def test_a_post_without_a_title_is_fine_and_one_with_a_title_keeps_it(make_settings):
+    """`CreatePostDTO` has no Title; `UpdatePostDTO` and `CreateGroupPostDto` both do.
+
+    So a post may or may not carry one, and neither shape may be the one that quietly works.
+    """
+    c = client(make_settings)
+    quick = c.post("/v1/moderate", json={"TextContent": "Shipping two containers.",
+                                         "content_type": "post"}).get_json()["Data"]
+    assert quick["content"] == "Shipping two containers."
+    assert sorted(quick["fields"]) == ["body"]
+
+    edited = c.post("/v1/moderate", json={"Title": "Shipping update",
+                                          "TextContent": "Shipping two containers.",
+                                          "content_type": "post"}).get_json()["Data"]
+    assert edited["content"] == "Shipping update\n\nShipping two containers."
+    assert sorted(edited["fields"]) == ["body", "title"]

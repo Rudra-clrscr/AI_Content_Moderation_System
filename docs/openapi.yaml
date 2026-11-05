@@ -207,56 +207,23 @@ paths:
                     - { type: integer }
                   description: Your platform's own ID. Always returned as a string.
             examples:
-              clean:
-                summary: An ordinary listing (expect allow)
-                value:
-                  content: Premium basmati rice exporter, FSSAI certified.
-                  content_type: product_listing
-                  content_id: LST-10293
-              scam:
-                summary: Text the model should refuse (not a gate rule — the model decides)
-                value:
-                  content: Pay the processing fee to this personal UPI first and I will release your consignment.
-                  content_type: post
-                  content_id: POST-5521
-              articleParts:
-                summary: An article — send the parts, the service joins them
-                value:
-                  title: Why our mill switched to drip irrigation
-                  body: We cut water use by 40% over two seasons across 120 acres, and the yield held.
-                  hashtags: ["#dripIrrigation", "#sustainableFarming"]
-                  content_type: article
-                  content_id: ART-8831
-              articlePartsDotNet:
-                summary: The same, with the PascalCase names the .NET DTOs use
+              article:
+                summary: An article - title, body and hashtags
                 value:
                   Title: Why our mill switched to drip irrigation
                   Body: We cut water use by 40% over two seasons across 120 acres, and the yield held.
                   Hashtags: "#dripIrrigation,#sustainableFarming"
                   content_type: article
                   content_id: ART-8831
-              article:
-                summary: An article, pre-joined into one `content` string
+              post:
+                summary: A post - its text and hashtags
                 value:
-                  content: |-
-                    Why our mill switched to drip irrigation
-
-                    We cut water use by 40% over two seasons across 120 acres, and the yield held. Here is what it cost and what we would do differently.
-
-                    drip Irrigation sustainable Farming
-                  content_type: article
-                  content_id: ART-8831
-              articleSplitHarm:
-                summary: Why joining matters — the title is clean, the body is not
-                value:
-                  content: |-
-                    Our export paperwork service
-
-                    Pay the processing fee to this personal UPI first and I will release your consignment.
-                  content_type: article
-                  content_id: ART-8832
+                  TextContent: Shipping two containers of long-grain rice to Dubai this week.
+                  Hashtags: "#export,#logistics"
+                  content_type: post
+                  content_id: POST-9912
               jobPosting:
-                summary: A job posting — every prose box, forwarded from CreateJobDTO
+                summary: A job posting - every prose box of CreateJobDTO
                 value:
                   Title: Warehouse Supervisor
                   CompanyName: Fortune Agro Exports
@@ -268,20 +235,6 @@ paths:
                   Benefits: PF, health cover, annual bonus
                   content_type: job
                   content_id: JOB-4412
-              post:
-                summary: A quick post — its text and hashtags
-                value:
-                  content: |-
-                    Shipping two containers of long-grain rice to Dubai this week. Message me if you need space.
-
-                    export logistics
-                  content_type: post
-                  content_id: POST-9912
-              grievance:
-                summary: A public complaint — refused on article/post/advertisement only
-                value:
-                  content: Nobody at their support desk has replied about the refund in two weeks.
-                  content_type: article
       responses:
         "200":
           description: A decision was reached — allow, revise **or** reject.
@@ -337,6 +290,16 @@ paths:
         required: true
         content:
           multipart/form-data:
+            examples:
+              article:
+                summary: An image attached to an article
+                value: { content_type: article, content_id: ART-8831 }
+              post:
+                summary: An image attached to a post
+                value: { content_type: post, content_id: POST-9912 }
+              jobPosting:
+                summary: An image attached to a job posting
+                value: { content_type: job, content_id: JOB-4412 }
             schema:
               type: object
               required: [file]
@@ -413,6 +376,35 @@ paths:
                 content_id:
                   type: string
           application/json:
+            examples:
+              article:
+                summary: An article - title, body and hashtags
+                value:
+                  Title: Why our mill switched to drip irrigation
+                  Body: We cut water use by 40% over two seasons across 120 acres, and the yield held.
+                  Hashtags: "#dripIrrigation,#sustainableFarming"
+                  content_type: article
+                  content_id: ART-8831
+              post:
+                summary: A post - its text and hashtags
+                value:
+                  TextContent: Shipping two containers of long-grain rice to Dubai this week.
+                  Hashtags: "#export,#logistics"
+                  content_type: post
+                  content_id: POST-9912
+              jobPosting:
+                summary: A job posting - every prose box of CreateJobDTO
+                value:
+                  Title: Warehouse Supervisor
+                  CompanyName: Fortune Agro Exports
+                  Description: Oversee inbound and outbound shipments at our Pune facility.
+                  Responsibilities: Plan shifts, maintain stock accuracy, report weekly.
+                  Requirements: Three years in logistics.
+                  Qualification: Graduate in any discipline.
+                  KeySkills: inventory, SAP, team handling
+                  Benefits: PF, health cover, annual bonus
+                  content_type: job
+                  content_id: JOB-4412
             schema:
               type: object
               properties:
