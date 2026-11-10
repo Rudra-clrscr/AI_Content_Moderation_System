@@ -1,0 +1,26 @@
+# Daily backup of the moderation service's databases, uploads and admin-edited config.
+# Started by moderation-backup.timer; see deploy/backup.py for what is and is not included.
+#
+# Runs as the service user so the SQLite copies never leave root-owned files beside the live
+# databases. /var/backups/moderation must exist and belong to that user (deploy/STAGING_SERVER.md).
+#
+#   sudo cp deploy/moderation-backup.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now moderation-backup.timer
+#   sudo systemctl start moderation-backup      # run one now
+#   journalctl -u moderation-backup -n 20       # what it did
+
+[Unit]
+Description=Back up the moderation API's data
+After=moderation-api.service
+
+[Service]
+Type=oneshot
+User=moderation
+Group=moderation
+ExecStart=/usr/bin/python3 /opt/moderation/deploy/backup.py --app-dir /opt/moderation --dest /var/backups/moderation --keep 14
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
