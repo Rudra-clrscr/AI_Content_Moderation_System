@@ -366,7 +366,18 @@ paths:
               properties:
                 content:
                   type: string
-                  description: Text content to moderate (optional if file provided).
+                  description: |
+                    Text content to moderate (optional if file provided). Use this **or**
+                    `Title` / `Body` / `Hashtags`, not both — sending both is a 400.
+                Title:
+                  type: string
+                  description: The article or post title. The service joins `Title`, `Body` and `Hashtags` into the text it scores.
+                Body:
+                  type: string
+                  description: The article body, or a post's text. Use this, not `content`, when you send a `Title`.
+                Hashtags:
+                  type: string
+                  description: 'Comma-separated, e.g. `#dripIrrigation,#sustainableFarming`. Each tag is split into its words before scoring.'
                 file:
                   type: string
                   format: binary
@@ -411,7 +422,13 @@ paths:
               properties:
                 content:
                   type: string
-                  description: Text content to moderate.
+                  description: Text content to moderate. Use this **or** the DTO parts (`Title`, `Body`, `Hashtags`, ...), not both.
+                Title:
+                  type: string
+                Body:
+                  type: string
+                Hashtags:
+                  type: string
                 content_type:
                   allOf: [{ $ref: '#/components/schemas/ContentType' }]
                   default: article
@@ -425,7 +442,7 @@ paths:
               schema: { $ref: '#/components/schemas/UnifiedModerationResultApiResponse' }
         "401": { $ref: '#/components/responses/ServiceTokenRequired' }
         "400":
-          description: '`invalid_request` (neither text nor media provided), `invalid_content` (empty string), `invalid_content_type`'
+          description: '`invalid_request` (neither text nor media provided, or `content` sent together with `Title`/`Body`/`Hashtags`), `invalid_content` (empty string), `invalid_content_type`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "403":
           description: '`client_blocked`'

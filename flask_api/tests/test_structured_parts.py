@@ -231,3 +231,17 @@ def test_a_post_without_a_title_is_fine_and_one_with_a_title_keeps_it(make_setti
                                           "content_type": "post"}).get_json()["Data"]
     assert edited["content"] == "Shipping update\n\nShipping two containers."
     assert sorted(edited["fields"]) == ["body", "title"]
+
+
+def test_unified_refuses_content_sent_with_the_parts(make_settings):
+    """A Title typed beside `content` in the Swagger form used to win silently, and the
+    text in `content` was never scored. Same rule as /v1/moderate now: one or the other."""
+    r = client(make_settings).post(
+        "/v1/moderate/unified",
+        data={"Title": "A title", "content": "the text that used to vanish",
+              "content_type": "article"},
+        content_type="multipart/form-data")
+    assert r.status_code == 400
+    data = r.get_json()["Data"]
+    assert data["code"] == "invalid_request"
+    assert data["parts"] == ["title"]
