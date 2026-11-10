@@ -38,3 +38,9 @@ pillow>=10.0
 # right and must not break if the data-science stack is ever dropped. Without it the Text and
 # Word exports still work and the Excel one reports what is missing.
 openpyxl>=3.1
+
+# Retraining the image probe from the admin dashboard (app/image_trainer.py, behind
+# POST /v1/admin/images/train). It is imported when the app starts, through app/admin_images.py,
+# so without it the server does not boot at all: gunicorn exits with
+# ModuleNotFoundError: sklearn. That is how the first Contabo deploy failed.
+scikit-learn>=1.5

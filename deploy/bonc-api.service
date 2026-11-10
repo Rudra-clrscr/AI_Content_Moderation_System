@@ -68,8 +68,21 @@ Environment=OMP_NUM_THREADS=2
 #   MemoryHigh   reclaim pressure starts here - the service is throttled, not killed
 #   MemoryMax    hard ceiling: exceed it and only THIS service is killed
 #   OOMScoreAdj  and if the whole box runs out anyway, volunteer this service first
-MemoryHigh=1536M
-MemoryMax=2G
+#
+# "Throttled, not killed" is not mild. The 1.5 GB above is the worker BEFORE its first
+# picture: OCR loads lazily on the first image and adds ~200 MB, up to ~290 MB after a 12 MP
+# photo, and onnxruntime keeps that peak for the life of the process. Add the decoded images
+# in flight on four threads and a normal peak is 1.75-1.9 GB. At the 1536M/2G this file used
+# to ship, the first Contabo deploy sat above MemoryHigh permanently: memory.events counted
+# 235,932 throttle events, memory.pressure showed the service stalled ~80% of the time, an
+# OCR read that takes 2 s took 80-100 s, image uploads 504'd at nginx's 180 s, and the requests
+# nginx gave up on kept running and blocked the OCR lock for everyone queued behind them.
+# Nothing was killed and nothing was logged - it just crawled.
+#
+# 2400M leaves ~500 MB above the measured peak; 2700M keeps the ceiling inside what that box
+# had free. Check `free -h` before raising either on a shared host.
+MemoryHigh=2400M
+MemoryMax=2700M
 OOMScoreAdjust=500
 
 StandardOutput=journal

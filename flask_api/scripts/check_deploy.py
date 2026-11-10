@@ -81,15 +81,30 @@ def check_files() -> list[tuple[str, bool, str]]:
     out.append(("image prompts", prompts.is_file(),
                 "prompts.npz" if prompts.is_file()
                 else "missing prompts.npz - run scripts/build_clip_prompts.py"))
+
+    # Gitignored like vision_model.onnx, and it fails just as quietly: app/ocr.py logs one
+    # error and falls back to the bundled Latin-only model, so Hindi writing in a picture
+    # reads as gibberish while the service reports itself ready.
+    ocr = s.get("ocr") or {}
+    rec = str(ocr.get("rec_model_path") or "")
+    if ocr.get("enabled", True) and rec:
+        ok, note = _file(ROOT / rec, f"{ocr.get('rec_lang') or 'OCR'} recognition")
+        if not ok and note.startswith("missing"):
+            note += f" - run scripts/fetch_ocr_langs.py {ocr.get('rec_lang') or ''}".rstrip()
+        out.append(("OCR language model", ok, note))
     return out
 
 
 def check_service(url: str) -> list[tuple[str, bool, str]]:
     try:
         with urllib.request.urlopen(url.rstrip("/") + "/ready", timeout=30) as r:
-            d = json.loads(r.read().decode("utf-8"))
+            body = json.loads(r.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError) as e:
         return [("service", False, f"cannot read {url}/ready: {e}")]
+    # Every response is the {Success, Message, Data} envelope, so the fields are one level
+    # down. Reading the top level instead found no "status" and failed a healthy service.
+    # The fallback keeps this working against an older build that answered bare.
+    d = body.get("Data") if isinstance(body.get("Data"), dict) else body
 
     out = [("service", d.get("status") == "ready", f"status={d.get('status')}")]
     out.append(("text model live", bool(d.get("model_ready")),

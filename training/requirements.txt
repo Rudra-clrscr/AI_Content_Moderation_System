@@ -1,6 +1,7 @@
-# Training dependencies. NONE of these are needed to serve - flask_api/requirements.txt is the
-# serving set, and it is deliberately smaller. A fitted probe ships as two numpy arrays and is
-# applied with one matmul in app/clip.py, so scikit-learn never reaches a production host.
+# Training dependencies. flask_api/requirements.txt is the serving set, and it is deliberately
+# smaller. A fitted probe ships as two numpy arrays and is applied with one matmul in
+# app/clip.py, so scoring never needs scikit-learn. The server does need it all the same:
+# the admin dashboard can refit the probe (app/image_trainer.py), so flask_api declares it too.
 #
 # This file exists because it didn't. `train_image_probe.py` imports scikit-learn, nothing
 # declared it, and the probe that was shipping could not be retrained in the project's own
