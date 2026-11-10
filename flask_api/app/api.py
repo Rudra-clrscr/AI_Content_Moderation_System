@@ -648,7 +648,14 @@ def moderate_unified():
 
     source = {**body, **form}
     parts = _read_parts(source)
-    if any(v is not None for v in parts.values()):
+    sent = sorted(n for n, v in parts.items() if v is not None)
+    if sent and any(k in source for k in ("content", "text")):
+        # The same rule as /v1/moderate. Taking the parts and quietly dropping `content` meant
+        # a Title typed beside the text in the Swagger form threw the text away unscored.
+        return _error(400, "invalid_request",
+                      f"send either 'content' or the parts {sent}, not both - put the text "
+                      f"in 'Body' alongside 'Title'", parts=sent)
+    if sent:
         joined, unified_fields = join_parts(parts)
         has_text_field = True
         raw_content = joined
