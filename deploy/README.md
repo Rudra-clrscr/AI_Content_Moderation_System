@@ -2,6 +2,11 @@
 
 Written for: whoever provisions and operates the BONC moderation server.
 
+> **Operating the live staging server?** Read [STAGING_SERVER.md](STAGING_SERVER.md) instead.
+> It was deployed under different names (`/opt/moderation`, `moderation-api`, port 8005), so
+> the paths and commands below do not apply to it as written, and `install.sh` must not be
+> re-run there.
+
 This service runs **two models**, and they arrive by **different routes**. That asymmetry is
 the whole reason this document exists.
 
@@ -102,9 +107,16 @@ resolved by the kernel killing whichever process scores worst, and that score tr
 which on this box is the **2.5 GB AI search**. Deploying carelessly here does not degrade
 this service, it kills that one.
 
-`bonc-api.service` therefore sets `MemoryHigh=1536M`, `MemoryMax=2G` and
+`bonc-api.service` therefore sets `MemoryHigh=2400M`, `MemoryMax=2700M` and
 `OOMScoreAdjust=500`: this service is throttled first, hard-capped second, and volunteered
 to the OOM killer ahead of everything that was here before it.
+
+The 1.47 GB above is the worker **before its first picture**. OCR loads on the first image
+and adds ~200–290 MB that it never gives back, so the real peak is 1.75–1.9 GB. The limits
+used to be 1536M/2G, and on the first deploy that left the service permanently throttled:
+OCR took 80–100 s instead of 2 s and image uploads timed out with 504s, with nothing in
+the logs. If images are slow and `/health` is sluggish, read
+`/sys/fs/cgroup/system.slice/<unit>/memory.events` — a climbing `high` count is this.
 
 ### Video is not checked
 
