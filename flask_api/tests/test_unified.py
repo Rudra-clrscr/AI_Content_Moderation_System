@@ -216,13 +216,33 @@ def test_4_empty_text_explicitly_supplied_returns_400(client):
     assert r1.status_code == 400
     assert r1.get_json()["Data"]["code"] == "invalid_content"
 
-    # Empty string in multipart form alongside file
-    r2 = client.post("/v1/moderate/unified", data={
-        "content": "   ",
-        "file": (io.BytesIO(png()), "pic.png")
-    }, content_type="multipart/form-data")
+    # Blank text and no file: nothing to check.
+    r2 = client.post("/v1/moderate/unified", data={"content": "   ", "Title": ""},
+                     content_type="multipart/form-data")
     assert r2.status_code == 400
     assert r2.get_json()["Data"]["code"] == "invalid_content"
+
+
+def test_blank_text_boxes_beside_a_picture_are_an_empty_caption(client):
+    """Exactly what Swagger sends with "Send empty value" ticked: every text box as an empty
+    string, plus the picture. That is a photo-only post, not a request that sent `content`
+    and the parts together - which is what it was refused as."""
+    r = client.post("/v1/moderate/unified", data={
+        "content": "", "Title": "", "Body": "  ", "Hashtags": "",
+        "file": (io.BytesIO(png()), "pic.png"), "content_type": "post",
+    }, content_type="multipart/form-data")
+    assert r.status_code == 200, r.get_json()
+    checks = r.get_json()["Data"]["checks"]
+    assert checks["text"]["executed"] is False
+    assert checks["image"]["executed"] is True
+
+
+def test_blank_parts_beside_content_are_not_a_conflict(client):
+    r = client.post("/v1/moderate/unified", data={
+        "content": "Shipping two containers of rice.", "Title": "", "Body": "", "Hashtags": "",
+    }, content_type="multipart/form-data")
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["Data"]["content"] == "Shipping two containers of rice."
 
 
 # --------------------------------------------------------------------------------

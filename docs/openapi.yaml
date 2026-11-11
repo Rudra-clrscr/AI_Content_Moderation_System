@@ -368,7 +368,9 @@ paths:
                   type: string
                   description: |
                     Text content to moderate (optional if file provided). Use this **or**
-                    `Title` / `Body` / `Hashtags`, not both — sending both is a 400.
+                    `Title` / `Body` / `Hashtags`, not both — sending both is a 400. A box left
+                    blank counts as not sent, so a picture with every text box empty is checked
+                    as a picture only.
                 Title:
                   type: string
                   description: The article or post title. The service joins `Title`, `Body` and `Hashtags` into the text it scores.
