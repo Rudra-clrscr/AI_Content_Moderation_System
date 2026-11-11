@@ -642,50 +642,62 @@ def moderate_unified():
     # Extract text content. The parts come first: an article arriving here is the one with a
     # picture attached, so this is the endpoint most likely to be handed a whole DTO, and
     # dropping its title because `content` was absent is the failure /v1/moderate already had.
-    has_text_field = False
-    raw_content = None
     unified_fields = {}
-
     source = {**body, **form}
-    parts = _read_parts(source)
-    sent = sorted(n for n, v in parts.items() if v is not None)
-    if sent and any(k in source for k in ("content", "text")):
-        # The same rule as /v1/moderate. Taking the parts and quietly dropping `content` meant
-        # a Title typed beside the text in the Swagger form threw the text away unscored.
-        return _error(400, "invalid_request",
-                      f"send either 'content' or the parts {sent}, not both - put the text "
-                      f"in 'Body' alongside 'Title'", parts=sent)
-    if sent:
-        joined, unified_fields = join_parts(parts)
-        has_text_field = True
-        raw_content = joined
-    elif "content" in form:
-        has_text_field = True
-        raw_content = form.get("content")
-    elif "text" in form:
-        has_text_field = True
-        raw_content = form.get("text")
-    elif "content" in body:
-        has_text_field = True
-        raw_content = body.get("content")
-    elif "text" in body:
-        has_text_field = True
-        raw_content = body.get("text")
 
     # Extract upload file
     upload = files.get("file") or files.get("image") or files.get("media")
     has_file = (upload is not None and bool(upload.filename))
 
+    def _blank(v) -> bool:
+        if v is None:
+            return True
+        if isinstance(v, str):
+            return not v.strip()
+        if isinstance(v, (list, tuple)):
+            return not any(str(x).strip() for x in v if x is not None)
+        return False
+
+    # A BLANK FIELD IS NOT A SENT FIELD. Swagger's "Send empty value" boxes, and a .NET form
+    # serialising every property, both send `Title=` and `content=` for boxes nobody typed in.
+    # Counting those as sent refused a picture-only request for "sending content and the parts
+    # together" when neither held a word.
+    parts = {k: (None if _blank(v) else v) for k, v in _read_parts(source).items()}
+    sent = sorted(n for n, v in parts.items() if v is not None)
+    raw_content, content_key = None, None
+    for k in ("content", "text"):
+        if k in form or k in body:
+            raw_content, content_key = (form.get(k) if k in form else body.get(k)), k
+            break
+    content_given = content_key is not None and not _blank(raw_content)
+
+    if sent and content_given:
+        # The same rule as /v1/moderate. Taking the parts and quietly dropping `content` meant
+        # a Title typed beside the text in the Swagger form threw the text away unscored.
+        return _error(400, "invalid_request",
+                      f"send either 'content' or the parts {sent}, not both - put the text "
+                      f"in 'Body' alongside 'Title'", parts=sent)
+
     text_provided = False
     content = None
-    if has_text_field:
-        if not isinstance(raw_content, str) or not raw_content.strip():
-            return _error(400, "invalid_content", "'content' must be a non-empty string")
-        max_chars = _svc().settings.max_chars
-        if len(raw_content) > max_chars:
-            return _error(413, "content_too_long", f"'content' exceeds {max_chars} characters")
+    if sent:
+        content, unified_fields = join_parts(parts)
         text_provided = True
+    elif content_given:
+        if not isinstance(raw_content, str):
+            return _error(400, "invalid_content", "'content' must be a non-empty string")
         content = raw_content
+        text_provided = True
+    elif not has_file and (content_key is not None
+                           or any(a in source for al in PART_ALIASES.values() for a in al)):
+        # Text boxes were sent, all blank, and there is no picture: nothing at all to check.
+        # With a picture the blank boxes are simply an empty caption - a photo-only post.
+        return _error(400, "invalid_content", "'content' must be a non-empty string")
+
+    if text_provided:
+        max_chars = _svc().settings.max_chars
+        if len(content) > max_chars:
+            return _error(413, "content_too_long", f"'content' exceeds {max_chars} characters")
 
     if not text_provided and not has_file:
         return _error(400, "invalid_request", "At least one of 'content' (text) or 'file' (image/media) must be provided")
