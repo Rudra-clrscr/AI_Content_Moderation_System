@@ -50,6 +50,10 @@ def create_app(
     and for the data layer's integration; production uses the defaults."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = settings or load_settings()
+    if settings.auth_disabled:
+        logging.getLogger(__name__).warning(
+            "AUTH_DISABLED is on: every endpoint, admin ones included, answers without a token "
+            "or a login. Anyone who can reach this host can change levels and clear the audit log.")
     app = Flask(__name__, static_folder=None)  # only /demo serves a file, and only when enabled
     # bytes; UTF-8 worst case + JSON overhead, or an attachment plus its multipart envelope.
     json_limit = settings.max_chars * 4 + 4096

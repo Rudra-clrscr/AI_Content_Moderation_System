@@ -16,8 +16,14 @@ any of it.
 
 **Base URL (staging):** `https://boncaistageapi.boncnetwork.com`. Swagger, where every call
 below can be tried live, is at [`/docs`](https://boncaistageapi.boncnetwork.com/docs).
-This is the staging host. Production will get its own name and its own token.
-**Auth:** `Authorization: Bearer <SERVICE_TOKEN>` — the same scheme your Swagger already
+This is the staging host. Production will get its own name.
+
+**Auth on staging: none.** The server runs with `AUTH_DISABLED=1`, so every endpoint answers
+without a token or a login, admin ones included. Authentication is yours to add in front of
+it, to suit your setup. `GET /ready` shows `"service_auth"` and `"admin_auth"` as `open`.
+The service still has its own checks, which you can switch back on with no code change:
+
+**Built-in auth, if switched back on:** `Authorization: Bearer <SERVICE_TOKEN>` — the same scheme your Swagger already
 declares as `Bearer` (an `apiKey` in the `Authorization` header), so your existing handler
 works unchanged. The token will be issued to you privately. `GET /ready` reports
 `"service_auth": "enforced"` or `"open"`, so you can see which one you're talking to. If it
