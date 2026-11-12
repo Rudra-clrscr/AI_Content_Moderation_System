@@ -6,7 +6,7 @@ import logging
 import re
 from pathlib import Path
 
-from flask import Blueprint, current_app, g, jsonify, request, send_from_directory
+from flask import Blueprint, Response, current_app, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
 from app import client_address
@@ -222,6 +222,8 @@ def _require_service_token():
     on its own host instead of beside the caller. `/ready` reports `service_auth` so a deploy
     check can assert it came out `enforced` rather than discover it did not.
     """
+    if _svc().settings.auth_disabled:
+        return None
     token = _svc().settings.service_token
     if not token:
         return None
@@ -971,7 +973,28 @@ def openapi_spec():
         return _error(404, "not_found",
                       f"no spec at {_SPEC_DIR / 'openapi.yaml'}; it ships in the repository's "
                       "docs/ directory, which a flask_api-only deployment does not carry")
+    if _svc().settings.auth_disabled:
+        # No lock icons and no Authorize button for checks that are not there. The file on
+        # disk keeps its security declarations for when authentication goes back on.
+        return Response(_spec_without_auth(), mimetype="application/yaml")
     return send_from_directory(_SPEC_DIR, "openapi.yaml", mimetype="application/yaml")
+
+
+def _spec_without_auth() -> str:
+    import yaml
+
+    spec = yaml.safe_load((_SPEC_DIR / "openapi.yaml").read_text(encoding="utf-8"))
+    spec["security"] = []
+    (spec.get("components") or {}).pop("securitySchemes", None)
+    for ops in (spec.get("paths") or {}).values():
+        for op in (ops or {}).values():
+            if isinstance(op, dict):
+                op.pop("security", None)
+    info = spec.setdefault("info", {})
+    info["description"] = ("> **Authentication is switched off on this server** (`AUTH_DISABLED=1`). "
+                           "Every endpoint, admin ones included, answers without a token or a "
+                           "login.\n\n" + str(info.get("description") or ""))
+    return yaml.safe_dump(spec, sort_keys=False, allow_unicode=True)
 
 
 @bp.get("/docs")
@@ -1011,7 +1034,9 @@ def ready():
         # Whether the submission endpoints are behind the bearer token. Reported because the
         # service fails OPEN when SERVICE_TOKEN is unset, and a deploy that forgot it looks
         # exactly like a deploy that did not - from the outside, until someone finds it.
-        "service_auth": "enforced" if svc.settings.service_token else "open",
+        "service_auth": "open" if svc.settings.auth_disabled or not svc.settings.service_token
+                        else "enforced",
+        "admin_auth": "open" if svc.settings.auth_disabled else "enforced",
     }
     if svc.settings.mode == "sync":
         body.update(model_ready=svc.models.ready, model_version=svc.models.version,

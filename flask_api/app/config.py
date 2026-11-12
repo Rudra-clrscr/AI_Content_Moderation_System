@@ -79,6 +79,12 @@ class Settings:
     # which is what local runs and the test suite depend on - see api._require_service_token,
     # and /ready, which reports which of the two a deployment ended up with.
     service_token: str | None = None
+    # AUTH_DISABLED=1 TURNS OFF EVERY CHECK: the bearer token on /v1/moderate* and the admin
+    # login on /v1/admin/*. For a deployment where the caller puts its own authentication in
+    # front (the .NET backend, on staging). Anyone who can reach the host can then change
+    # levels, edit the policy and clear the audit log, so it is logged loudly at startup and
+    # reported by /ready, and it is a switch rather than deleted code so it can go back on.
+    auth_disabled: bool = False
     # HOW MANY PROXIES SIT IN FRONT OF THIS SERVICE. 0 means none, and the caller's address is
     # the socket's - the only value that cannot be forged. Above 0, that many hops are stripped
     # from the right of X-Forwarded-For and the next one is the caller.
@@ -188,6 +194,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         celery_queue=celery.get("queue", "moderation"),
         admin_token=env("ADMIN_TOKEN") or None,
         service_token=env("SERVICE_TOKEN") or None,
+        auth_disabled=_as_bool(env("AUTH_DISABLED", False)),
         trust_proxy_hops=max(0, int(env("TRUST_PROXY_HOPS", raw.get("trust_proxy_hops", 0)) or 0)),
         db_server=env("DB_SERVER"),
         db_name=env("DB_NAME"),

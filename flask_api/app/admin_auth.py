@@ -222,8 +222,11 @@ def _session_admin():
 def check_admin():
     """None if the caller may use admin endpoints, otherwise a ready-made error response.
 
-    Accepted: a logged-in admin session, or (for scripts/ops) the X-Admin-Token header.
+    Accepted: a logged-in admin session, or (for scripts/ops) the X-Admin-Token header -
+    or anyone at all when AUTH_DISABLED is on (see Settings.auth_disabled).
     """
+    if current_app.extensions["moderation"].settings.auth_disabled:
+        return None
     row = _session_admin()
     if row is not None:
         if request.method not in ("GET", "HEAD", "OPTIONS") \

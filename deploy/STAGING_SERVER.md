@@ -90,7 +90,8 @@ Values are not written down anywhere but the file itself. Read one with
 | Key | Set to | Why |
 |---|---|---|
 | `GUNICORN_BIND` | `127.0.0.1:8005` | local only; nginx is the way in |
-| `SERVICE_TOKEN` | 64 hex chars | the bearer token for `/v1/moderate*`. **Empty means those endpoints are open to anyone.** Only the token goes here, without the word `Bearer`. |
+| `AUTH_DISABLED` | `1` | **all authentication off**: no bearer token on `/v1/moderate*`, no login on `/v1/admin/*`. Anyone who can reach the host can change levels, edit the policy and clear the audit log. Chosen on 2026-11-11 so the .NET team can put their own authentication in front. Remove the line, or set it to `0`, and restart to turn the checks below back on. `/ready` shows `admin_auth`. |
+| `SERVICE_TOKEN` | empty | the bearer token for `/v1/moderate*`, used only when `AUTH_DISABLED` is off. **Empty means those endpoints are open to anyone.** Only the token goes here, without the word `Bearer`. Don't reuse the old one, which was exposed: generate a new one with the command below. |
 | `ADMIN_TOKEN` | empty for now | if set, scripts can use the admin APIs with `X-Admin-Token: <value>`. Admins log in with email and password regardless. |
 | `SECRET_KEY` | 64 hex chars | signs admin login sessions; changing it logs every admin out |
 | `ADMIN_EMAIL` | the first admin's address | default for `admin_cli` |
