@@ -154,3 +154,103 @@ def test_health_reports_each_check(client):
 
 def test_health_needs_an_admin(client):
     assert client.get("/v1/admin/health").status_code == 401
+
+
+def test_repeat_offenders_endpoint(client, store):
+    _row(store, 4, decision="reject", user="spammer", modality="image")
+    _row(store, 1, decision="allow", user="spammer")
+    _row(store, 1, decision="reject", user="newcomer")
+    d = client.get("/v1/admin/moderation-logs/repeat-offenders", headers=ADMIN).get_json()
+    assert [u["user_id"] for u in d["users"]] == ["spammer"]
+    assert d["users"][0]["image_rejected"] == 4
+    assert (d["min_rejects"], d["min_rate"]) == (3, 0.5)
+
+    # The rule travels in the query, under either name.
+    d = client.get("/v1/admin/moderation-logs/repeat-offenders?min_rejects=1&min_rate=1",
+                   headers=ADMIN).get_json()
+    assert [u["user_id"] for u in d["users"]] == ["newcomer"]
+    d = client.get("/v1/admin/moderation-logs/repeat-offenders?modality=text",
+                   headers=ADMIN).get_json()
+    assert d["users"] == []
+
+    # A window that ends before anything was written finds no one.
+    d = client.get("/v1/admin/moderation-logs/repeat-offenders?until=1", headers=ADMIN).get_json()
+    assert d["users"] == []
+
+
+def test_member_record_answers_yes_or_no_with_the_numbers(client, store):
+    _row(store, 3, decision="reject", user="m-1")
+    _row(store, 1, decision="allow", user="m-1")
+    _row(store, 1, decision="reject", user="m-2")
+    _row(store, 9, decision="allow", user="m-2")
+
+    d = client.get("/v1/admin/moderation-logs/repeat-offenders/m-1", headers=ADMIN).get_json()
+    assert d["is_repeat_offender"] is True
+    assert (d["total"], d["rejected"], d["allowed"], d["reject_rate"]) == (4, 3, 1, 0.75)
+
+    d = client.get("/v1/admin/moderation-logs/repeat-offenders/m-2", headers=ADMIN).get_json()
+    assert d["is_repeat_offender"] is False and d["rejected"] == 1
+
+    d = client.get("/v1/admin/moderation-logs/repeat-offenders/nobody", headers=ADMIN).get_json()
+    assert d["total"] == 0 and d["is_repeat_offender"] is False and d["reject_rate"] is None
+
+    r = client.get("/v1/admin/moderation-logs/repeat-offenders/anonymous", headers=ADMIN)
+    assert r.status_code == 400
+
+
+def test_repeat_offender_endpoints_need_an_admin(client):
+    assert client.get("/v1/admin/moderation-logs/repeat-offenders").status_code == 401
+    assert client.get("/v1/admin/moderation-logs/repeat-offenders/m-1").status_code == 401
+
+
+# ---- blocking a member ---------------------------------------------------------------
+
+def _post(client, user=None, **kw):
+    headers = {"X-User-Id": user} if user else {}
+    return client.post("/v1/moderate", json={"content": "hello there", "content_type": "post", **kw},
+                       headers=headers)
+
+
+def test_a_blocked_member_is_refused_wherever_they_post_from(client, store):
+    r = client.post("/v1/admin/blocked-clients", headers=ADMIN,
+                    json={"value": "spammer", "scope": "member", "reason": "scam listings"})
+    assert r.status_code == 201, r.get_json()
+
+    r = _post(client, "spammer")
+    assert r.status_code == 403
+    assert r.get_json()["Data"]["code"] == "member_blocked"
+    # The id in the body counts as much as the header.
+    assert _post(client, userId="spammer").status_code == 403
+    # Everyone else, and anonymous submissions, carry on.
+    assert _post(client, "someone-else").status_code == 200
+    assert _post(client).status_code == 200
+
+    r = client.delete("/v1/admin/blocked-clients/spammer?scope=member", headers=ADMIN)
+    assert r.status_code == 200
+    assert _post(client, "spammer").status_code == 200
+
+
+def test_a_member_id_that_reads_like_an_address_blocks_only_the_member(client):
+    client.post("/v1/admin/blocked-clients", headers=ADMIN,
+                json={"value": "127.0.0.1", "scope": "member"})
+    assert _post(client).status_code == 200            # the test client's own address
+    assert _post(client, "127.0.0.1").status_code == 403
+
+
+def test_blocked_members_are_marked_on_the_log_and_the_offender_lists(client, store):
+    _row(store, 4, decision="reject", user="spammer")
+    client.post("/v1/admin/blocked-clients", headers=ADMIN,
+                json={"value": "spammer", "scope": "member"})
+    d = client.get("/v1/admin/moderation-logs", headers=ADMIN).get_json()
+    assert d["blocked_members"] == ["spammer"]
+    assert d["repeat_offenders"]["users"][0]["blocked"] is True
+    d = client.get("/v1/admin/moderation-logs/repeat-offenders", headers=ADMIN).get_json()
+    assert d["users"][0]["blocked"] is True
+    d = client.get("/v1/admin/moderation-logs/repeat-offenders/spammer", headers=ADMIN).get_json()
+    assert d["blocked"] is True
+
+
+def test_anonymous_cannot_be_blocked_as_a_member(client):
+    r = client.post("/v1/admin/blocked-clients", headers=ADMIN,
+                    json={"value": "anonymous", "scope": "member"})
+    assert r.status_code == 400 and r.get_json()["Data"]["code"] == "bad_member"

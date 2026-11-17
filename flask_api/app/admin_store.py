@@ -74,7 +74,8 @@ CREATE INDEX IF NOT EXISTS idx_mod_log_user ON moderation_log (user_id);
 
 -- Addresses an operator has refused. `scope` is 'ip' for one device or 'network' for the
 -- block it sits in, because an address that rotates within its own /24 is the usual reason
--- somebody reaches for this twice.
+-- somebody reaches for this twice. 'member' refuses one portal member by user_id, wherever
+-- they post from - the one block a phone hopping between networks cannot step around.
 CREATE TABLE IF NOT EXISTS blocked_client (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     value TEXT NOT NULL,
@@ -494,9 +495,42 @@ class AdminStore:
             "repeat_offenders": offenders,
         }
 
+    def member_record(self, user_id: str, *, since: float | None = None,
+                      until: float | None = None, min_rejects: int = 3,
+                      min_rate: float = 0.5) -> dict:
+        """One member's moderation record in a window, and whether it makes them an offender.
+
+        The same counts and the same two-part rule as repeat_offenders, for a member who may
+        or may not meet it - so a caller can ask "is this member one?" and get the numbers
+        behind the answer either way, rather than inferring "no" from absence in a list.
+        """
+        min_rejects = max(1, int(min_rejects))
+        min_rate = min(1.0, max(0.0, float(min_rate)))
+        where_sql, args = self._moderation_log_filter(None, None, None, None,
+                                                      since=since, until=until, user=user_id)
+        with self._tx() as db:
+            r = db.execute(f"""
+                SELECT COUNT(*) AS total,
+                       COALESCE(SUM(LOWER(decision) = 'allow'), 0) AS allowed,
+                       COALESCE(SUM(LOWER(decision) = 'revise'), 0) AS revised,
+                       COALESCE(SUM(LOWER(decision) = 'reject'), 0) AS rejected,
+                       COALESCE(SUM(LOWER(decision) = 'reject' AND COALESCE(modality, 'text') = 'text'), 0) AS text_rejected,
+                       COALESCE(SUM(LOWER(decision) = 'reject' AND modality = 'image'), 0) AS image_rejected,
+                       MAX(CASE WHEN LOWER(decision) = 'reject' THEN created_at END) AS last_reject_at,
+                       MAX(created_at) AS last_at
+                FROM moderation_log {where_sql}""", tuple(args)).fetchone()
+        out = {"user_id": user_id, **dict(r)}
+        out["reject_rate"] = round(out["rejected"] / out["total"], 4) if out["total"] else None
+        out["is_repeat_offender"] = bool(
+            out["total"] and out["rejected"] >= min_rejects
+            and out["rejected"] / out["total"] >= min_rate)
+        out.update(min_rejects=min_rejects, min_rate=min_rate)
+        return out
+
     def repeat_offenders(self, *, since: float | None = None, until: float | None = None,
                          min_rejects: int = 3, min_rate: float = 0.5,
-                         content_type: str | None = None, limit: int = 50) -> dict:
+                         content_type: str | None = None, limit: int = 50,
+                         modality: str | None = None) -> dict:
         """Members whose submissions are refused too often, in the window being looked at.
 
         Both conditions, not either: a count alone flags the busiest honest member (ten
@@ -506,7 +540,8 @@ class AdminStore:
         offender. Rows with no user id ("anonymous") cannot be attributed and are left out.
         """
         where_sql, args = self._moderation_log_filter(None, content_type, None, None,
-                                                      since=since, until=until)
+                                                      since=since, until=until,
+                                                      modality=modality)
         cond = "user_id IS NOT NULL AND user_id != '' AND user_id != 'anonymous'"
         where_sql = f"{where_sql} AND {cond}" if where_sql else f"WHERE {cond}"
         min_rejects = max(1, int(min_rejects))
@@ -560,13 +595,18 @@ class AdminStore:
 
     # ---- blocked addresses --------------------------------------------------------
 
+    @staticmethod
+    def _block_scope(scope: str | None) -> str:
+        s = str(scope or "").lower()
+        return s if s in ("ip", "network", "member") else "ip"
+
     def block_client(self, value: str, scope: str = "ip", reason: str = "",
                      created_by: str = "") -> dict:
-        """Refuse an address, or the network it sits in. Idempotent on (value, scope)."""
+        """Refuse an address, the network it sits in, or a member. Idempotent on (value, scope)."""
         value = str(value or "").strip()
         if not value:
-            raise ValueError("an address is required")
-        scope = "network" if str(scope).lower() == "network" else "ip"
+            raise ValueError("an address or member id is required")
+        scope = self._block_scope(scope)
         now = time.time()
         with self._tx() as db:
             db.execute(
@@ -583,7 +623,7 @@ class AdminStore:
         with self._tx() as db:
             if scope:
                 cur = db.execute("DELETE FROM blocked_client WHERE value = ? AND scope = ?",
-                                 (value, "network" if str(scope).lower() == "network" else "ip"))
+                                 (value, self._block_scope(scope)))
             else:
                 cur = db.execute("DELETE FROM blocked_client WHERE value = ?", (value,))
             return cur.rowcount
@@ -593,22 +633,37 @@ class AdminStore:
             return [dict(r) for r in db.execute(
                 "SELECT * FROM blocked_client ORDER BY created_at DESC")]
 
-    def blocked_entry(self, ip: str | None, network: str | None) -> dict | None:
+    def blocked_entry(self, ip: str | None, network: str | None,
+                      user: str | None = None) -> dict | None:
         """The block that stops this caller, or None. Checked on every submission.
 
-        Both keys in one query: an address is refused either because it is listed itself or
-        because its network is, and asking twice per request doubles the cost of the common
-        case where neither is listed.
+        Every key in one query: a caller is refused because its address is listed, its
+        network is, or the member it says it is posting for is - and asking three times per
+        request triples the cost of the common case where none is. Scopes are matched as well
+        as values, so a member id that happens to read like an address blocks only a member.
         """
-        keys = [k for k in (ip, network) if k]
-        if not keys:
+        clauses, args = [], []
+        addrs = [k for k in (ip, network) if k]
+        if addrs:
+            clauses.append(f"(scope IN ('ip', 'network') AND value IN ({','.join('?' * len(addrs))}))")
+            args += addrs
+        if user and user != "anonymous":
+            clauses.append("(scope = 'member' AND value = ?)")
+            args.append(user)
+        if not clauses:
             return None
-        qs = ",".join("?" * len(keys))
         with self._tx() as db:
             row = db.execute(
-                f"SELECT * FROM blocked_client WHERE value IN ({qs}) "
-                "ORDER BY CASE scope WHEN 'ip' THEN 0 ELSE 1 END LIMIT 1", keys).fetchone()
+                f"SELECT * FROM blocked_client WHERE {' OR '.join(clauses)} "
+                "ORDER BY CASE scope WHEN 'member' THEN 0 WHEN 'ip' THEN 1 ELSE 2 END LIMIT 1",
+                args).fetchone()
             return dict(row) if row else None
+
+    def blocked_members(self) -> dict[str, dict]:
+        """Every blocked member, by user id - for marking them on the log screen."""
+        with self._tx() as db:
+            return {r["value"]: dict(r) for r in db.execute(
+                "SELECT * FROM blocked_client WHERE scope = 'member'")}
 
     def get_moderation_log_by_request_id(self, request_id: str) -> dict | None:
         with self._tx() as db:

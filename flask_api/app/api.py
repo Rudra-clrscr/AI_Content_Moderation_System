@@ -194,13 +194,18 @@ def _resolve_client():
         return None
     try:
         hit = current_app.extensions["admin"].store.blocked_entry(
-            g.client.get("ip"), g.client.get("network"))
+            g.client.get("ip"), g.client.get("network"), _request_user_id())
     except Exception:
         # The blocklist is a moderation convenience, not an authentication boundary. If it
         # cannot be read, submissions carry on and the failure is in the log, because the
         # alternative is the whole service going down with the admin database.
         log.exception("could not read the blocklist")
         return None
+    if hit and hit.get("scope") == "member":
+        # A member block names itself, unlike an address block: the portal has to tell its
+        # member why their post went nowhere, and there is no width to hide - it is them.
+        return _error(403, "member_blocked",
+                      "This account is not allowed to submit content right now.")
     if hit:
         # 403 and a flat sentence. Naming the address or the scope would tell someone probing
         # it exactly how wide the block is and which address to come back from.

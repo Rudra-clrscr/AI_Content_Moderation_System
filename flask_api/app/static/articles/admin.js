@@ -2688,14 +2688,14 @@
         return qp;
       }
 
-      async function loadLogs() {
+      async function loadLogs(msg = "", ok = false) {
         const queryParams = filterParams();
         queryParams.set("limit", filter.limit);
         queryParams.set("offset", (filter.page - 1) * filter.limit);
 
         try {
           logsData = await call("GET", `/v1/admin/moderation-logs?${queryParams.toString()}`);
-          render();
+          render(msg, ok);
         } catch (err) {
           if (err instanceof SessionExpired) return loginView(err.message);
           render(err.message);
@@ -2750,21 +2750,29 @@
        *  decision here, and the difference between them is a household and a building. A
        *  yes/no box would have to pick one silently.
        */
-      function blockModal(ip, net) {
+      function blockModal(ip, net, member) {
+        member = member && member !== "anonymous" ? member : "";
         const back = document.createElement("div");
         back.className = "backdrop";
         back.innerHTML = `
           <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="blk-title">
-            <div class="modal-head"><h2 id="blk-title">Stop submissions from this address</h2>
+            <div class="modal-head"><h2 id="blk-title">${member && !ip ? "Block this member" : "Stop submissions"}</h2>
               <button class="btn-link" id="blk-x" aria-label="Close" type="button">✕</button></div>
             <div class="modal-body">
               <div id="blk-msg" class="adm-msg" role="status"></div>
-              <div class="field">
-                <label><input type="radio" name="blk-scope" value="ip" checked>
+              ${member ? `<div class="field">
+                <label><input type="radio" name="blk-scope" value="member" checked>
+                  This member — <code>${esc(member)}</code></label>
+                <p class="hint">Refuses everything this member submits, from any device or
+                  network, until you unblock them. The portal is told the account is blocked,
+                  so it can say so to the member.</p>
+              </div>` : ""}
+              ${ip ? `<div class="field">
+                <label><input type="radio" name="blk-scope" value="ip" ${member ? "" : "checked"}>
                   Just this device — <code>${esc(ip)}</code></label>
                 <p class="hint">Stops this one address. A phone switching to mobile data, or
                   anyone on a VPN, gets a new one immediately.</p>
-              </div>
+              </div>` : ""}
               ${net ? `<div class="field">
                 <label><input type="radio" name="blk-scope" value="network">
                   The whole network — <code>${esc(net)}</code></label>
@@ -2791,14 +2799,14 @@
         back.querySelector("#blk-cancel").addEventListener("click", close);
         back.querySelector("#blk-go").addEventListener("click", async () => {
           const scope = back.querySelector('input[name="blk-scope"]:checked').value;
-          const value = scope === "network" ? net : ip;
+          const value = scope === "member" ? member : scope === "network" ? net : ip;
           const foot = back.querySelector(".modal-foot");
           foot.innerHTML = `<button class="btn btn-primary" disabled><span class="spinner"></span> Blocking…</button>`;
           try {
             const res = await call("POST", "/v1/admin/blocked-clients",
                                    { value, scope, reason: back.querySelector("#blk-reason").value.trim() });
             close();
-            render(res.message || `Blocked ${value}.`, true);
+            await loadLogs(res.message || `Blocked ${value}.`, true);
           } catch (e) {
             if (e instanceof SessionExpired) { close(); return loginView(e.message); }
             const m = back.querySelector("#blk-msg");
@@ -2810,6 +2818,18 @@
         });
       }
 
+      async function unblockMember(member) {
+        if (!window.confirm(`Unblock ${member}? Their submissions will be moderated as usual again.`)) return;
+        try {
+          const res = await call("DELETE",
+            `/v1/admin/blocked-clients/${encodeURIComponent(member)}?scope=member`);
+          await loadLogs(res.message || `Unblocked ${member}.`, true);
+        } catch (e) {
+          if (e instanceof SessionExpired) return loginView(e.message);
+          render(e.message);
+        }
+      }
+
       /** A Date as the value a datetime-local input takes, in the admin's own time zone. */
       function localInput(d) {
         const pad = (n) => String(n).padStart(2, "0");
@@ -2817,55 +2837,58 @@
       }
 
       let offenderBy = {};
+      let blockedSet = new Set();
 
       /** Allowed / refused, overall and for each model, over exactly the rows the filters select. */
       function kpiSection() {
-        const st = logsData.stats || {};
         const bm = logsData.by_modality || {};
         const rg = logsData.range || {};
         const n = (v) => (v || 0).toLocaleString();
-        const rate = (b) => (b && b.reject_rate !== null && b.reject_rate !== undefined)
-          ? `${(b.reject_rate * 100).toFixed(1)}% refused` : "—";
-        const card = (title, b, icon) => `
-          <div class="logs-kpi-model">
-            <div class="logs-kpi-head">${icon} ${title}<span class="hint">${n(b && b.total)} checked · ${rate(b)}</span></div>
-            <div class="logs-kpi-nums">
-              <span><b style="color:#16a34a;">${n(b && b.allow)}</b> allowed</span>
-              <span><b style="color:#d97706;">${n(b && b.revise)}</b> revise</span>
-              <span><b style="color:#dc2626;">${n(b && b.reject)}</b> rejected</span>
+        const pct = (part, whole) => whole ? `${(part / whole * 100).toFixed(1)}%` : "—";
+        // TEXT AND IMAGE ARE COUNTED APART, never summed into one "Total screened". They are
+        // different models judging different things - a picture is never sent back to be
+        // revised, and one post with a photo is two checks - so a combined figure describes
+        // neither model and hides the one that is refusing.
+        const card = (kind, title, icon, b) => {
+          b = b || {};
+          const total = b.total || 0;
+          const showRevise = kind === "text" || (b.revise || 0) > 0;
+          const parts = [["allow", "Allowed", b.allow || 0]];
+          if (showRevise) parts.push(["revise", "Revise", b.revise || 0]);
+          parts.push(["reject", "Rejected", b.reject || 0]);
+          return `
+          <div class="logs-kpi-model ${kind}">
+            <div class="logs-kpi-head">
+              <span class="logs-kpi-title"><span class="logs-kpi-icon">${icon}</span>${title}</span>
+              <span class="logs-kpi-total"><b>${n(total)}</b> checked</span>
             </div>
+            ${total ? `
+            <div class="logs-kpi-split" role="img" aria-label="${parts.map(([, l, v]) => `${l} ${pct(v, total)}`).join(", ")}">
+              ${parts.map(([k, , v]) => v ? `<i class="${k}" style="width:${(v / total * 100).toFixed(2)}%"></i>` : "").join("")}
+            </div>
+            <div class="logs-kpi-tiles">
+              ${parts.map(([k, l, v]) => `
+                <div class="logs-kpi-tile ${k}">
+                  <span class="logs-kpi-num">${n(v)}</span>
+                  <span class="logs-kpi-lbl">${l}</span>
+                  <span class="logs-kpi-pct">${pct(v, total)}</span>
+                </div>`).join("")}
+            </div>` : `<p class="logs-kpi-empty">Nothing checked by this model in this window.</p>`}
           </div>`;
+        };
         const win = (filter.since || filter.until)
           ? `${filter.since ? formatTime(new Date(filter.since).getTime() / 1000) : "the first record"} → ${filter.until ? formatTime(new Date(filter.until).getTime() / 1000) : "now"}`
           : "All time";
         const span = rg.first_at
           ? `earliest ${formatTime(rg.first_at)}, latest ${formatTime(rg.last_at)}` : "no records";
         return `
-          <div class="logs-stats-bar">
-            <div class="logs-stat-box">
-              <span class="logs-stat-val">${n(st.total)}</span>
-              <span class="logs-stat-lbl">Total Screened</span>
-            </div>
-            <div class="logs-stat-box">
-              <span class="logs-stat-val" style="color:#16a34a;">${n(st.allow)}</span>
-              <span class="logs-stat-lbl">Allowed</span>
-            </div>
-            <div class="logs-stat-box">
-              <span class="logs-stat-val" style="color:#d97706;">${n(st.revise)}</span>
-              <span class="logs-stat-lbl">Revisions</span>
-            </div>
-            <div class="logs-stat-box">
-              <span class="logs-stat-val" style="color:#dc2626;">${n(st.reject)}</span>
-              <span class="logs-stat-lbl">Refusals · ${rate(st)}</span>
-            </div>
-          </div>
           <div class="logs-kpi-models">
-            ${card("Text model", bm.text, "✎")}
-            ${card("Image model", bm.image, "🖼")}
+            ${card("text", "Text moderation", "✎", bm.text)}
+            ${card("image", "Image moderation", "🖼", bm.image)}
           </div>
           <p class="logs-kpi-when">Window: <b>${esc(win)}</b> · ${esc(span)} ·
-            counted ${esc(formatTime(logsData.generated_at))}. These follow every filter except
-            Decision, so the split stays visible when the table shows one decision only.</p>`;
+            counted ${esc(formatTime(logsData.generated_at))}. The cards follow every filter
+            except Decision.</p>`;
       }
 
       /** Members refused too often in this window, highlighted above the table and on their rows. */
@@ -2873,6 +2896,7 @@
         const ro = logsData.repeat_offenders || {};
         const users = ro.users || [];
         offenderBy = Object.fromEntries(users.map((u) => [u.user_id, u]));
+        blockedSet = new Set(logsData.blocked_members || []);
         const rule = `at least ${ro.min_rejects || 3} refusals and ${Math.round((ro.min_rate || 0.5) * 100)}% or more of their submissions`;
         const unattributed = Math.max(0, ((logsData.stats || {}).total || 0) - (ro.attributed_rows || 0));
         const gap = unattributed
@@ -2883,7 +2907,8 @@
             return `<div class="logs-offenders none"><b>Repeat offenders</b>
               <span class="hint">None can be identified: no submission in this window says who
               sent it. The portal must pass the member's <code>user_id</code> (or an
-              <code>X-User-Id</code> header) on each moderation call.</span></div>`;
+              <code>X-User-Id</code> header) on each moderation call. To try it here, fill in
+              <b>Posting as</b> at the top of this page and submit a few posts.</span></div>`;
           }
           return `<div class="logs-offenders none"><b>Repeat offenders</b>
             <span class="hint">No member in this window has ${esc(rule)} refused.</span>${gap}</div>`;
@@ -2898,7 +2923,13 @@
             <td><b style="color:#dc2626;">${u.rejected}</b> of ${u.total} <span class="hint">(${(u.reject_rate * 100).toFixed(0)}%)</span></td>
             <td>${u.text_rejected || 0} / ${u.image_rejected || 0}</td>
             <td>${esc(formatTime(u.last_reject_at))}</td>
-            <td><button class="btn-xs" type="button" data-offender="${esc(u.user_id)}">Show their logs</button></td>
+            <td class="logs-offender-acts">
+              <button class="btn-xs" type="button" data-offender="${esc(u.user_id)}">Show their logs</button>
+              ${u.blocked
+                ? `<span class="blocked-badge">🚫 Blocked</span>
+                   <button class="btn-xs" type="button" data-unblock-member="${esc(u.user_id)}">Unblock</button>`
+                : `<button class="btn-xs btn-xs-danger" type="button" data-block-member="${esc(u.user_id)}">Block member</button>`}
+            </td>
           </tr>`).join("")}
           </tbody></table></div>`;
       }
@@ -3009,10 +3040,13 @@
                     const scoreClass = row.risk_score > 0.5 ? "danger" : (row.risk_score > 0.25 ? "warn" : "safe");
                     const user = row.user_id || "anonymous";
                     const off = offenderBy[row.user_id];
+                    const isBlocked = blockedSet.has(row.user_id);
+                    const member = row.user_id && row.user_id !== "anonymous" ? row.user_id : "";
                     return `<tr class="${off ? "row-offender" : ""}">
                       <td style="white-space:nowrap; color:var(--muted); font-size:12px;">${esc(formatTime(row.decided_at || row.created_at))}</td>
                       <td><span class="user-badge" title="${esc(user)}">👤 ${esc(user)}</span>${off
-                        ? `<span class="offender-badge" title="${off.rejected} of ${off.total} submissions refused in this window">⚠ repeat offender</span>` : ""}</td>
+                        ? `<span class="offender-badge" title="${off.rejected} of ${off.total} submissions refused in this window">⚠ repeat offender</span>` : ""}${isBlocked
+                        ? `<span class="blocked-badge" title="This member's submissions are being refused">🚫 blocked</span>` : ""}</td>
                       <td><span class="surface-badge">${esc(row.content_type)}</span>
                         <span class="modality-badge ${esc(row.modality || "text")}">${row.modality === "image" ? "🖼 image" : "✎ text"}</span></td>
                       <td><span class="badge-dec ${esc(dec)}">${esc(dec.toUpperCase())}</span></td>
@@ -3046,10 +3080,11 @@
                       <td><div class="log-preview-text" title="${esc(row.content_preview || "")}">${esc(row.content_preview || "—")}</div></td>
                       <td style="white-space:nowrap;">
                         <button class="btn btn-outline log-inspect-btn" type="button" data-id="${esc(row.request_id)}" style="padding:4px 8px; font-size:12px;">Inspect</button>
-                        ${row.client_ip ? `<button class="btn btn-outline log-block-btn" type="button"
-                              data-ip="${esc(row.client_ip)}" data-net="${esc(row.client_network || "")}"
+                        ${row.client_ip || member ? `<button class="btn btn-outline log-block-btn" type="button"
+                              data-ip="${esc(row.client_ip || "")}" data-net="${esc(row.client_network || "")}"
+                              data-member="${esc(member)}"
                               style="padding:4px 8px; font-size:12px; color:var(--danger);"
-                              title="Stop submissions from this address">Block</button>` : ""}
+                              title="Stop submissions from this member or address">Block</button>` : ""}
                       </td>
                     </tr>`;
                   }).join("") || `<tr><td colspan="9" style="text-align:center; padding:32px; color:var(--muted);">No moderation logs found matching the filter criteria.</td></tr>`}
@@ -3070,7 +3105,11 @@
         $("logs-back-btn").addEventListener("click", () => signedIn(currentAdmin, false));
         $("logs-refresh-btn").addEventListener("click", () => loadLogs());
         root.querySelectorAll(".log-block-btn").forEach((b) =>
-          b.addEventListener("click", () => blockModal(b.dataset.ip, b.dataset.net)));
+          b.addEventListener("click", () => blockModal(b.dataset.ip, b.dataset.net, b.dataset.member)));
+        root.querySelectorAll("[data-block-member]").forEach((b) =>
+          b.addEventListener("click", () => blockModal("", "", b.dataset.blockMember)));
+        root.querySelectorAll("[data-unblock-member]").forEach((b) =>
+          b.addEventListener("click", () => unblockMember(b.dataset.unblockMember)));
         $("logs-export-btn").addEventListener("click", async () => {
           const btn = $("logs-export-btn");
           const fmt = $("logs-export-fmt").value;
