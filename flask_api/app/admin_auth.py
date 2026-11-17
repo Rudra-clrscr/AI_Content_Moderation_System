@@ -455,16 +455,46 @@ def put_settings():
 
 # ---- moderation logs & audit trail endpoints ------------------------------------------
 
+def _when(raw) -> float | None:
+    """A time bound from the query string: epoch seconds, or an ISO date / date-time.
+
+    A bare date is the start of that day in UTC; the screen sends full ISO times built from
+    the admin's own clock, so a range picked in IST means IST.
+    """
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        pass
+    from datetime import datetime, timezone
+    try:
+        d = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return d.timestamp()
+
+
+def _log_filters() -> dict:
+    """The filters the log screen sends, shared by the list and the export."""
+    return {"decision": request.args.get("decision"),
+            "content_type": request.args.get("content_type"),
+            "severity": request.args.get("severity"),
+            "query": request.args.get("q"),
+            "modality": request.args.get("modality"),
+            "since": _when(request.args.get("since")),
+            "until": _when(request.args.get("until")),
+            "user": request.args.get("user")}
+
+
 @admin_bp.get("/v1/admin/moderation-logs")
 def get_moderation_logs():
     denied = check_admin()
     if denied:
         return denied
     a: Admin = current_app.extensions["admin"]
-    decision = request.args.get("decision")
-    content_type = request.args.get("content_type")
-    severity = request.args.get("severity")
-    query = request.args.get("q")
     try:
         limit = min(200, max(1, int(request.args.get("limit", 50))))
     except (ValueError, TypeError):
@@ -474,14 +504,18 @@ def get_moderation_logs():
     except (ValueError, TypeError):
         offset = 0
 
+    try:
+        offender_min = max(1, int(request.args.get("offender_min", 3)))
+    except (ValueError, TypeError):
+        offender_min = 3
+    try:
+        offender_rate = min(1.0, max(0.0, float(request.args.get("offender_rate", 0.5))))
+    except (ValueError, TypeError):
+        offender_rate = 0.5
+
     logs_data = a.store.get_moderation_logs(
-        decision=decision,
-        content_type=content_type,
-        severity=severity,
-        query=query,
-        limit=limit,
-        offset=offset,
-    )
+        **_log_filters(), limit=limit, offset=offset,
+        offender_min=offender_min, offender_rate=offender_rate)
     return jsonify(logs_data), 200
 
 
@@ -510,10 +544,7 @@ def export_moderation_logs():
                     f"format must be one of: {', '.join(sorted(MEDIA_TYPES))}.")
 
     a: Admin = current_app.extensions["admin"]
-    filters = {"decision": request.args.get("decision"),
-               "content_type": request.args.get("content_type"),
-               "severity": request.args.get("severity"),
-               "query": request.args.get("q")}
+    filters = _log_filters()
     try:
         cap = min(MAX_EXPORT_ROWS, max(1, int(request.args.get("max_rows", MAX_EXPORT_ROWS))))
     except (TypeError, ValueError):
@@ -528,7 +559,9 @@ def export_moderation_logs():
             truncated=total > len(rows),
             # Reported as the admin set them on screen, not as the query names them.
             filters={"decision": filters["decision"], "surface": filters["content_type"],
-                     "severity": filters["severity"], "search": filters["query"]})
+                     "severity": filters["severity"], "search": filters["query"],
+                     "model": filters["modality"], "user": filters["user"],
+                     "from": request.args.get("since"), "to": request.args.get("until")})
     except ImportError:
         # Only the workbook has a dependency, and it is declared. Say which format is missing
         # rather than failing the button, because the other two still work.

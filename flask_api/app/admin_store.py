@@ -110,7 +110,8 @@ class AdminStore:
         client_ip was added. Additive and idempotent: ALTER TABLE ADD COLUMN on SQLite is a
         metadata-only change, existing rows read NULL, and nothing here rewrites or drops.
         """
-        wanted = {"moderation_log": {"client_ip": "TEXT", "client_network": "TEXT"}}
+        wanted = {"moderation_log": {"client_ip": "TEXT", "client_network": "TEXT",
+                                     "modality": "TEXT"}}
         for table, columns in wanted.items():
             have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
             if not have:
@@ -120,6 +121,18 @@ class AdminStore:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
                     log.info("admin store: added %s.%s", table, name)
         db.execute("CREATE INDEX IF NOT EXISTS idx_mod_log_ip ON moderation_log (client_ip)")
+        # Rows written before `modality` was recorded. A picture's own verdict is
+        # recognisable - a visual.* match, or the `[photo.jpg]` placeholder that stands in for
+        # content - so those are filed as image. What cannot be recovered is the OCR text read
+        # out of a picture, which was logged as plain text: those older rows count as text.
+        db.execute("""UPDATE moderation_log SET modality = CASE
+                        WHEN gate_matches LIKE '%"visual.%'
+                          OR (substr(content_preview, 1, 1) = '['
+                              AND substr(content_preview, -1, 1) = ']'
+                              AND instr(content_preview, '.') > 0) THEN 'image'
+                        ELSE 'text' END
+                      WHERE modality IS NULL""")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_mod_log_modality ON moderation_log (modality)")
 
     @contextmanager
     def _tx(self):
@@ -255,7 +268,14 @@ class AdminStore:
         # address nobody connected from.
         client = result.get("client") or {}
 
+        modality = str(result.get("modality") or "").lower()
+        if modality not in ("text", "image"):
+            visual = any(str((m or {}).get("rule_id", "")).startswith("visual.")
+                         for m in (result.get("gate_matches") or []) if isinstance(m, dict))
+            modality = "image" if visual or result.get("media") else "text"
+
         return {
+            "modality": modality,
             "client_ip": client.get("ip"),
             "client_network": client.get("network"),
             "request_id": result.get("request_id") or f"req_{int(time.time()*1000)}",
@@ -289,8 +309,8 @@ class AdminStore:
                         predicted_label, feedback_title, feedback_message,
                         content_preview, gate_matches, model_version,
                         latency_ms, raw_result, client_ip, client_network,
-                        created_at, decided_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, decided_at, modality
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     params["request_id"], params["user_id"], params["content_id"], params["content_type"],
                     params["decision"], params["decided_by"], params["severity"], params["risk_score"],
@@ -298,7 +318,7 @@ class AdminStore:
                     params["content_preview"], params["gate_matches"], params["model_version"],
                     params["latency_ms"], params["raw_result"],
                     params["client_ip"], params["client_network"],
-                    params["created_at"], params["decided_at"]
+                    params["created_at"], params["decided_at"], params["modality"]
                 ))
         except Exception:
             # The audit log must never fail a moderation decision, but a write that fails
@@ -307,7 +327,10 @@ class AdminStore:
 
     @staticmethod
     def _moderation_log_filter(decision: str | None, content_type: str | None,
-                               severity: str | None, query: str | None) -> tuple[str, list]:
+                               severity: str | None, query: str | None,
+                               modality: str | None = None, since: float | None = None,
+                               until: float | None = None,
+                               user: str | None = None) -> tuple[str, list]:
         """(WHERE clause, parameters) for the moderation log, shared by the page and the export.
 
         One builder, because the export button means "give me what I am looking at". When the
@@ -329,6 +352,20 @@ class AdminStore:
             q_like = f"%{query.strip()}%"
             where_clauses.append("(user_id LIKE ? OR content_id LIKE ? OR content_preview LIKE ? OR request_id LIKE ? OR feedback_message LIKE ?)")
             args.extend([q_like, q_like, q_like, q_like, q_like])
+        if modality and modality.lower() in ("text", "image"):
+            where_clauses.append("modality = ?")
+            args.append(modality.lower())
+        # created_at is epoch seconds, written when the row is, so a range is exact rather
+        # than depending on how a caller formatted decided_at.
+        if since is not None:
+            where_clauses.append("created_at >= ?")
+            args.append(float(since))
+        if until is not None:
+            where_clauses.append("created_at < ?")
+            args.append(float(until))
+        if user and user.strip():
+            where_clauses.append("user_id = ?")
+            args.append(user.strip())
         return (("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""), args
 
     # The columns an export carries, in the order a reader wants them. `raw_result` is
@@ -336,7 +373,8 @@ class AdminStore:
     # readable table into something nobody can open in Word.
     EXPORT_COLUMNS = [
         ("created_at", "Timestamp"), ("request_id", "Request ID"), ("user_id", "User"),
-        ("content_id", "Content ID"), ("content_type", "Surface"), ("decision", "Decision"),
+        ("content_id", "Content ID"), ("content_type", "Surface"), ("modality", "Model"),
+        ("decision", "Decision"),
         ("severity", "Severity"), ("risk_score", "Risk score"), ("decided_by", "Decided by"),
         ("predicted_label", "Predicted label"), ("model_version", "Model version"),
         ("latency_ms", "Latency (ms)"), ("client_ip", "Device IP"),
@@ -346,7 +384,8 @@ class AdminStore:
 
     def export_moderation_logs(self, *, decision: str | None = None,
                                content_type: str | None = None, severity: str | None = None,
-                               query: str | None = None, limit: int = 50000) -> list[dict]:
+                               query: str | None = None, limit: int = 50000,
+                               **more) -> list[dict]:
         """Every row matching the filter, oldest last, for a download.
 
         Capped rather than unbounded: the whole result is built in memory to be written into a
@@ -354,7 +393,8 @@ class AdminStore:
         limit as a dead server rather than as a truncated file. The caller is told when the cap
         bit, so the file can say so about itself.
         """
-        where_sql, args = self._moderation_log_filter(decision, content_type, severity, query)
+        where_sql, args = self._moderation_log_filter(decision, content_type, severity, query,
+                                                      **more)
         cols = ", ".join(c for c, _ in self.EXPORT_COLUMNS)
         with self._tx() as db:
             rows = db.execute(
@@ -365,8 +405,9 @@ class AdminStore:
 
     def count_moderation_logs(self, *, decision: str | None = None,
                               content_type: str | None = None, severity: str | None = None,
-                              query: str | None = None) -> int:
-        where_sql, args = self._moderation_log_filter(decision, content_type, severity, query)
+                              query: str | None = None, **more) -> int:
+        where_sql, args = self._moderation_log_filter(decision, content_type, severity, query,
+                                                      **more)
         with self._tx() as db:
             row = db.execute(f"SELECT COUNT(*) AS cnt FROM moderation_log {where_sql}",
                              tuple(args)).fetchone()
@@ -374,18 +415,43 @@ class AdminStore:
 
     def get_moderation_logs(self, *, decision: str | None = None, content_type: str | None = None,
                             severity: str | None = None, query: str | None = None,
-                            limit: int = 50, offset: int = 0) -> dict:
-        where_sql, args = self._moderation_log_filter(decision, content_type, severity, query)
+                            limit: int = 50, offset: int = 0, modality: str | None = None,
+                            since: float | None = None, until: float | None = None,
+                            user: str | None = None, offender_min: int = 3,
+                            offender_rate: float = 0.5) -> dict:
+        more = {"modality": modality, "since": since, "until": until, "user": user}
+        where_sql, args = self._moderation_log_filter(decision, content_type, severity, query,
+                                                      **more)
+        # THE KPIs DESCRIBE WHAT IS ON THE SCREEN. They were counted over the whole table
+        # whatever the filters said, so narrowing the log to one surface or one week left
+        # "Allowed" and "Refusals" showing all-time totals beside rows that did not add up to
+        # them. Same filter as the table - except the decision filter, because "REJECT only"
+        # with Allowed reading 0 answers nothing; the cards keep the split, the table narrows.
+        kpi_sql, kpi_args = self._moderation_log_filter(None, content_type, severity, query,
+                                                        **more)
 
         with self._tx() as db:
-            stats_rows = db.execute("SELECT LOWER(decision) as dec, COUNT(*) as cnt FROM moderation_log GROUP BY LOWER(decision)").fetchall()
             stats = {"total": 0, "allow": 0, "revise": 0, "reject": 0}
-            for row in stats_rows:
-                d = row["dec"]
-                c = row["cnt"]
+            by_modality = {m: {"total": 0, "allow": 0, "revise": 0, "reject": 0}
+                           for m in ("text", "image")}
+            for row in db.execute(
+                    f"SELECT COALESCE(modality, 'text') AS m, LOWER(decision) AS dec, "
+                    f"COUNT(*) AS cnt FROM moderation_log {kpi_sql} "
+                    f"GROUP BY COALESCE(modality, 'text'), LOWER(decision)", tuple(kpi_args)):
+                m = row["m"] if row["m"] in by_modality else "text"
+                d, c = row["dec"], row["cnt"]
+                # Anything outside allow/revise/reject (a disabled surface's own decision, say)
+                # still counts toward the total, so the total is the number of rows.
                 if d in stats:
-                    stats[d] = c
+                    stats[d] += c
+                    by_modality[m][d] += c
                 stats["total"] += c
+                by_modality[m]["total"] += c
+            for bucket in [stats, *by_modality.values()]:
+                done = bucket["allow"] + bucket["revise"] + bucket["reject"]
+                bucket["reject_rate"] = round(bucket["reject"] / done, 4) if done else None
+            span = db.execute(f"SELECT MIN(created_at) AS first, MAX(created_at) AS last "
+                              f"FROM moderation_log {kpi_sql}", tuple(kpi_args)).fetchone()
 
             total_row = db.execute(f"SELECT COUNT(*) as cnt FROM moderation_log {where_sql}", tuple(args)).fetchone()
             total = total_row["cnt"] if total_row else 0
@@ -395,7 +461,7 @@ class AdminStore:
                        decision, decided_by, severity, risk_score, predicted_label,
                        feedback_title, feedback_message, content_preview,
                        model_version, latency_ms, client_ip, client_network,
-                       created_at, decided_at, raw_result
+                       created_at, decided_at, raw_result, modality
                 FROM moderation_log
                 {where_sql}
                 ORDER BY created_at DESC, id DESC
@@ -412,13 +478,85 @@ class AdminStore:
                         pass
                 logs.append(item)
 
+        offenders = self.repeat_offenders(since=since, until=until, min_rejects=offender_min,
+                                          min_rate=offender_rate, content_type=content_type)
         return {
             "logs": logs,
             "total": total,
             "limit": limit,
             "offset": offset,
-            "stats": stats
+            "stats": stats,
+            "by_modality": by_modality,
+            "range": {"since": since, "until": until,
+                      "first_at": span["first"] if span else None,
+                      "last_at": span["last"] if span else None},
+            "generated_at": time.time(),
+            "repeat_offenders": offenders,
         }
+
+    def repeat_offenders(self, *, since: float | None = None, until: float | None = None,
+                         min_rejects: int = 3, min_rate: float = 0.5,
+                         content_type: str | None = None, limit: int = 50) -> dict:
+        """Members whose submissions are refused too often, in the window being looked at.
+
+        Both conditions, not either: a count alone flags the busiest honest member (ten
+        refusals out of four hundred posts), and a rate alone flags a newcomer with one post
+        refused out of one. Counted per user_id, never per address - the portal calls from its
+        own servers, so an address names the portal, not a member, and would make everyone one
+        offender. Rows with no user id ("anonymous") cannot be attributed and are left out.
+        """
+        where_sql, args = self._moderation_log_filter(None, content_type, None, None,
+                                                      since=since, until=until)
+        cond = "user_id IS NOT NULL AND user_id != '' AND user_id != 'anonymous'"
+        where_sql = f"{where_sql} AND {cond}" if where_sql else f"WHERE {cond}"
+        min_rejects = max(1, int(min_rejects))
+        min_rate = min(1.0, max(0.0, float(min_rate)))
+        with self._tx() as db:
+            rows = db.execute(f"""
+                SELECT user_id,
+                       COUNT(*) AS total,
+                       SUM(LOWER(decision) = 'reject') AS rejected,
+                       SUM(LOWER(decision) = 'revise') AS revised,
+                       SUM(LOWER(decision) = 'reject' AND COALESCE(modality, 'text') = 'text') AS text_rejected,
+                       SUM(LOWER(decision) = 'reject' AND modality = 'image') AS image_rejected,
+                       MAX(CASE WHEN LOWER(decision) = 'reject' THEN created_at END) AS last_reject_at,
+                       MAX(created_at) AS last_at
+                FROM moderation_log {where_sql}
+                GROUP BY user_id
+                HAVING rejected >= ? AND (rejected * 1.0 / total) >= ?
+                ORDER BY rejected DESC, last_reject_at DESC
+                LIMIT ?""", tuple(args + [min_rejects, min_rate, int(limit)])).fetchall()
+            attributed = db.execute(
+                f"SELECT COUNT(*) AS n FROM moderation_log {where_sql}", tuple(args)).fetchone()
+        return {
+            "users": [{**dict(r), "reject_rate": round(r["rejected"] / r["total"], 4)}
+                      for r in rows],
+            "min_rejects": min_rejects, "min_rate": min_rate,
+            # So the screen can say "no member ids are being sent" rather than "no offenders".
+            "attributed_rows": int(attributed["n"]) if attributed else 0,
+        }
+
+    def log_health(self, window_s: float = 3600.0) -> dict:
+        """Traffic over the last window, from the audit log: volume, refusals, latency."""
+        since = time.time() - window_s
+        out: dict = {"window_s": window_s}
+        with self._tx() as db:
+            for m in ("text", "image"):
+                rows = db.execute(
+                    "SELECT LOWER(decision) AS d, latency_ms FROM moderation_log "
+                    "WHERE created_at >= ? AND COALESCE(modality, 'text') = ?",
+                    (since, m)).fetchall()
+                lat = sorted(float(r["latency_ms"]) for r in rows if r["latency_ms"] is not None)
+                out[m] = {
+                    "requests": len(rows),
+                    "rejected": sum(1 for r in rows if r["d"] == "reject"),
+                    "latency_ms_avg": round(sum(lat) / len(lat), 1) if lat else None,
+                    "latency_ms_p95": (round(lat[min(len(lat) - 1, int(len(lat) * 0.95))], 1)
+                                       if lat else None),
+                }
+            last = db.execute("SELECT MAX(created_at) AS t FROM moderation_log").fetchone()
+            out["last_decision_at"] = last["t"] if last else None
+        return out
 
     # ---- blocked addresses --------------------------------------------------------
 

@@ -445,12 +445,25 @@
             <p>Live stream of member moderation requests: inspect decisions (allow, revise, reject), user severity ratings, risk scores, and latency.</p>
             <button class="btn btn-primary" id="adm-logs-btn" type="button" style="background:#0284c7; border-color:#0284c7;">View Moderation Logs</button>
           </div>
+
+          <!-- Card 5: System health -->
+          <div class="adm-dash-card" id="card-health">
+            <div class="adm-dash-icon" style="background:#dcfce7; color:#15803d;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+              </svg>
+            </div>
+            <h3>System Health</h3>
+            <p>Whether the text and image moderation models, OCR and the databases are working right now, with live response times and the last hour's traffic.</p>
+            <button class="btn btn-primary" id="adm-health-btn" type="button" style="background:#15803d; border-color:#15803d;">Check System Health</button>
+          </div>
         </div>`);
 
       $("adm-open").addEventListener("click", () => settingsModal());
       $("adm-images-btn").addEventListener("click", () => imagesOptionView());
       $("adm-policy-btn").addEventListener("click", () => policyView());
       $("adm-logs-btn").addEventListener("click", () => logsView());
+      $("adm-health-btn").addEventListener("click", () => healthView());
       $("adm-logout").addEventListener("click", async () => {
         try { await call("POST", "/v1/admin/auth/logout"); } catch { /* ignore */ }
         loginView("You have been logged out.", true);
@@ -541,6 +554,10 @@
       // than only after a save: it is a property of the policy, and a negative margin that
       // arrived four rules ago still decides how every ordinary photograph scores today.
       let balance = {};
+      // The same subjects as seen from Image Fine-Tuning: a rule and a category of one name
+      // are one subject, and this says where their verdicts disagree.
+      let sync = { subjects: [], disagreeing: [], pictures_only: [] };
+      let syncBy = {};
 
       function render(msg = "", ok = false, note = "") {
         const names = Object.keys(labels).sort();
@@ -550,8 +567,10 @@
           "What the visual check refuses, written as phrasings. Changes apply in about a second - no retraining.", `
           <div class="img-top-bar">
             <button class="btn btn-outline" id="pol-back" type="button">← Back to Dashboard</button>
-            <div style="display:flex; align-items:center; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
               <span class="img-badge-policy" id="pol-sync"></span>
+              <button class="btn btn-outline" id="pol-test" type="button"
+                      title="See what the live check would do with a picture">🔍 Test an image</button>
               <button class="btn btn-outline" id="pol-reset" type="button"
                       title="Restore the policy exactly as it shipped">↺ Restore default</button>
             </div>
@@ -565,6 +584,7 @@
                <b>${balance.safe_prompts}</b> allowing ones.`}
           </p>
           ${balance.warning ? `<div class="adm-msg err" style="font-weight:400;">${esc(balance.warning)}</div>` : ""}
+          ${syncPanel()}
           <div class="pol-list">
             ${unsafe.map((n) => ruleRow(n, true)).join("") || `<p class="hint">No refusing rules.</p>`}
           </div>
@@ -584,7 +604,15 @@
 
         $("pol-back").addEventListener("click", () => signedIn(currentAdmin, false));
         $("pol-add").addEventListener("click", () => ruleModal(null));
+        $("pol-test").addEventListener("click", () => testImageModal());
         $("pol-reset").addEventListener("click", () => resetPolicy());
+        back_root().querySelectorAll("[data-sync-keep]").forEach((b) =>
+          b.addEventListener("click", () => resolveSync(b.dataset.syncName, b.dataset.syncKeep)));
+        back_root().querySelectorAll("[data-write-rule]").forEach((b) =>
+          b.addEventListener("click", () => ruleModal(null, {
+            name: b.dataset.writeRule, unsafe: b.dataset.writeVerdict === "block" })));
+        back_root().querySelectorAll("[data-retrain]").forEach((b) =>
+          b.addEventListener("click", () => retrainProbe(b)));
         back_root().querySelectorAll("[data-edit]").forEach((b) =>
           b.addEventListener("click", () => ruleModal(b.dataset.edit)));
         back_root().querySelectorAll("[data-del]").forEach((b) =>
@@ -612,12 +640,17 @@
         const e = labels[name] || {};
         const n = (e.prompts || []).length;
         const bar = e.reject_min === undefined ? "default" : `refuses at ${e.reject_min}`;
+        const s = syncBy[name] || {};
+        const pics = s.pictures
+          ? ` · ${s.pictures.images} picture${s.pictures.images === 1 ? "" : "s"} in Fine-Tuning`
+            + (s.state === "disagree" ? ` <span class="pol-tag block">out of sync</span>` : "")
+          : "";
         return `
           <div class="pol-row">
             <div class="pol-row-main">
               <b>${esc(name)}</b>
               <span class="pol-tag ${isUnsafe ? "block" : "allow"}">${isUnsafe ? "REFUSING" : "ALLOWED"}</span>
-              <span class="hint">${n} phrasing${n === 1 ? "" : "s"} · ${esc(bar)}${e.category ? " · " + esc(e.category) : ""}</span>
+              <span class="hint">${n} phrasing${n === 1 ? "" : "s"} · ${esc(bar)}${e.category ? " · " + esc(e.category) : ""}${pics}</span>
               <div class="pol-prompts">${(e.prompts || []).slice(0, 3).map((p) => `“${esc(p)}”`).join(" · ")}${n > 3 ? ` <span class="hint">+${n - 3} more</span>` : ""}</div>
             </div>
             <div class="pol-row-acts">
@@ -651,6 +684,93 @@
         return bits.length ? `<ul class="pol-consq"><li>${bits.join("</li><li>")}</li></ul>` : "";
       }
 
+      /** What a save did to the same subject on the Image Fine-Tuning screen. */
+      function fineTuningNote(ft) {
+        if (!ft) return "";
+        if (ft.error) return `<ul class="pol-consq"><li>${esc(ft.error)}</li></ul>`;
+        if (ft.created) {
+          return `<ul class="pol-consq"><li>Image Fine-Tuning now has the category
+            <b>${esc(ft.category)}</b> for this rule's pictures.</li></ul>`;
+        }
+        if (!ft.changed) return "";
+        return `<ul class="pol-consq"><li>${ft.changed} picture${ft.changed === 1 ? "" : "s"} in
+          Image Fine-Tuning moved to <b>${esc(String(ft.action).toUpperCase())}</b> to match.
+          The trained probe still holds the old verdict until it is retrained —
+          <button class="btn-teach allow" type="button" data-retrain="1">Retrain now</button></li></ul>`;
+      }
+
+      /** Subjects whose rule and pictures disagree, and categories that have no rule. */
+      function syncPanel() {
+        const bad = (sync.disagreeing || []).map((n) => syncBy[n]).filter(Boolean);
+        const bare = (sync.pictures_only || []).map((n) => syncBy[n]).filter(Boolean);
+        const tag = (v) => `<span class="pol-tag ${v === "refuse" || v === "block" ? "block" : "allow"}">${
+          { refuse: "REFUSES", allow: "ALLOWS", block: "BLOCK" }[v] || esc(String(v).toUpperCase())}</span>`;
+        let html = "";
+        if (bad.length) {
+          html += `<div class="pol-sync warn">
+            <b>⚠ ${bad.length} subject${bad.length === 1 ? "" : "s"} disagree${bad.length === 1 ? "s" : ""}
+              with Image Fine-Tuning.</b>
+            <p class="hint">The rule and the pictures filed under the same name point opposite
+              ways, so the next retrain teaches the probe the opposite of what the rule says.
+              Choose which side stands.</p>
+            ${bad.map((s) => {
+              const rv = s.rule.verdict, pv = s.pictures.default_action;
+              return `<div class="pol-sync-row">
+                <span><b>${esc(s.name)}</b> — rule ${tag(rv)} · pictures <span class="pol-tag ${pv === "block" ? "block" : "allow"}">${esc(String(pv).toUpperCase())}</span>
+                  <span class="hint">${s.pictures.blocked} of ${s.pictures.images} blocked</span></span>
+                <span class="pol-sync-acts">
+                  <button class="btn btn-outline" type="button" data-sync-name="${esc(s.name)}" data-sync-keep="rule">Set pictures to ${rv === "refuse" ? "BLOCK" : "ALLOW"}</button>
+                  <button class="btn btn-outline" type="button" data-sync-name="${esc(s.name)}" data-sync-keep="pictures">Set rule to ${pv === "block" ? "REFUSE" : "ALLOW"}</button>
+                </span></div>`;
+            }).join("")}
+          </div>`;
+        }
+        if (bare.length) {
+          html += `<div class="pol-sync">
+            <b>Image Fine-Tuning categories with no written rule</b>
+            <p class="hint">Only the trained probe and marked lookalikes judge these. Writing a
+              rule gives the category phrasings of its own — it does not create a second one.</p>
+            <div class="pol-sync-chips">${bare.map((s) =>
+              `<button class="btn-xs" type="button" data-write-rule="${esc(s.name)}"
+                       data-write-verdict="${esc(s.pictures.default_action)}">
+                 ${esc(s.name)} · ${s.pictures.images} pic · ${esc(String(s.pictures.default_action).toUpperCase())} — Write a rule</button>`).join("")}</div>
+          </div>`;
+        }
+        return html;
+      }
+
+      async function resolveSync(name, keep, resolve) {
+        const msg = $("pol-msg");
+        if (msg) { msg.className = "adm-msg"; msg.textContent = `Syncing “${name}”…`; }
+        try {
+          const res = await call("POST", `/v1/admin/policy/sync/${encodeURIComponent(name)}`,
+                                 resolve ? { keep, resolve } : { keep });
+          await load(keep === "rule"
+            ? `“${name}”: pictures now follow the rule.`
+            : `“${name}”: the rule now follows its pictures. The model is using it now.`, true,
+            fineTuningNote(res.fine_tuning));
+        } catch (err) {
+          if (err.code === "policy_conflict" && err.detail && (err.detail.conflicts || []).length) {
+            if (msg) { msg.className = "adm-msg"; msg.textContent = ""; }
+            conflictModal(err.detail, (verdict) => resolveSync(name, keep, verdict));
+            return;
+          }
+          await load(err.message, false);
+        }
+      }
+
+      async function retrainProbe(btn) {
+        btn.disabled = true;
+        btn.textContent = "Retraining…";
+        try {
+          const res = await call("POST", "/v1/admin/images/train", { C: 1.0 });
+          const acc = res.accuracy === undefined ? "" : ` (training accuracy ${Number(res.accuracy).toFixed(1)}%)`;
+          await load(`Probe retrained on the updated pictures${acc}.`, true);
+        } catch (err) {
+          await load("Retraining failed: " + err.message, false);
+        }
+      }
+
       async function load(msg = "", ok = false, note = "") {
         try {
           const res = await call("GET", "/v1/admin/policy/labels");
@@ -658,6 +778,8 @@
           live = res.live_labels || [];
           namedCats = res.named_categories || {};
           balance = res.balance || {};
+          sync = res.sync || sync;
+          syncBy = Object.fromEntries((sync.subjects || []).map((s) => [s.name, s]));
           render(msg, ok, note);
         } catch (err) {
           frame("Image Policy Rules", "", `<div class="adm-msg err">${esc(err.message)}</div>
@@ -675,7 +797,7 @@
         try {
           const res = await apply();
           await load(`${what} applied. The model is using it now.`, true,
-                     consequenceNote(res && res.consequences));
+                     consequenceNote(res && res.consequences) + fineTuningNote(res && res.fine_tuning));
         } catch (err) {
           // A CONFLICT IS A QUESTION, NOT A FAILURE. The server answers 409 with the clashing
           // rules precisely so the admin can be asked which verdict stands, and this path -
@@ -737,8 +859,12 @@
        *  with write order quietly deciding. Resolving one way REMOVES the wording from the
        *  rules holding the other verdict, so the consequence is spelled out before the click.
        */
-      function ruleModal(name) {
-        const e = (name && labels[name]) || { unsafe: true, prompts: [], category: "" };
+      function ruleModal(name, prefill) {
+        const e = (name && labels[name])
+          || { unsafe: prefill ? !!prefill.unsafe : true, prompts: [], category: "" };
+        // A rule written FOR an existing Fine-Tuning category attaches to it; the plain
+        // "New rule" path is asked first, so a subject is never created twice by accident.
+        let attach = !!prefill;
         const back = document.createElement("div");
         back.className = "backdrop";
         back.innerHTML = `
@@ -749,10 +875,11 @@
               <div id="pol-modal-msg" class="adm-msg" role="status"></div>
               <div class="field">
                 <label for="pol-name">Rule name <span class="req">*</span></label>
-                <input class="input" id="pol-name" value="${esc(name || "")}" ${name ? "readonly" : ""}
+                <input class="input" id="pol-name" value="${esc(name || (prefill && prefill.name) || "")}" ${name || prefill ? "readonly" : ""}
                        placeholder="e.g. fireworks" autocomplete="off">
                 <p class="hint">Lower case, letters, digits and underscores. This name appears in
-                  moderation results.</p>
+                  moderation results, and is the Image Fine-Tuning category its pictures are filed under.</p>
+                <p class="hint" id="pol-name-note"></p>
               </div>
               <div class="field">
                 <label for="pol-prompts">Phrasings <span class="req">*</span></label>
@@ -815,6 +942,24 @@
         q("pol-cancel").addEventListener("click", close);
         back.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
 
+        // Say, while typing, whether this name is already taken on either screen.
+        const nameNote = () => {
+          const nm = q("pol-name").value.trim().toLowerCase().replace(/ /g, "_");
+          const s = syncBy[nm];
+          const out = q("pol-name-note");
+          if (name || !nm || !s) { out.innerHTML = ""; return; }
+          if (s.rule) {
+            out.innerHTML = `<b style="color:#b91c1c;">A rule named “${esc(nm)}” already exists</b> — edit it instead.`;
+          } else if (s.pictures) {
+            out.innerHTML = `<b>“${esc(nm)}” already exists in Image Fine-Tuning</b> with
+              ${s.pictures.images} picture${s.pictures.images === 1 ? "" : "s"}
+              (${esc(String(s.pictures.default_action).toUpperCase())}). This rule will be that
+              category's written rule, not a new subject.`;
+          }
+        };
+        q("pol-name").addEventListener("input", nameNote);
+        nameNote();
+
         q("pol-try-btn").addEventListener("click", async () => {
           const prompts = q("pol-prompts").value.split("\n").map((s) => s.trim()).filter(Boolean);
           const out = q("pol-try-out");
@@ -853,7 +998,7 @@
             out.innerHTML = `<div class="adm-msg err">${esc(err.message)}</div>`;
           }
         });
-        q("pol-save").addEventListener("click", async () => {
+        const doSave = async () => {
           const nm = q("pol-name").value.trim().toLowerCase();
           const prompts = q("pol-prompts").value.split("\n").map((s) => s.trim()).filter(Boolean);
           const m = q("pol-modal-msg");
@@ -866,12 +1011,21 @@
           const entry = { unsafe: q("pol-unsafe").value === "1", prompts,
                           category: q("pol-cat").value.trim() || nm,
                           reject_min: q("pol-min").value.trim() };
+          // New rules say so, so the server can refuse a name already taken on either screen
+          // instead of quietly replacing a rule or minting a second copy of a category.
+          if (!name) { entry.create = true; if (attach) entry.attach = true; }
           const apply = async (resolve) => {
             const res = await call("PUT", `/v1/admin/policy/labels/${encodeURIComponent(nm)}`,
                                    resolve ? { ...entry, resolve } : entry);
             close();
             await load(`“${nm}” applied. The model is using it now.`, true,
-                       consequenceNote(res && res.consequences));
+                       consequenceNote(res && res.consequences) + fineTuningNote(res && res.fine_tuning));
+          };
+          const restoreFoot = () => {
+            foot.innerHTML = `<button class="btn btn-outline" id="pol-cancel2" type="button">Cancel</button>
+              <button class="btn btn-primary" id="pol-save2" type="button">Apply rule</button>`;
+            back.querySelector("#pol-cancel2").addEventListener("click", close);
+            back.querySelector("#pol-save2").addEventListener("click", doSave);
           };
           try {
             await apply();
@@ -883,13 +1037,166 @@
               });
               return;
             }
-            foot.innerHTML = `<button class="btn btn-outline" id="pol-cancel2" type="button">Cancel</button>
-              <button class="btn btn-primary" id="pol-save2" type="button">Apply rule</button>`;
+            restoreFoot();
             m.className = "adm-msg err"; m.textContent = err.message;
-            back.querySelector("#pol-cancel2").addEventListener("click", close);
-            back.querySelector("#pol-save2").addEventListener("click", () => q("pol-save").click());
+            if (err.code === "rule_exists") {
+              m.insertAdjacentHTML("beforeend", ` <button class="btn-teach allow" type="button" id="pol-goto">Edit “${esc(nm)}”</button>`);
+              m.querySelector("#pol-goto").addEventListener("click", () => { close(); ruleModal(nm); });
+            } else if (err.code === "category_exists") {
+              m.insertAdjacentHTML("beforeend", ` <button class="btn-teach allow" type="button" id="pol-attach">Make this its written rule</button>`);
+              m.querySelector("#pol-attach").addEventListener("click", () => { attach = true; doSave(); });
+            }
+          }
+        };
+        q("pol-save").addEventListener("click", doSave);
+      }
+
+      /** Put one picture through the live visual check and show the decision and its cause.
+       *
+       *  The reverse of "Try these words first": that one asks what a wording picks out of
+       *  the stored pictures; this asks what the policy as a whole does with a given picture -
+       *  which rule, the probe or a marked lookalike decides it, and how close the others came.
+       *  Nothing is stored and no moderation result is written.
+       */
+      function testImageModal() {
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        back.innerHTML = `
+          <div class="modal img-modal-wide" role="dialog" aria-modal="true" aria-labelledby="ti-title">
+            <div class="modal-head"><h2 id="ti-title">Test an image</h2>
+              <button class="btn-link" id="ti-x" aria-label="Close" type="button">✕</button></div>
+            <div class="modal-body">
+              <p class="hint" style="margin-top:0;">Runs the picture through the live visual check
+                exactly as an upload would: every rule below, the trained probe and any marked
+                lookalikes. Nothing is stored or logged.</p>
+              <label class="pol-ti-drop" id="ti-drop" for="ti-file">
+                <input type="file" id="ti-file" accept="image/*" hidden>
+                <img id="ti-prev" alt="" hidden>
+                <span id="ti-drop-text">Choose an image, or drop one here</span>
+              </label>
+              <div id="ti-out" role="status" aria-live="polite"></div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-outline" id="ti-close" type="button">Close</button>
+              <button class="btn btn-primary" id="ti-run" type="button" disabled>Test image</button>
+            </div>
+          </div>`;
+        document.body.appendChild(back);
+        const q = (id) => back.querySelector("#" + id);
+        let file = null;
+        let previewUrl = null;
+        const close = () => { if (previewUrl) URL.revokeObjectURL(previewUrl); back.remove(); };
+        q("ti-x").addEventListener("click", close);
+        q("ti-close").addEventListener("click", close);
+        back.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
+
+        const choose = (f) => {
+          if (!f) return;
+          file = f;
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          previewUrl = URL.createObjectURL(f);
+          q("ti-prev").src = previewUrl;
+          q("ti-prev").hidden = false;
+          q("ti-drop-text").textContent = `${f.name} — click to choose another`;
+          q("ti-run").disabled = false;
+          q("ti-out").innerHTML = "";
+        };
+        q("ti-file").addEventListener("change", (ev) => choose(ev.target.files[0]));
+        const drop = q("ti-drop");
+        drop.addEventListener("dragover", (ev) => { ev.preventDefault(); drop.classList.add("over"); });
+        drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+        drop.addEventListener("drop", (ev) => {
+          ev.preventDefault();
+          drop.classList.remove("over");
+          choose(ev.dataTransfer.files && ev.dataTransfer.files[0]);
+        });
+
+        q("ti-run").addEventListener("click", async () => {
+          if (!file) return;
+          const out = q("ti-out");
+          const btn = q("ti-run");
+          btn.disabled = true;
+          out.innerHTML = `<p class="adm-loading"><span class="spinner dark"></span> Checking the picture…</p>`;
+          const fd = new FormData();
+          fd.append("file", file, file.name);
+          try {
+            const res = await call("POST", "/v1/admin/policy/test-image", fd);
+            out.innerHTML = testResultHtml(res);
+            out.querySelectorAll("[data-ti-edit]").forEach((b) =>
+              b.addEventListener("click", () => { close(); ruleModal(b.dataset.tiEdit); }));
+            const more = out.querySelector("#ti-more");
+            if (more) more.addEventListener("click", () => {
+              out.querySelectorAll(".pol-ti-extra").forEach((r) => { r.hidden = false; });
+              more.remove();
+            });
+          } catch (err) {
+            out.innerHTML = `<div class="adm-msg err">${esc(err.message)}</div>`;
+          } finally {
+            btn.disabled = false;
           }
         });
+      }
+
+      function testResultHtml(res) {
+        const pct = (v) => (v === null || v === undefined) ? "—" : Number(v).toFixed(2);
+        const refused = res.verdict === "refuse";
+        const editBtn = (n) => (n && labels[n])
+          ? ` <button class="btn-teach allow" type="button" data-ti-edit="${esc(n)}">Edit rule</button>` : "";
+        const row = (res.labels || []).find((l) => l.name === res.rule) || {};
+        let why;
+        if (res.decided_by === "exemplar") {
+          const m = (res.exemplar && res.exemplar.matched) || {};
+          why = `Refused because it looks like picture <b>#${esc(m.id || "?")}</b>
+            (${esc(m.category || "")}) that was marked “refuse things like this” — similarity
+            ${pct(res.exemplar.block)}, refuses at ${pct(res.exemplar.bar)}. Change that mark in Image Fine-Tuning.`;
+        } else if (res.decided_by === "probe") {
+          why = `Refused by the <b>trained probe</b> (Image Fine-Tuning): it reads the picture as
+            <b>${esc((res.probe && res.probe.top_class) || res.rule || "")}</b>, unsafe
+            ${pct(res.probe && res.probe.unsafe)} against a bar of ${pct(res.probe && res.probe.bar)}.`;
+        } else if (refused) {
+          why = `Refused by the rule <b>${esc(res.rule || "")}</b> — scored ${pct(row.score)},
+            refuses at ${pct(row.bar)}.${editBtn(res.rule)}`;
+        } else if (res.decided_by === "allow_exemplar") {
+          why = `Published because it looks like a picture marked “allow things like this”
+            (similarity ${pct(res.exemplar && res.exemplar.allow)}), which overrides the rules.`;
+        } else {
+          const nearest = (res.labels || []).filter((l) => l.unsafe)
+            .sort((a, b) => (b.score / (b.bar || 1)) - (a.score / (a.bar || 1)))[0];
+          why = nearest
+            ? `No refusing rule reached its bar. Closest: <b>${esc(nearest.name)}</b> at
+               ${pct(nearest.score)} of ${pct(nearest.bar)}.${editBtn(nearest.name)}`
+            : "No refusing rule matched.";
+        }
+        const rows = (res.labels || []).map((l, i) => {
+          const w = Math.max(2, Math.round(l.score * 100));
+          return `<tr class="${i >= 8 && !l.over ? "pol-ti-extra" : ""}" ${i >= 8 && !l.over ? "hidden" : ""}>
+            <td><b>${esc(l.name)}</b></td>
+            <td><span class="pol-tag ${l.unsafe ? "block" : "allow"}">${l.unsafe ? "REFUSING" : "ALLOWED"}</span></td>
+            <td class="pol-ti-meter-cell"><span class="pol-ti-meter ${l.over ? "over" : ""}"><i style="width:${w}%"></i>${
+              l.bar !== null && l.bar !== undefined ? `<b style="left:${Math.round(l.bar * 100)}%"></b>` : ""}</span></td>
+            <td class="num">${pct(l.score)}</td>
+            <td class="num hint">${l.bar === null || l.bar === undefined ? "" : "bar " + pct(l.bar)}</td>
+          </tr>`;
+        }).join("");
+        const hidden = (res.labels || []).filter((l, i) => i >= 8 && !l.over).length;
+        const probe = res.probe
+          ? `<div class="hint">Trained probe: unsafe ${pct(res.probe.unsafe)} (refuses at ${pct(res.probe.bar)})${
+              res.probe.top_class ? `, leans <b>${esc(res.probe.top_class)}</b>` : ""}${
+              res.probe.withheld ? ` — no vote, “${esc(res.probe.withheld)}” is withdrawn from the model` : ""}.</div>` : "";
+        const ex = res.exemplar
+          ? `<div class="hint">Marked lookalikes: nearest refusing ${pct(res.exemplar.block)},
+              nearest allowing ${pct(res.exemplar.allow)} — refuses only at ${pct(res.exemplar.bar)} or more
+              <i>and</i> ${pct(res.exemplar.margin)} ahead of the nearest allowing mark.</div>` : "";
+        return `
+          <div class="pol-ti-verdict ${refused ? "refuse" : "publish"}">
+            ${refused ? "Would be REFUSED" : "Would be PUBLISHED"}</div>
+          <p style="margin:8px 0;">${why}</p>
+          ${res.author_sees ? `<p class="hint">The author would be told it breaks BONC's community
+            policies on <b>${esc(res.author_sees)}</b>.</p>` : ""}
+          <table class="pol-try-table pol-ti-table"><tbody>${rows}</tbody></table>
+          ${hidden ? `<button class="btn-link" type="button" id="ti-more">Show all ${(res.labels || []).length} rules</button>` : ""}
+          ${probe}${ex}
+          <p class="hint">${esc(res.note || "")}</p>`;
       }
 
       load();
@@ -979,6 +1286,7 @@
                   Set all <b id="cur-cat-name"></b> to:
                   <button class="btn-link" id="cat-bulk-allow" type="button" style="color:#16a34a; font-weight:700;">ALLOW ALL</button> |
                   <button class="btn-link" id="cat-bulk-block" type="button" style="color:#dc2626; font-weight:700;">BLOCK ALL</button>
+                  <span id="cur-cat-rule"></span>
                 </span>
               </div>
               <div class="cat-pills-bar" id="cat-pills-container">
@@ -1114,8 +1422,9 @@
         // statement, which looks exactly like a button that does nothing.
         let html = `<button class="cat-pill ${activeCat === "all" ? "active" : ""}" type="button" data-cat="all">All <span class="cnt" id="cat-cnt-all">${totalAll}</span></button>`;
         categories.forEach((cat) => {
-          html += `<button class="cat-pill ${activeCat === cat.name ? "active" : ""}" type="button" data-cat="${esc(cat.name)}" title="${esc(cat.description || cat.display_name)}">
-            ${esc(cat.display_name)} <span class="cnt">${cat.total_images || 0}</span></button>`;
+          const ruleNote = cat.rule ? ` — Image Policy Rule: ${cat.rule.verdict === "refuse" ? "REFUSING" : "ALLOWED"}` : "";
+          html += `<button class="cat-pill ${activeCat === cat.name ? "active" : ""}" type="button" data-cat="${esc(cat.name)}" title="${esc((cat.description || cat.display_name) + ruleNote)}">
+            ${esc(cat.display_name)}${cat.rule ? ` <span class="cat-rule-dot ${cat.rule.verdict}" aria-label="has a policy rule"></span>` : ""} <span class="cnt">${cat.total_images || 0}</span></button>`;
         });
         html += `<button class="cat-pill add-cat-btn" id="btn-add-cat-modal" type="button">+ New Category</button>`;
         container.innerHTML = html;
@@ -1143,6 +1452,12 @@
           wrap.style.display = "inline-block";
           const catObj = categories.find((c) => c.name === activeCat);
           $("cur-cat-name").textContent = catObj ? catObj.display_name : activeCat;
+          // The same subject's written rule, so a verdict set here is seen to carry across.
+          const rule = catObj && catObj.rule;
+          $("cur-cat-rule").innerHTML = rule
+            ? ` · Image Policy Rule: <span class="pol-tag ${rule.verdict === "refuse" ? "block" : "allow"}">${rule.verdict === "refuse" ? "REFUSING" : "ALLOWED"}</span>
+               <span class="hint">(follows ALLOW ALL / BLOCK ALL)</span>`
+            : ` · <span class="hint">no written rule</span>`;
         }
       }
 
@@ -1672,6 +1987,9 @@
             q("cat-modal-msg").textContent = err.message;
             q("cat-modal-msg").className = "adm-msg err";
             busy(btn, false, "Create Category");
+            // The name belongs to an Image Policy Rule; the server has listed it here as the
+            // category it already is, so show it rather than leave it looking missing.
+            if (err.code === "category_exists" && err.detail && err.detail.rule) loadCategories();
           }
         });
       }
@@ -2269,9 +2587,89 @@
     // ===================================================================================
     // MODERATION LOGS & AUDIT VIEW
     // ===================================================================================
+    // ===================================================================================
+    // SYSTEM HEALTH VIEW
+    //
+    // /ready says what is loaded; GET /v1/admin/health exercises each model once and reports
+    // what actually works, plus the last hour's traffic from the audit log. Refreshed every
+    // 30 s through cooldownTimer, which frame() clears, so leaving the screen stops polling.
+    // ===================================================================================
+    function healthView() {
+      const TONE = { ok: "ok", off: "off", down: "down", degraded: "degraded" };
+      const fmtUp = (sec) => {
+        const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+        return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+      };
+      const when = (t) => t ? new Date(t * 1000).toLocaleString() : "—";
+
+      function traffic(label, t) {
+        if (!t) return "";
+        const row = (name, m) => `<tr><td>${name}</td><td class="num">${(m.requests || 0).toLocaleString()}</td>
+          <td class="num">${(m.rejected || 0).toLocaleString()}</td>
+          <td class="num">${m.latency_ms_avg === null ? "—" : m.latency_ms_avg + " ms"}</td>
+          <td class="num">${m.latency_ms_p95 === null ? "—" : m.latency_ms_p95 + " ms"}</td></tr>`;
+        return `<div class="hl-traffic"><b>${label}</b>
+          <table class="pol-try-table"><thead><tr><th></th><th class="num">Requests</th><th class="num">Rejected</th>
+            <th class="num">Avg latency</th><th class="num">p95</th></tr></thead>
+          <tbody>${row("✎ Text model", t.text || {})}${row("🖼 Image model", t.image || {})}</tbody></table></div>`;
+      }
+
+      function body(h) {
+        const overall = { ok: "All systems working", degraded: "Degraded — something is down",
+                          down: "Down — text moderation is not working" }[h.status] || h.status;
+        const last = h.traffic && h.traffic.last_hour && h.traffic.last_hour.last_decision_at;
+        return `
+          <div class="hl-overall ${TONE[h.status] || "degraded"}">${esc(overall)}</div>
+          <p class="hint">Checked ${esc(when(h.checked_at))} · up ${esc(fmtUp(h.uptime_s || 0))} ·
+            ${esc(h.mode)} mode · last moderation decision ${esc(when(last))}
+            ${h.service_auth === "open" ? ` · <b style="color:#b91c1c;">submission endpoints are open (no SERVICE_TOKEN)</b>` : ""}</p>
+          <div class="hl-grid">
+            ${(h.checks || []).map((c) => `
+              <div class="hl-check ${TONE[c.status] || "down"}">
+                <div class="hl-check-head"><span class="hl-dot"></span><b>${esc(c.name)}</b>
+                  <span class="hl-status">${esc(String(c.status).toUpperCase())}</span></div>
+                <div class="hint">${esc(c.detail || "")}</div>
+                <div class="hl-ms">${c.ms} ms</div>
+              </div>`).join("")}
+          </div>
+          ${traffic("Last hour", h.traffic && h.traffic.last_hour)}
+          ${traffic("Last 24 hours", h.traffic && h.traffic.last_day)}
+          ${(h.moderation_disabled_for || []).length ? `<p class="hint">Moderation is switched OFF for:
+            <b>${(h.moderation_disabled_for || []).map(esc).join(", ")}</b>.</p>` : ""}`;
+      }
+
+      async function refresh() {
+        const el = $("hl-body");
+        if (!el) { clearInterval(cooldownTimer); return; }
+        const btn = $("hl-refresh");
+        if (btn) btn.disabled = true;
+        try {
+          el.innerHTML = body(await call("GET", "/v1/admin/health"));
+        } catch (err) {
+          if (err instanceof SessionExpired) return loginView(err.message);
+          el.innerHTML = `<div class="hl-overall down">The API did not answer: ${esc(err.message)}</div>`;
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      }
+
+      frame("System Health", "Live checks of the moderation models and the services they depend on.", `
+        <div class="img-top-bar">
+          <button class="btn btn-outline" id="hl-back" type="button">← Back to Dashboard</button>
+          <button class="btn btn-outline" id="hl-refresh" type="button">↺ Run checks again</button>
+        </div>
+        <div id="hl-body"><p class="adm-loading"><span class="spinner dark"></span> Running checks…</p></div>`);
+      $("hl-back").addEventListener("click", () => signedIn(currentAdmin, false));
+      $("hl-refresh").addEventListener("click", refresh);
+      refresh();
+      cooldownTimer = setInterval(refresh, 30000);
+    }
+
     function logsView() {
-      let filter = { decision: "", surface: "", severity: "", q: "", page: 1, limit: 15 };
-      let logsData = { logs: [], total: 0, stats: { total: 0, allow: 0, revise: 0, reject: 0 } };
+      let filter = { decision: "", surface: "", severity: "", q: "", modality: "", since: "",
+                     until: "", user: "", page: 1, limit: 15 };
+      let logsData = { logs: [], total: 0, stats: { total: 0, allow: 0, revise: 0, reject: 0 },
+                       by_modality: {}, range: {}, repeat_offenders: { users: [] } };
 
       /** The filters as query parameters, without the pagination. Shared so Export cannot
        *  drift from the table it sits under. */
@@ -2281,6 +2679,12 @@
         if (filter.surface) qp.set("content_type", filter.surface);
         if (filter.severity) qp.set("severity", filter.severity);
         if (filter.q) qp.set("q", filter.q);
+        if (filter.modality) qp.set("modality", filter.modality);
+        // datetime-local is the admin's own clock; sent as an absolute instant so the server
+        // cuts the range where the admin meant it, not at UTC midnight.
+        if (filter.since) qp.set("since", new Date(filter.since).toISOString());
+        if (filter.until) qp.set("until", new Date(filter.until).toISOString());
+        if (filter.user) qp.set("user", filter.user);
         return qp;
       }
 
@@ -2293,7 +2697,7 @@
           logsData = await call("GET", `/v1/admin/moderation-logs?${queryParams.toString()}`);
           render();
         } catch (err) {
-          if (err instanceof SessionExpired) return sessionEnded(err);
+          if (err instanceof SessionExpired) return loginView(err.message);
           render(err.message);
         }
       }
@@ -2396,7 +2800,7 @@
             close();
             render(res.message || `Blocked ${value}.`, true);
           } catch (e) {
-            if (e instanceof SessionExpired) { close(); return sessionEnded(e); }
+            if (e instanceof SessionExpired) { close(); return loginView(e.message); }
             const m = back.querySelector("#blk-msg");
             m.className = "adm-msg err";
             m.textContent = e.message;
@@ -2404,6 +2808,99 @@
             back.querySelector("#blk-cancel2").addEventListener("click", close);
           }
         });
+      }
+
+      /** A Date as the value a datetime-local input takes, in the admin's own time zone. */
+      function localInput(d) {
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      }
+
+      let offenderBy = {};
+
+      /** Allowed / refused, overall and for each model, over exactly the rows the filters select. */
+      function kpiSection() {
+        const st = logsData.stats || {};
+        const bm = logsData.by_modality || {};
+        const rg = logsData.range || {};
+        const n = (v) => (v || 0).toLocaleString();
+        const rate = (b) => (b && b.reject_rate !== null && b.reject_rate !== undefined)
+          ? `${(b.reject_rate * 100).toFixed(1)}% refused` : "—";
+        const card = (title, b, icon) => `
+          <div class="logs-kpi-model">
+            <div class="logs-kpi-head">${icon} ${title}<span class="hint">${n(b && b.total)} checked · ${rate(b)}</span></div>
+            <div class="logs-kpi-nums">
+              <span><b style="color:#16a34a;">${n(b && b.allow)}</b> allowed</span>
+              <span><b style="color:#d97706;">${n(b && b.revise)}</b> revise</span>
+              <span><b style="color:#dc2626;">${n(b && b.reject)}</b> rejected</span>
+            </div>
+          </div>`;
+        const win = (filter.since || filter.until)
+          ? `${filter.since ? formatTime(new Date(filter.since).getTime() / 1000) : "the first record"} → ${filter.until ? formatTime(new Date(filter.until).getTime() / 1000) : "now"}`
+          : "All time";
+        const span = rg.first_at
+          ? `earliest ${formatTime(rg.first_at)}, latest ${formatTime(rg.last_at)}` : "no records";
+        return `
+          <div class="logs-stats-bar">
+            <div class="logs-stat-box">
+              <span class="logs-stat-val">${n(st.total)}</span>
+              <span class="logs-stat-lbl">Total Screened</span>
+            </div>
+            <div class="logs-stat-box">
+              <span class="logs-stat-val" style="color:#16a34a;">${n(st.allow)}</span>
+              <span class="logs-stat-lbl">Allowed</span>
+            </div>
+            <div class="logs-stat-box">
+              <span class="logs-stat-val" style="color:#d97706;">${n(st.revise)}</span>
+              <span class="logs-stat-lbl">Revisions</span>
+            </div>
+            <div class="logs-stat-box">
+              <span class="logs-stat-val" style="color:#dc2626;">${n(st.reject)}</span>
+              <span class="logs-stat-lbl">Refusals · ${rate(st)}</span>
+            </div>
+          </div>
+          <div class="logs-kpi-models">
+            ${card("Text model", bm.text, "✎")}
+            ${card("Image model", bm.image, "🖼")}
+          </div>
+          <p class="logs-kpi-when">Window: <b>${esc(win)}</b> · ${esc(span)} ·
+            counted ${esc(formatTime(logsData.generated_at))}. These follow every filter except
+            Decision, so the split stays visible when the table shows one decision only.</p>`;
+      }
+
+      /** Members refused too often in this window, highlighted above the table and on their rows. */
+      function offenderSection() {
+        const ro = logsData.repeat_offenders || {};
+        const users = ro.users || [];
+        offenderBy = Object.fromEntries(users.map((u) => [u.user_id, u]));
+        const rule = `at least ${ro.min_rejects || 3} refusals and ${Math.round((ro.min_rate || 0.5) * 100)}% or more of their submissions`;
+        const unattributed = Math.max(0, ((logsData.stats || {}).total || 0) - (ro.attributed_rows || 0));
+        const gap = unattributed
+          ? ` <span class="hint">${unattributed.toLocaleString()} submission${unattributed === 1 ? "" : "s"} in this window
+              carry no member id and cannot be counted — the portal should send <code>user_id</code>.</span>` : "";
+        if (!users.length) {
+          if (!ro.attributed_rows) {
+            return `<div class="logs-offenders none"><b>Repeat offenders</b>
+              <span class="hint">None can be identified: no submission in this window says who
+              sent it. The portal must pass the member's <code>user_id</code> (or an
+              <code>X-User-Id</code> header) on each moderation call.</span></div>`;
+          }
+          return `<div class="logs-offenders none"><b>Repeat offenders</b>
+            <span class="hint">No member in this window has ${esc(rule)} refused.</span>${gap}</div>`;
+        }
+        return `<div class="logs-offenders">
+          <div class="logs-offenders-head"><b>⚠ Repeat offenders — ${users.length} member${users.length === 1 ? "" : "s"}</b>
+            <span class="hint">${esc(rule)} refused, in this window.</span>${gap}</div>
+          <table class="logs-offenders-table"><thead><tr>
+            <th>Member</th><th>Refused</th><th>Text / Image</th><th>Last refusal</th><th></th></tr></thead><tbody>
+          ${users.map((u) => `<tr>
+            <td><b>👤 ${esc(u.user_id)}</b></td>
+            <td><b style="color:#dc2626;">${u.rejected}</b> of ${u.total} <span class="hint">(${(u.reject_rate * 100).toFixed(0)}%)</span></td>
+            <td>${u.text_rejected || 0} / ${u.image_rejected || 0}</td>
+            <td>${esc(formatTime(u.last_reject_at))}</td>
+            <td><button class="btn-xs" type="button" data-offender="${esc(u.user_id)}">Show their logs</button></td>
+          </tr>`).join("")}
+          </tbody></table></div>`;
       }
 
       function render(msg = "", ok = false) {
@@ -2436,24 +2933,8 @@
 
             ${msg ? `<div class="adm-msg ${ok ? "ok" : "err"}" role="${ok ? "status" : "alert"}">${esc(msg)}</div>` : ""}
 
-            <div class="logs-stats-bar">
-              <div class="logs-stat-box">
-                <span class="logs-stat-val">${(logsData.stats.total || 0).toLocaleString()}</span>
-                <span class="logs-stat-lbl">Total Screened</span>
-              </div>
-              <div class="logs-stat-box">
-                <span class="logs-stat-val" style="color:#16a34a;">${(logsData.stats.allow || 0).toLocaleString()}</span>
-                <span class="logs-stat-lbl">Allowed</span>
-              </div>
-              <div class="logs-stat-box">
-                <span class="logs-stat-val" style="color:#d97706;">${(logsData.stats.revise || 0).toLocaleString()}</span>
-                <span class="logs-stat-lbl">Revisions</span>
-              </div>
-              <div class="logs-stat-box">
-                <span class="logs-stat-val" style="color:#dc2626;">${(logsData.stats.reject || 0).toLocaleString()}</span>
-                <span class="logs-stat-lbl">Refusals</span>
-              </div>
-            </div>
+            ${kpiSection()}
+            ${offenderSection()}
 
             <div class="logs-toolbar">
               <div class="logs-filters">
@@ -2478,6 +2959,11 @@
                   <option value="advertisement" ${filter.surface === "advertisement" ? "selected" : ""}>Advertisements</option>
                   <option value="product_listing" ${filter.surface === "product_listing" ? "selected" : ""}>Listings</option>
                 </select>
+                <select class="logs-select" id="logs-modality-filter" aria-label="Model">
+                  <option value="" ${filter.modality === "" ? "selected" : ""}>Text & Image</option>
+                  <option value="text" ${filter.modality === "text" ? "selected" : ""}>Text model only</option>
+                  <option value="image" ${filter.modality === "image" ? "selected" : ""}>Image model only</option>
+                </select>
                 <select class="logs-select" id="logs-severity-filter">
                   <option value="" ${filter.severity === "" ? "selected" : ""}>All Severities</option>
                   <option value="high" ${filter.severity === "high" ? "selected" : ""}>High Severity</option>
@@ -2485,6 +2971,18 @@
                   <option value="low" ${filter.severity === "low" ? "selected" : ""}>Low Severity</option>
                 </select>
               </div>
+              <div class="logs-range">
+                <label>From <input type="datetime-local" class="logs-select" id="logs-since" value="${esc(filter.since)}"></label>
+                <label>To <input type="datetime-local" class="logs-select" id="logs-until" value="${esc(filter.until)}"></label>
+                <span class="logs-range-quick">
+                  <button class="btn-xs" type="button" data-range="24">24h</button>
+                  <button class="btn-xs" type="button" data-range="168">7d</button>
+                  <button class="btn-xs" type="button" data-range="720">30d</button>
+                  <button class="btn-xs" type="button" data-range="0">All time</button>
+                </span>
+              </div>
+              ${filter.user ? `<div class="logs-user-chip">Showing only <b>${esc(filter.user)}</b>
+                <button class="btn-link" type="button" id="logs-user-clear" aria-label="Show all users">✕</button></div>` : ""}
             </div>
 
             <div class="logs-table-wrap">
@@ -2509,11 +3007,14 @@
                     const sev = (row.severity || "none").toLowerCase();
                     const score = row.risk_score !== null && row.risk_score !== undefined ? Number(row.risk_score).toFixed(3) : "—";
                     const scoreClass = row.risk_score > 0.5 ? "danger" : (row.risk_score > 0.25 ? "warn" : "safe");
-                    const user = row.user_id || row.content_id || "anonymous";
-                    return `<tr>
+                    const user = row.user_id || "anonymous";
+                    const off = offenderBy[row.user_id];
+                    return `<tr class="${off ? "row-offender" : ""}">
                       <td style="white-space:nowrap; color:var(--muted); font-size:12px;">${esc(formatTime(row.decided_at || row.created_at))}</td>
-                      <td><span class="user-badge" title="${esc(user)}">👤 ${esc(user)}</span></td>
-                      <td><span class="surface-badge">${esc(row.content_type)}</span></td>
+                      <td><span class="user-badge" title="${esc(user)}">👤 ${esc(user)}</span>${off
+                        ? `<span class="offender-badge" title="${off.rejected} of ${off.total} submissions refused in this window">⚠ repeat offender</span>` : ""}</td>
+                      <td><span class="surface-badge">${esc(row.content_type)}</span>
+                        <span class="modality-badge ${esc(row.modality || "text")}">${row.modality === "image" ? "🖼 image" : "✎ text"}</span></td>
                       <td><span class="badge-dec ${esc(dec)}">${esc(dec.toUpperCase())}</span></td>
                       <td><span class="badge-sev ${esc(sev)}">${esc(sev)}</span></td>
                       <td><span class="score-pill ${scoreClass}">${esc(score)}</span></td>
@@ -2589,7 +3090,7 @@
                 + `${all.toLocaleString()} matching rows. Narrow the filters for the rest.`
               : `Downloaded ${got.name} — ${n.toLocaleString()} rows.`, true);
           } catch (e) {
-            if (e instanceof SessionExpired) return sessionEnded(e);
+            if (e instanceof SessionExpired) return loginView(e.message);
             render("Export failed: " + e.message);
           } finally {
             btn.disabled = false;
@@ -2625,6 +3126,33 @@
         });
         $("logs-severity-filter").addEventListener("change", (e) => {
           filter.severity = e.target.value;
+          filter.page = 1;
+          loadLogs();
+        });
+        $("logs-modality-filter").addEventListener("change", (e) => {
+          filter.modality = e.target.value;
+          filter.page = 1;
+          loadLogs();
+        });
+        ["since", "until"].forEach((k) => $("logs-" + k).addEventListener("change", (e) => {
+          filter[k] = e.target.value;
+          filter.page = 1;
+          loadLogs();
+        }));
+        root.querySelectorAll("[data-range]").forEach((b) => b.addEventListener("click", () => {
+          const hours = Number(b.dataset.range);
+          filter.since = hours ? localInput(new Date(Date.now() - hours * 3600 * 1000)) : "";
+          filter.until = "";
+          filter.page = 1;
+          loadLogs();
+        }));
+        root.querySelectorAll("[data-offender]").forEach((b) => b.addEventListener("click", () => {
+          filter.user = b.dataset.offender;
+          filter.page = 1;
+          loadLogs();
+        }));
+        if ($("logs-user-clear")) $("logs-user-clear").addEventListener("click", () => {
+          filter.user = "";
           filter.page = 1;
           loadLogs();
         });

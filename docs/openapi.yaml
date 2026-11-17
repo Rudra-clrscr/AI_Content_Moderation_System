@@ -207,6 +207,9 @@ paths:
                     - { type: string }
                     - { type: integer }
                   description: Your platform's own ID. Always returned as a string.
+                user_id:
+                  type: string
+                  description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision. Also accepted as userId / UserId or an X-User-Id header.
             examples:
               article:
                 summary: An article - title, body and hashtags
@@ -314,6 +317,9 @@ paths:
                   default: article
                 content_id:
                   type: string
+                user_id:
+                  type: string
+                  description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision. Also accepted as userId / UserId or an X-User-Id header.
             encoding:
               file: { contentType: image/png, image/jpeg, application/pdf, video/mp4 }
       responses:
@@ -389,6 +395,9 @@ paths:
                   default: article
                 content_id:
                   type: string
+                user_id:
+                  type: string
+                  description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision. Also accepted as userId / UserId or an X-User-Id header.
           application/json:
             examples:
               article:
