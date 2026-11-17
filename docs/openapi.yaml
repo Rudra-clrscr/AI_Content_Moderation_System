@@ -87,7 +87,7 @@ tags:
   - name: "Admin: audit"
     description: The moderation log and its exports.
   - name: "Admin: blocking"
-    description: Refusing submissions from an address or network.
+    description: Refusing submissions from one member, one address, or a whole network.
   - name: "Admin: images"
     description: The image dataset behind the visual check, and its training.
   - name: "Admin: policy"
@@ -110,6 +110,8 @@ paths:
       # Declared optional ([] alongside Bearer) because both are real deployments: the
       # token is how this is meant to run, and open is what a local checkout does.
       security: [{ Bearer: [] }, {}]
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
       description: |
         The endpoint the platform calls on every piece of member-written text.
 
@@ -209,7 +211,7 @@ paths:
                   description: Your platform's own ID. Always returned as a string.
                 user_id:
                   type: string
-                  description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision. Also accepted as userId / UserId or an X-User-Id header.
+                  description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision, but a member an admin has blocked is refused with `403 member_blocked`. Also accepted as userId / UserId or an X-User-Id header.
             examples:
               article:
                 summary: An article - title, body and hashtags
@@ -256,7 +258,22 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "403":
           description: '`client_blocked` — this address is on the blocklist. `member_blocked` — the member named by `user_id` / `X-User-Id` is blocked; show them that their account cannot post.'
-          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                member_blocked:
+                  summary: This member is blocked
+                  value:
+                    Success: false
+                    Message: This account is not allowed to submit content right now.
+                    Data: { code: member_blocked, message: This account is not allowed to submit content right now. }
+                client_blocked:
+                  summary: This address or network is blocked
+                  value:
+                    Success: false
+                    Message: submissions from this connection are not being accepted.
+                    Data: { code: client_blocked, message: submissions from this connection are not being accepted. }
         "413":
           description: '`content_too_long`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -276,6 +293,8 @@ paths:
       # Declared optional ([] alongside Bearer) because both are real deployments: the
       # token is how this is meant to run, and open is what a local checkout does.
       security: [{ Bearer: [] }, {}]
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
       description: |
         Post **one** file per request — each gets its own decision and its own audit row.
         The kind is detected from the file's bytes, never its name.
@@ -319,7 +338,7 @@ paths:
                   type: string
                 user_id:
                   type: string
-                  description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision. Also accepted as userId / UserId or an X-User-Id header.
+                  description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision, but a member an admin has blocked is refused with `403 member_blocked`. Also accepted as userId / UserId or an X-User-Id header.
             encoding:
               file: { contentType: image/png, image/jpeg, application/pdf, video/mp4 }
       responses:
@@ -336,7 +355,22 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "403":
           description: '`client_blocked` (address) or `member_blocked` (the member sending it)'
-          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                member_blocked:
+                  summary: This member is blocked
+                  value:
+                    Success: false
+                    Message: This account is not allowed to submit content right now.
+                    Data: { code: member_blocked, message: This account is not allowed to submit content right now. }
+                client_blocked:
+                  summary: This address or network is blocked
+                  value:
+                    Success: false
+                    Message: submissions from this connection are not being accepted.
+                    Data: { code: client_blocked, message: submissions from this connection are not being accepted. }
         "413":
           description: '`media_too_large`, `content_too_long`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -356,6 +390,8 @@ paths:
       summary: Unified moderation endpoint (text, image, or both)
       operationId: moderateUnified
       security: [{ Bearer: [] }, {}]
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
       description: |
         Intelligently moderates text, image/media, or both in a single unified wrapper API.
 
@@ -397,7 +433,7 @@ paths:
                   type: string
                 user_id:
                   type: string
-                  description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision. Also accepted as userId / UserId or an X-User-Id header.
+                  description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision, but a member an admin has blocked is refused with `403 member_blocked`. Also accepted as userId / UserId or an X-User-Id header.
           application/json:
             examples:
               article:
@@ -457,7 +493,22 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "403":
           description: '`client_blocked` (address) or `member_blocked` (the member sending it)'
-          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                member_blocked:
+                  summary: This member is blocked
+                  value:
+                    Success: false
+                    Message: This account is not allowed to submit content right now.
+                    Data: { code: member_blocked, message: This account is not allowed to submit content right now. }
+                client_blocked:
+                  summary: This address or network is blocked
+                  value:
+                    Success: false
+                    Message: submissions from this connection are not being accepted.
+                    Data: { code: client_blocked, message: submissions from this connection are not being accepted. }
         "413":
           description: '`content_too_long`, `media_too_large`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -1061,10 +1112,33 @@ paths:
                       total: { type: integer }
                   by_modality:
                     type: object
-                    description: 'The same counts per model, `text` and `image`, each with `reject_rate`. The screen shows these two, never a combined total.'
+                    description: 'The same counts per model. The screen shows these two cards, never a combined total. They follow every filter except `decision`.'
+                    properties:
+                      text: { $ref: '#/components/schemas/ModalityCounts' }
+                      image: { $ref: '#/components/schemas/ModalityCounts' }
                   repeat_offenders:
                     type: object
-                    description: 'As `GET /v1/admin/moderation-logs/repeat-offenders`.'
+                    description: 'As `GET /v1/admin/moderation-logs/repeat-offenders`, each user with `blocked`.'
+                  blocked_members:
+                    type: array
+                    items: { type: string }
+                    description: Every member id currently blocked, for badging rows in the table.
+              example:
+                logs: []
+                total: 0
+                limit: 50
+                offset: 0
+                stats: { allow: 40, revise: 2, reject: 9, total: 51, reject_rate: 0.1765 }
+                by_modality:
+                  text: { total: 38, allow: 30, revise: 2, reject: 6, reject_rate: 0.1579 }
+                  image: { total: 13, allow: 10, revise: 0, reject: 3, reject_rate: 0.2308 }
+                repeat_offenders:
+                  users:
+                    - { user_id: member-2045, total: 9, rejected: 6, revised: 0, text_rejected: 4, image_rejected: 2, reject_rate: 0.6667, last_reject_at: 1794987600, last_at: 1794987900, blocked: true }
+                  min_rejects: 3
+                  min_rate: 0.5
+                  attributed_rows: 34
+                blocked_members: [member-2045]
         "401": { $ref: '#/components/responses/Unauthorized' }
     delete:
       tags: ["Admin: audit"]
@@ -1110,6 +1184,10 @@ paths:
         - { name: content_type, in: query, schema: { type: string } }
         - { name: severity, in: query, schema: { type: string } }
         - { name: q, in: query, schema: { type: string } }
+        - { name: modality, in: query, schema: { type: string, enum: [text, image] } }
+        - { name: since, in: query, description: 'Epoch seconds or ISO 8601.', schema: { type: string } }
+        - { name: until, in: query, description: 'Epoch seconds or ISO 8601.', schema: { type: string } }
+        - { name: user, in: query, description: "One member's rows only.", schema: { type: string } }
         - { name: max_rows, in: query, schema: { type: integer, default: 50000, maximum: 50000 } }
       responses:
         "200":
@@ -1191,7 +1269,8 @@ paths:
                       until: { type: number, nullable: true }
               example:
                 users:
-                  - { user_id: member-7781, total: 5, rejected: 4, revised: 0, text_rejected: 3, image_rejected: 1, reject_rate: 0.8, last_reject_at: 1794987600, last_at: 1794987600 }
+                  - { user_id: member-2045, total: 9, rejected: 6, revised: 0, text_rejected: 4, image_rejected: 2, reject_rate: 0.6667, last_reject_at: 1794987600, last_at: 1794987900, blocked: true }
+                  - { user_id: member-7781, total: 5, rejected: 4, revised: 0, text_rejected: 3, image_rejected: 1, reject_rate: 0.8, last_reject_at: 1794987600, last_at: 1794987600, blocked: false }
                 min_rejects: 3
                 min_rate: 0.5
                 attributed_rows: 42
@@ -1205,10 +1284,13 @@ paths:
       operationId: getMemberModerationRecord
       description: |
         One member's record in the window and a yes/no answer, with the numbers behind it
-        either way. Takes the same rule and window parameters as the list.
+        either way. Takes the same rule and window parameters as the list. A member with no
+        submissions in the window comes back with `total: 0` and `is_repeat_offender: false`,
+        not 404. `blocked` says whether they are blocked already; block them with
+        `POST /v1/admin/blocked-clients` and `scope: member`.
       security: [{ AdminToken: [] }, { AdminSession: [] }]
       parameters:
-        - { name: user_id, in: path, required: true, schema: { type: string, maxLength: 128 } }
+        - { name: user_id, in: path, required: true, description: 'The member id your platform sends as `user_id`.', schema: { type: string, maxLength: 128, example: member-7781 } }
         - { name: min_rejects, in: query, schema: { type: integer, default: 3, minimum: 1 } }
         - { name: min_rate, in: query, schema: { type: number, default: 0.5, minimum: 0, maximum: 1 } }
         - { name: since, in: query, schema: { type: string } }
@@ -1236,7 +1318,12 @@ paths:
                   last_at: { type: number, nullable: true }
                   min_rejects: { type: integer }
                   min_rate: { type: number }
-              example: { user_id: member-7781, is_repeat_offender: true, total: 5, allowed: 1, revised: 0, rejected: 4, text_rejected: 3, image_rejected: 1, reject_rate: 0.8, last_reject_at: 1794987600, last_at: 1794987600, min_rejects: 3, min_rate: 0.5, window: { since: null, until: null } }
+                  window:
+                    type: object
+                    properties:
+                      since: { type: number, nullable: true }
+                      until: { type: number, nullable: true }
+              example: { user_id: member-7781, is_repeat_offender: true, blocked: false, total: 5, allowed: 1, revised: 0, rejected: 4, text_rejected: 3, image_rejected: 1, reject_rate: 0.8, last_reject_at: 1794987600, last_at: 1794987600, min_rejects: 3, min_rate: 0.5, window: { since: null, until: null } }
         "400":
           description: '`bad_user` - empty or `anonymous`.'
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
@@ -1263,8 +1350,9 @@ paths:
   /v1/admin/blocked-clients:
     get:
       tags: ["Admin: blocking"]
-      summary: List blocked addresses
+      summary: List blocked members, addresses and networks
       operationId: listBlockedClients
+      description: Every block, newest first. `scope` says what each one refuses.
       security: [{ AdminToken: [] }, { AdminSession: [] }]
       responses:
         "200":
@@ -1275,19 +1363,26 @@ paths:
                 type: object
                 properties:
                   blocked: { type: array, items: { $ref: '#/components/schemas/BlockedClient' } }
+              example:
+                blocked:
+                  - { id: 7, value: member-2045, scope: member, reason: repeat scam listings, created_by: admin@example.com, created_at: 1794988000.5 }
+                  - { id: 3, value: 203.0.113.45, scope: ip, reason: spam burst, created_by: admin@example.com, created_at: 1794900000.1 }
         "401": { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: ["Admin: blocking"]
-      summary: Block an address, a network or a member
+      summary: Block a member, an address or a network
       operationId: addBlockedClient
       description: |
-        `scope: member` blocks one portal member by `user_id`, wherever they post from: their
-        submissions are refused with `403 member_blocked` until unblocked. It works only when
-        the portal sends the member's id on each moderation call. An id that reads like an
-        address blocks only the member, never the address.
+        Pick one of the examples below to fill the body.
 
+        **`scope: member`** blocks one portal member by `user_id`, wherever they post from:
+        every `/v1/moderate*` call that names them (in the body or `X-User-Id`) is refused
+        with `403 member_blocked` until unblocked. It works only when the portal sends the
+        member's id on each moderation call. An id that reads like an address blocks only the
+        member, never the address. `anonymous` cannot be blocked this way.
 
-        Blocking stops casual repetition from one connection. It is **not an identity
+        **`scope: ip` / `network`** refuse a connection with `403 client_blocked`. Blocking
+        an address stops casual repetition from one connection. It is **not an identity
         control**: a mobile connection changes address by switching to cellular, and a VPN
         changes it by clicking.
 
@@ -1306,9 +1401,19 @@ paths:
               type: object
               required: [value]
               properties:
-                value: { type: string, example: 203.0.113.45 }
+                value: { type: string, description: 'A member id, an IP address, or a network such as `203.0.113.0/24`.' }
                 scope: { type: string, enum: [ip, network, member], default: ip }
-                reason: { type: string, example: repeat scam listings }
+                reason: { type: string, description: Shown to other admins in the list. }
+            examples:
+              member:
+                summary: Block a member
+                value: { value: member-2045, scope: member, reason: repeat scam listings }
+              ip:
+                summary: Block one device's address
+                value: { value: 203.0.113.45, scope: ip, reason: spam burst }
+              network:
+                summary: Block a whole /24 network
+                value: { value: 203.0.113.0/24, scope: network, reason: rotating addresses }
       responses:
         "201":
           description: Blocked.
@@ -1319,6 +1424,9 @@ paths:
                 properties:
                   blocked: { $ref: '#/components/schemas/BlockedClient' }
                   message: { type: string }
+              example:
+                blocked: { id: 7, value: member-2045, scope: member, reason: repeat scam listings, created_by: admin@example.com, created_at: 1794988000.5 }
+                message: Blocked member member-2045.
         "400":
           description: '`missing_value`, `bad_scope`, `bad_address` or `bad_member` (`anonymous` or over 128 characters)'
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
@@ -1331,12 +1439,16 @@ paths:
   /v1/admin/blocked-clients/{value}:
     delete:
       tags: ["Admin: blocking"]
-      summary: Unblock
+      summary: Unblock a member, an address or a network
       operationId: removeBlockedClient
+      description: |
+        Send the same `value` and `scope` the block was made with. **`scope` defaults to
+        `ip`**, so unblocking a member needs `scope=member`, for example
+        `DELETE /v1/admin/blocked-clients/member-2045?scope=member`.
       security: [{ AdminToken: [] }, { AdminSession: [] }]
       parameters:
-        - { name: value, in: path, required: true, schema: { type: string } }
-        - { name: scope, in: query, schema: { type: string, enum: [ip, network, member] } }
+        - { name: value, in: path, required: true, description: 'The member id, address or network that was blocked.', schema: { type: string, example: member-2045 } }
+        - { name: scope, in: query, schema: { type: string, enum: [ip, network, member], default: ip } }
       responses:
         "200":
           description: Unblocked.
@@ -1348,6 +1460,7 @@ paths:
                   unblocked: { type: boolean }
                   count: { type: integer }
                   message: { type: string }
+              example: { unblocked: true, count: 1, message: Unblocked member-2045. }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "404":
           description: '`not_blocked`'
@@ -2029,6 +2142,18 @@ paths:
 # =====================================================================================
 components:
 
+  parameters:
+    MemberIdHeader:
+      name: X-User-Id
+      in: header
+      required: false
+      description: |
+        The member submitting, as your platform identifies them - the same value as `user_id`
+        in the body, for callers that would rather send it as a header. Counted toward
+        repeat offenders, and refused with `403 member_blocked` when an admin has blocked
+        this member. Leave it out for anonymous submissions.
+      schema: { type: string, maxLength: 128, example: member-7781 }
+
   securitySchemes:
     Bearer:
       type: apiKey
@@ -2180,6 +2305,16 @@ components:
         longer do, and new references should use `Error`.
       allOf:
         - $ref: '#/components/schemas/Error'
+
+    ModalityCounts:
+      type: object
+      description: One model's decisions in the filtered window.
+      properties:
+        total: { type: integer }
+        allow: { type: integer }
+        revise: { type: integer, description: Always 0 for the image model in practice. }
+        reject: { type: integer }
+        reject_rate: { type: number, nullable: true, description: 'reject / (allow + revise + reject); null when there are none.' }
 
     ContentType:
       type: string
@@ -2665,8 +2800,9 @@ components:
     BlockedClient:
       type: object
       properties:
-        value: { type: string }
-        scope: { type: string, enum: [ip, network, member] }
+        id: { type: integer }
+        value: { type: string, description: 'The member id, address or network refused.' }
+        scope: { type: string, enum: [ip, network, member], description: '`member` refuses that user_id anywhere; `ip` one address; `network` its /24 (or /64).' }
         reason: { type: string }
-        created_by: { type: string, description: Blank when blocked by a token-authenticated script. }
-        created_at: { type: string, format: date-time }
+        created_by: { type: string, nullable: true, description: 'Null when no admin session made it (a token script, or `AUTH_DISABLED`).' }
+        created_at: { type: number, description: Epoch seconds. }
