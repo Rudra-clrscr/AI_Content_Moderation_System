@@ -486,6 +486,8 @@ def list_labels():
         # said the two were different or that one of them had no name for the author.
         "named_categories": _named_categories(),
         "balance": _prompt_balance(doc),
+        # Which subjects the Fine-Tuning screen holds too, and where the two disagree.
+        "sync": sync_status(),
     })
 
 
@@ -516,6 +518,25 @@ def upsert_label(name: str):
     doc.setdefault("labels", {})
     existed = key in doc["labels"]
 
+    # ONE NAME, ONE SUBJECT, ACROSS BOTH SCREENS. This PUT is an upsert, so the "New rule"
+    # dialog naming a rule that already exists used to replace that rule's phrasings without
+    # a word. And a name already in use as an Image Fine-Tuning category was accepted as if
+    # it were new, although the two are the same subject by construction - the rule `toy`
+    # scores the pictures filed under `toy`. `create` is what the New rule dialog sends;
+    # edits, toggles and scripts leave it off and keep the upsert they always had.
+    if body.get("create"):
+        if existed:
+            return _err(409, "rule_exists",
+                        f"A rule named {key!r} already exists. Edit it instead of creating "
+                        "it again.", name=key)
+        cat = _store_category(key)
+        if cat is not None and not body.get("attach"):
+            return _err(409, "category_exists",
+                        f"{key!r} already exists in Image Fine-Tuning as a category with "
+                        f"{cat.get('total_images', 0)} picture(s). A rule of the same name is "
+                        "that category's written rule, not a second subject.",
+                        name=key, category=cat)
+
     # Refusing and allowing the same sentence are both coherent policies, and only the admin
     # knows which they meant - so this stops and asks instead of letting write order decide.
     resolve = str(body.get("resolve", "")).strip().lower() or None
@@ -534,36 +555,27 @@ def upsert_label(name: str):
     previous = (doc["labels"].get(key) or {}) if existed else None
     check_prompts = prompts_this_edit_introduces(previous, entry)
     conflicts = find_conflicts(doc, key, check_prompts, entry["unsafe"], model_dir)
-    if conflicts and resolve not in ("refuse", "allow"):
-        return _err(409, "policy_conflict",
-                    "This wording is already used by a rule with the opposite verdict. "
-                    "Choose which one should stand.",
-                    conflicts=conflicts,
-                    this_verdict="refuse" if entry["unsafe"] else "allow")
-    if conflicts:
-        if resolve == ("refuse" if entry["unsafe"] else "allow"):
-            _resolve_conflicts(doc, conflicts, keep=resolve)
-        else:
-            # The existing rule wins, so the clashing phrasings are dropped from THIS one.
-            entry["prompts"] = [p for p in entry["prompts"]
-                                if not any(_norm_phrase(p) == _norm_phrase(c["phrasing"])
-                                           for c in conflicts)]
-            if not entry["prompts"]:
-                return _err(409, "policy_conflict",
-                            "Every wording in this rule is already used by a rule with the "
-                            "opposite verdict, so keeping those leaves this rule with nothing.",
-                            conflicts=conflicts)
+    refusal = _settle_conflicts(doc, entry, conflicts, resolve)
+    if refusal is not None:
+        return _err(409, "policy_conflict", refusal["message"], **refusal["extra"])
 
     doc["labels"][key] = entry
     ok, msg = _apply(policy, doc, model_dir)
     if not ok:
         return _err(500, "policy_build_failed", msg)
+    # The other half of the subject. A new rule gets its Fine-Tuning category, so its
+    # pictures have somewhere to go and the name cannot be minted a second time there; a
+    # flipped verdict moves the pictures with it, or the probe goes on being taught the
+    # opposite of what the rule now says.
+    flipped = existed and bool(previous.get("unsafe", True)) != entry["unsafe"]
+    fine_tuning = _sync_pictures_to_rule(key, entry["unsafe"], move_pictures=flipped)
     return jsonify({"status": "updated" if existed else "created", "label": key,
                     "entry": entry, "live_labels": sorted(set(
                         current_app.extensions["moderation"].settings.visual._labels)),
                     # What this save means for the author and for the rest of the policy -
                     # both of which are decided here and reported nowhere else.
-                    "consequences": _consequences(doc, key, _feedback())})
+                    "consequences": _consequences(doc, key, _feedback()),
+                    "fine_tuning": fine_tuning})
 
 
 @admin_policy_bp.delete("/v1/admin/policy/labels/<name>")
@@ -591,6 +603,251 @@ def delete_label(name: str):
     if not ok:
         return _err(500, "policy_build_failed", msg)
     return jsonify({"status": "deleted", "label": key})
+
+
+# ---- one subject, two screens ----------------------------------------------------------
+# A policy rule and an Image Fine-Tuning category with the same name are ONE subject: the
+# rule `weapon` scores the pictures filed under `weapon`, and app/clip.policy_category relies
+# on exactly that ("the folder names ARE the label names"). The two screens nonetheless kept
+# separate lists and never told each other anything, which produced two kinds of drift:
+#
+#   * NAMES. Each create path checked only its own list, so a subject made on one screen
+#     could be made again on the other - and "New rule" on an existing rule name replaced it.
+#   * VERDICTS. "Stop refusing" changed the rule and left its pictures marked BLOCK; "ALLOW
+#     ALL" changed the pictures and left the rule refusing. Measured on this machine's data:
+#     the `weapon` rule refuses while all 500 of its pictures are marked ALLOW, so the next
+#     retrain teaches the probe that weapons are safe while the written rule refuses them.
+#     Two channels voting against each other, with neither screen showing it.
+#
+# The verdicts translate one to one: a refusing rule is BLOCK, an allowing one ALLOW.
+
+def _norm_subject(name: str) -> str:
+    """The key both screens agree on - system_store.add_category's own normalisation."""
+    return str(name or "").strip().lower().replace(" ", "_")
+
+
+def _system_store():
+    return current_app.extensions.get("system_store")
+
+
+def _store_category(name: str) -> dict | None:
+    """The Fine-Tuning category of this name, with its picture counts, or None."""
+    store = _system_store()
+    if store is None:
+        return None
+    key = _norm_subject(name)
+    try:
+        return next((c for c in store.list_categories() if c["name"] == key), None)
+    except Exception:
+        log.exception("could not read image categories")
+        return None
+
+
+def _settle_conflicts(doc: dict, entry: dict, conflicts: list[dict],
+                      resolve: str | None) -> dict | None:
+    """Apply the admin's answer to a refuse/allow clash, or say why the save cannot go on.
+
+    Returns None when the save may proceed (possibly with `entry` or `doc` trimmed), or
+    {"message", "extra"} for a 409. Shared by the rule editor and by a verdict arriving from
+    the Fine-Tuning screen, which must ask the same question rather than skip it.
+    """
+    if not conflicts:
+        return None
+    this = "refuse" if entry["unsafe"] else "allow"
+    if resolve not in ("refuse", "allow"):
+        return {"message": "This wording is already used by a rule with the opposite "
+                           "verdict. Choose which one should stand.",
+                "extra": {"conflicts": conflicts, "this_verdict": this}}
+    if resolve == this:
+        _resolve_conflicts(doc, conflicts, keep=resolve)
+        return None
+    # The existing rule wins, so the clashing phrasings are dropped from THIS one.
+    entry["prompts"] = [p for p in entry["prompts"]
+                        if not any(_norm_phrase(p) == _norm_phrase(c["phrasing"])
+                                   for c in conflicts)]
+    if not entry["prompts"]:
+        return {"message": "Every wording in this rule is already used by a rule with the "
+                           "opposite verdict, so keeping those leaves this rule with nothing.",
+                "extra": {"conflicts": conflicts}}
+    return None
+
+
+def _sync_pictures_to_rule(key: str, unsafe: bool, *, move_pictures: bool) -> dict | None:
+    """Make the Fine-Tuning side of this subject agree with its rule.
+
+    A rule with no category gets one, so the name is taken on both screens. A verdict that
+    just flipped moves the category's pictures with it - `move_pictures` - because those
+    marks are what the probe is trained on and what the exemplars refuse or allow by. An
+    edit that only changed wordings or a bar leaves per-picture choices alone.
+
+    Never raises: the rule is already live, and failing here would tell the admin it is not.
+    """
+    store = _system_store()
+    if store is None:
+        return None
+    action = "block" if unsafe else "allow"
+    try:
+        cat = store.get_category(key)
+        if cat is None:
+            store.add_category(key, key.replace("_", " ").capitalize(), action,
+                               "Created with the Image Policy Rule of the same name.")
+            return {"category": key, "created": True, "action": action, "changed": 0,
+                    "retrain_needed": False}
+        if not move_pictures:
+            return {"category": key, "created": False, "action": cat.get("default_action"),
+                    "changed": 0, "retrain_needed": False}
+        changed = store.set_category_policy(key, action)
+        from app.admin_images import _resync_exemplars
+        ex = _resync_exemplars(store.exemplar_ids(category=key))
+        return {"category": key, "created": False, "action": action, "changed": changed,
+                "retrain_needed": changed > 0, "exemplars": ex}
+    except Exception as exc:
+        log.exception("could not sync Fine-Tuning category %r to its rule", key)
+        return {"category": key, "error": f"The rule was saved, but its Fine-Tuning category "
+                                          f"could not be updated: {exc}"}
+
+
+def set_rule_verdict(name: str, unsafe: bool, resolve: str | None = None) -> dict:
+    """Flip one rule's verdict because its pictures were flipped on the Fine-Tuning screen.
+
+    {"changed": bool, "reason"?: "no_rule" | "already" | "conflict" | "error", ...}. Goes
+    through the same conflict question and the same staged write as the rule editor, so a
+    verdict arriving from the other screen cannot slip a contradiction past it.
+    """
+    key = _norm_subject(name)
+    policy, default, model_dir = _paths()
+    doc = _read(policy)
+    labels = doc.setdefault("labels", {})
+    previous = labels.get(key)
+    if not isinstance(previous, dict):
+        return {"changed": False, "reason": "no_rule", "rule": key}
+    if bool(previous.get("unsafe", True)) == bool(unsafe):
+        return {"changed": False, "reason": "already", "rule": key}
+    # Turning a rule to ALLOW drops its category and bar (see _validate), so turning it back
+    # would bring `minor` home as category `minor` at the generic bar instead of `minors` at
+    # its measured 0.85 - and the preset makes exactly that round trip. The shipped default
+    # still holds both, so a rule going back to refusing takes them from there.
+    shipped = {}
+    if unsafe and default.exists():
+        s = (_read(default).get("labels") or {}).get(key)
+        shipped = s if isinstance(s, dict) and s.get("unsafe", True) else {}
+    _, entry = _validate(key, {"unsafe": unsafe, "prompts": previous.get("prompts") or [],
+                               "category": previous.get("category") or shipped.get("category")
+                               or key,
+                               "reject_min": previous.get("reject_min",
+                                                          shipped.get("reject_min", ""))})
+    if not isinstance(entry, dict):
+        return {"changed": False, "reason": "error", "rule": key,
+                "message": "the rule's stored phrasings did not validate"}
+    conflicts = find_conflicts(doc, key, prompts_this_edit_introduces(previous, entry),
+                               entry["unsafe"], model_dir)
+    refusal = _settle_conflicts(doc, entry, conflicts, resolve)
+    if refusal is not None:
+        return {"changed": False, "reason": "conflict", "rule": key,
+                "message": refusal["message"], **refusal["extra"]}
+    _ensure_default(policy, default)
+    labels[key] = entry
+    ok, msg = _apply(policy, doc, model_dir)
+    if not ok:
+        return {"changed": False, "reason": "error", "rule": key, "message": msg}
+    return {"changed": True, "rule": key, "verdict": "refuse" if unsafe else "allow"}
+
+
+def sync_rule_to_pictures(name: str, action: str) -> dict | None:
+    """Called by the Fine-Tuning screen after it moved a whole category to ALLOW or BLOCK.
+
+    Never raises and never fails the caller: the pictures have already moved, and that part
+    is correct. A rule that could not follow is reported so the screen can say which half
+    did not move and where to settle it.
+    """
+    try:
+        res = set_rule_verdict(name, unsafe=(str(action).lower() == "block"))
+    except Exception as exc:
+        log.exception("could not sync rule %r to its pictures", name)
+        return {"changed": False, "reason": "error", "rule": _norm_subject(name),
+                "message": str(exc)}
+    return None if res.get("reason") == "no_rule" else res
+
+
+def sync_status() -> dict:
+    """Every subject on either screen, and whether its two halves agree."""
+    doc = _read(_paths()[0])
+    rules = doc.get("labels") or {}
+    store = _system_store()
+    cats = {}
+    if store is not None:
+        try:
+            cats = {c["name"]: c for c in store.list_categories()}
+        except Exception:
+            log.exception("could not read image categories")
+    subjects = []
+    for name in sorted(set(rules) | set(cats)):
+        r, c = rules.get(name), cats.get(name)
+        row: dict = {"name": name}
+        if isinstance(r, dict):
+            row["rule"] = {"verdict": "refuse" if r.get("unsafe", True) else "allow"}
+        if c is not None:
+            row["pictures"] = {"default_action": c.get("default_action"),
+                               "images": c.get("total_images", 0),
+                               "allowed": c.get("allowed_images", 0),
+                               "blocked": c.get("blocked_images", 0),
+                               "display_name": c.get("display_name")}
+        if "rule" in row and "pictures" in row:
+            want = "block" if row["rule"]["verdict"] == "refuse" else "allow"
+            p = row["pictures"]
+            # Disagreeing is the category's own verdict pointing the other way, or every one
+            # of its pictures doing so. A MIX is not a disagreement: 42 of 72 physique
+            # pictures refused is an admin's per-picture judgement and is left alone.
+            opposite = p["allowed"] if want == "block" else p["blocked"]
+            row["state"] = ("disagree" if p["default_action"] != want
+                            or (p["images"] and opposite == p["images"]) else "in_sync")
+        else:
+            row["state"] = "rule_only" if "rule" in row else "pictures_only"
+        subjects.append(row)
+    return {"subjects": subjects,
+            "disagreeing": [s["name"] for s in subjects if s["state"] == "disagree"],
+            "pictures_only": [s["name"] for s in subjects if s["state"] == "pictures_only"]}
+
+
+@admin_policy_bp.get("/v1/admin/policy/sync")
+def get_sync():
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    return jsonify(sync_status())
+
+
+@admin_policy_bp.post("/v1/admin/policy/sync/<name>")
+def resolve_sync(name: str):
+    """Settle one subject whose rule and pictures disagree: keep the rule's verdict or theirs."""
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    body = request.get_json(silent=True) or {}
+    keep = str(body.get("keep", "")).strip().lower()
+    if keep not in ("rule", "pictures"):
+        return _err(400, "bad_keep", "keep must be 'rule' or 'pictures'.")
+    key = _norm_subject(name)
+    rule = (_read(_paths()[0]).get("labels") or {}).get(key)
+    cat = _store_category(key)
+    if not isinstance(rule, dict) or cat is None:
+        return _err(404, "not_both",
+                    f"{key!r} needs both a rule and a Fine-Tuning category to be synced.")
+    if keep == "rule":
+        res = _sync_pictures_to_rule(key, bool(rule.get("unsafe", True)), move_pictures=True)
+        if res and res.get("error"):
+            return _err(500, "sync_failed", res["error"])
+        return jsonify({"status": "ok", "kept": "rule", "fine_tuning": res,
+                        "sync": sync_status()})
+    res = set_rule_verdict(key, unsafe=(cat.get("default_action") == "block"),
+                           resolve=str(body.get("resolve", "")).strip().lower() or None)
+    if res.get("reason") == "conflict":
+        return _err(409, "policy_conflict", res["message"],
+                    conflicts=res.get("conflicts", []), this_verdict=res.get("this_verdict"))
+    if res.get("reason") == "error":
+        return _err(500, "policy_build_failed", res.get("message") or "could not apply")
+    return jsonify({"status": "ok", "kept": "pictures", "policy_rule": res,
+                    "sync": sync_status()})
 
 
 def _norm_phrase(s: str) -> str:
@@ -1279,6 +1536,128 @@ def preview_label():
         "note": ("Cosine similarity against stored images. The live check softmaxes over every "
                  "rule, so a matching picture usually scores HIGHER in production than here."),
     })
+
+
+def _deciding_label(visual, result) -> str:
+    """The unsafe label that refuses this picture, when the written rules are the cause.
+
+    decides_reject walks every unsafe label against its own bar, so the refusing rule is not
+    always the top label: a picture can be 0.55 `safe` and 0.41 `weapon` with weapon's bar at
+    0.40. Name the strongest label that cleared its bar, and fall back to the top label for
+    the split case (0.5 weapon, 0.45 gore) that only the combined rule refuses.
+    """
+    over = [(s, n) for n, s in result.scores.items()
+            if n in visual._categories
+            and s >= visual._thresholds.get(n, visual.config.reject_min)]
+    return max(over)[1] if over else result.label
+
+
+@admin_policy_bp.post("/v1/admin/policy/test-image")
+def test_image():
+    """Run one picture through the live visual check and say what it would do, and why.
+
+    THE QUESTION AN ADMIN ACTUALLY ASKS. The rule editor's preview answers "what would these
+    words pick out of the pictures we already have", which is how a rule is written. After
+    it is written the question turns around: "this picture - would it be refused, and by
+    what?" Until now the only way to answer that was to post it through the Articles tab and
+    read the moderation log, which publishes an audit row for a test, needs the picture to be
+    attached to a piece of content, and still does not show how close the other rules came.
+
+    It is the same decision the upload path makes, not an imitation of it: classify(), then
+    decides_reject() and refused_by(), in that order - see app/api.py. Nothing is stored, no
+    moderation result is emitted, and the picture never touches system.db.
+
+    WHAT IT DOES NOT DO: read writing in the picture. On a real upload OCR runs alongside and
+    the text it finds is moderated as text, so an image can publish here and be refused for
+    its caption there. The response says so rather than leaving it to be discovered.
+    """
+    chk = check_admin()
+    if chk is not None:
+        return chk
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return _err(400, "no_file", "Upload an image in the 'file' multipart field.")
+
+    settings = current_app.extensions["moderation"].settings
+    visual = settings.visual
+    limits = settings.media
+    data = upload.read(limits.max_bytes + 1)
+    if not data:
+        return _err(400, "empty_file", "That file is empty.")
+    if len(data) > limits.max_bytes:
+        return _err(413, "media_too_large",
+                    f"The image is over the {limits.max_bytes // (1024 * 1024)} MB upload limit.")
+    if not visual.ready:
+        st = visual.status
+        return _err(503, "visual_unavailable",
+                    "The visual check is not running, so there is nothing to test against"
+                    + (f": {st.get('reason')}" if st.get("reason") else "."))
+
+    from app.media import MediaError, _decode
+    try:
+        frame = _decode(data, limits)
+    except MediaError as exc:
+        return _err(413 if exc.code == "media_too_large" else 422, exc.code, exc.message)
+    if frame is None:
+        return _err(503, "visual_unavailable", "Pillow is not installed on the server.")
+
+    result = visual.classify(frame)
+    if result.failed or not result.checked:
+        return _err(503, "media_not_checkable",
+                    "The visual check failed on this picture. The server log has the cause.")
+
+    cfg = visual.config
+    refused = bool(visual.decides_reject(result))
+    cause = result.refused_by(cfg) if refused else None
+    allowed_by_mark = (not refused and result.exemplar_allow >= cfg.exemplar_reject_min
+                       and result.exemplar_allow >= result.exemplar_block)
+
+    rule, category = None, ""
+    if cause == "exemplar":
+        m = result.exemplar_match or {}
+        rule = f"exemplar#{m.get('id')}" if m.get("id") else "exemplar"
+        category = visual.policy_category(m.get("category") or "")
+    elif cause == "probe":
+        rule, category = result.label, result.category
+    elif refused:
+        rule = _deciding_label(visual, result)
+        category = visual._categories.get(rule, result.category)
+
+    labels = []
+    for name, score in sorted(result.scores.items(), key=lambda kv: -kv[1]):
+        unsafe = name in visual._categories
+        bar = visual._thresholds.get(name, cfg.reject_min) if unsafe else None
+        labels.append({"name": name, "score": round(float(score), 4), "unsafe": unsafe,
+                       "bar": None if bar is None else round(float(bar), 4),
+                       "over": bool(unsafe and score >= bar)})
+
+    out = {
+        "checked": True,
+        "filename": upload.filename,
+        "verdict": "refuse" if refused else "publish",
+        # exemplar | probe | policy when refused; allow_exemplar when a mark overruled a rule.
+        "decided_by": cause or ("allow_exemplar" if allowed_by_mark else None),
+        "rule": rule,
+        "category": category or None,
+        "author_sees": _feedback().category_name(category) if category else None,
+        "top_label": result.label,
+        "labels": labels,
+        "reject_min": cfg.reject_min,
+        "note": ("Only the picture itself was judged. On a real upload any writing in the "
+                 "image is also read and moderated as text."),
+    }
+    if result.probe_scores:
+        probe_top = max((c for c in result.probe_scores if c != "safe"),
+                        key=lambda c: result.probe_scores[c], default=None)
+        out["probe"] = {"unsafe": round(result.probe_unsafe, 4), "bar": cfg.probe_reject_min,
+                        "top_class": probe_top, "withheld": result.withdrawn_category or None}
+    if result.exemplar_block or result.exemplar_allow:
+        out["exemplar"] = {"block": round(result.exemplar_block, 4),
+                           "allow": round(result.exemplar_allow, 4),
+                           "bar": cfg.exemplar_reject_min,
+                           "margin": getattr(cfg, "exemplar_margin_min", 0.0),
+                           "matched": result.exemplar_match}
+    return jsonify(out)
 
 
 @admin_policy_bp.post("/v1/admin/policy/reset")

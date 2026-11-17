@@ -243,8 +243,57 @@ def _emit(result: dict) -> dict:
     the public API's shape for the sake of an audit column.
     """
     svc = current_app.extensions["moderation"]
-    svc.sink.emit({**result, "client": getattr(g, "client", None) or {}})
+    stamp = {"client": getattr(g, "client", None) or {},
+             # WHICH MODEL'S DECISION THIS IS. A picture's verdict and an article's look the
+             # same once they are rows - the visual refusal carries a `[photo.jpg]`
+             # placeholder as its content and a gate-shaped match - so the log could not say
+             # how many pictures were refused, only how many decisions were. Set by the media
+             # path for everything it decides, including the text it reads out of a picture.
+             "modality": getattr(g, "modality", None) or "text"}
+    user = _request_user_id()
+    if user and not result.get("user_id"):
+        stamp["user_id"] = user
+    # A picture's decision row otherwise carries only the gate's timing - the vision encoder
+    # and OCR ran before the result was built - so an allowed image logged 0.2 ms. The audit
+    # copy gets the real time spent on the file; the response is left as it was.
+    t0 = getattr(g, "media_started", None)
+    if stamp["modality"] == "image" and t0 is not None:
+        import time
+        lat = result.get("latency_ms")
+        lat = dict(lat) if isinstance(lat, dict) else {}
+        lat["total"] = round((time.perf_counter() - t0) * 1000, 3)
+        stamp["latency_ms"] = lat
+    svc.sink.emit({**result, **stamp})
     return result
+
+
+# The names a caller might use for the member who submitted. The portal's DTOs are .NET, so
+# PascalCase and camelCase both arrive; a header serves callers that cannot change the body.
+_USER_KEYS = ("user_id", "userId", "UserId", "author_id", "authorId", "AuthorId")
+
+
+def _request_user_id() -> str | None:
+    """Who submitted this, if the caller said - for the audit row and repeat-offender counts.
+
+    Optional and never validated against anything: this service has no user table, and a
+    request without it is moderated exactly as before. Without it every row is "anonymous",
+    which is why the log could not tell one member's tenth refusal from ten members' first.
+    """
+    try:
+        v = request.headers.get("X-User-Id")
+        if not v:
+            sources = [request.form or {}]
+            body = request.get_json(silent=True)
+            if isinstance(body, dict):
+                sources.append(body)
+            v = next((s.get(k) for s in sources for k in _USER_KEYS
+                      if s.get(k) not in (None, "")), None)
+    except Exception:
+        return None
+    if v is None or isinstance(v, (dict, list, bool)):
+        return None
+    v = str(v).strip()[:128]
+    return v or None
 
 
 @bp.errorhandler(HTTPException)
@@ -495,6 +544,23 @@ def moderate():
 
 def _execute_media_moderation(upload, content_type: ContentType,
                              content_id: str | None) -> tuple[dict | None, tuple | None]:
+    """Moderate one file; every row it writes is recorded as the IMAGE model's decision.
+
+    Including the OCR text read out of a picture: it is the picture being judged, and counting
+    it as an article would put image refusals in the text column of the log's KPIs. Restored
+    afterwards, so the text half of a text-and-picture request stays text.
+    """
+    import time
+    before = getattr(g, "modality", None), getattr(g, "media_started", None)
+    g.modality, g.media_started = "image", time.perf_counter()
+    try:
+        return _execute_media_moderation_inner(upload, content_type, content_id)
+    finally:
+        g.modality, g.media_started = before
+
+
+def _execute_media_moderation_inner(upload, content_type: ContentType,
+                                    content_id: str | None) -> tuple[dict | None, tuple | None]:
     svc = _svc()
     media = svc.settings.media
 
@@ -1045,6 +1111,106 @@ def ready():
             return jsonify(_envelope({"status": "not_ready", **body},
                                      "Service models not ready.", success=False)), 503
     return jsonify(_envelope({"status": "ready", **body}, "Service is ready.")), 200
+
+
+_STARTED_AT = __import__("time").time()
+
+
+def _probe(name: str, fn) -> dict:
+    """Run one live check: {"name", "status": ok|down|off, "ms", "detail"}. Never raises."""
+    import time
+    t0 = time.perf_counter()
+    try:
+        status, detail = fn()
+    except Exception as exc:
+        log.warning("health check %s failed", name, exc_info=True)
+        status, detail = "down", f"{type(exc).__name__}: {exc}"
+    return {"name": name, "status": status, "detail": detail,
+            "ms": round((time.perf_counter() - t0) * 1000, 1)}
+
+
+@bp.get("/v1/admin/health")
+def admin_health():
+    """Whether each model and store is actually working right now, for the dashboard.
+
+    /ready says what is LOADED; this says what WORKS. Each model is exercised once - one
+    ordinary sentence through the text model, one blank picture through the vision encoder and
+    through OCR - because a model can be loaded and still fail on every call (a missing GPU
+    provider, a corrupt npz swapped in by a reload), and that is exactly the state an admin
+    cannot see from the dashboard while uploads quietly fail. Traffic comes from the audit
+    log, so "no requests in the last hour" is visible as well as "requests failing".
+    """
+    denied = _require_admin()
+    if denied:
+        return denied
+    import time
+
+    svc = _svc()
+    s = svc.settings
+    checks = []
+
+    def text_model():
+        if s.mode != "sync":
+            return "ok", f"{s.mode} mode: text is scored by the worker, not this process"
+        svc.models.score("Selling handmade wooden chairs, great quality.")
+        return "ok", f"{svc.models.version} ({s.model_backend}) - scored a test sentence"
+    checks.append(_probe("Text moderation model", text_model))
+
+    def visual_model():
+        v = s.visual
+        if not v.config.enabled:
+            return "off", "visual check is switched off in settings"
+        if not v.ready:
+            return "down", (v.status or {}).get("reason") or "model files missing"
+        from PIL import Image
+        res = v.classify(Image.new("RGB", (64, 64), (200, 200, 200)))
+        if res.failed or not res.checked:
+            return "down", "the vision encoder failed on a test picture"
+        st = v.status
+        return "ok", (f"{st.get('provider', '')} - {len(st.get('labels') or [])} rules, "
+                      f"probe {'loaded' if st.get('probe') else 'absent'}")
+    checks.append(_probe("Image moderation model", visual_model))
+
+    def ocr():
+        if s.ocr is None or not s.ocr.enabled:
+            return "off", "OCR is switched off - writing inside pictures is not read"
+        import numpy as np
+        s.ocr.read_image(np.full((48, 160, 3), 255, dtype=np.uint8))
+        return "ok", "reads writing inside pictures"
+    checks.append(_probe("OCR (text in images)", ocr))
+
+    def admin_db():
+        n = current_app.extensions["admin"].store.count_moderation_logs()
+        return "ok", f"{n:,} moderation log rows"
+    checks.append(_probe("Audit log database", admin_db))
+
+    def system_db():
+        store = current_app.extensions.get("system_store")
+        if store is None:
+            return "off", "no image store configured"
+        return "ok", f"{len(store.list_categories())} image categories"
+    checks.append(_probe("Image store database", system_db))
+
+    try:
+        hour = current_app.extensions["admin"].store.log_health(3600)
+        day = current_app.extensions["admin"].store.log_health(86400)
+    except Exception:
+        log.exception("health: traffic summary failed")
+        hour = day = None
+
+    down = [c for c in checks if c["status"] == "down"]
+    overall = "down" if any(c["name"] == "Text moderation model" for c in down) else \
+        ("degraded" if down else "ok")
+    return jsonify({
+        "status": overall,
+        "checked_at": time.time(),
+        "uptime_s": round(time.time() - _STARTED_AT),
+        "mode": s.mode,
+        "checks": checks,
+        "traffic": {"last_hour": hour, "last_day": day},
+        "service_auth": "open" if s.auth_disabled or not s.service_token else "enforced",
+        "moderation_disabled_for": svc.levels.disabled_features(),
+    })
 
 
 def _require_admin():

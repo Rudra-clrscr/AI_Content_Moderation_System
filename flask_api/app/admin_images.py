@@ -107,10 +107,43 @@ def list_categories():
     if chk is not None:
         return chk
     store = _store()
+    cats = store.list_categories()
+    # Each category's written rule, when the policy has one of the same name: the two are one
+    # subject, and this screen is where an admin decides whether its pictures are allowed.
+    rules = _policy_rules()
+    for c in cats:
+        r = rules.get(c["name"])
+        c["rule"] = None if not isinstance(r, dict) else {
+            "verdict": "refuse" if r.get("unsafe", True) else "allow"}
     return jsonify({
-        "categories": store.list_categories(),
+        "categories": cats,
         "active_mode": store.get_setting("active_policy_mode", "standard"),
     })
+
+
+def _policy_rules() -> dict:
+    """The visual policy's rules by name, or {} if the file cannot be read."""
+    try:
+        from app.admin_policy import _paths, _read
+        return _read(_paths()[0]).get("labels") or {}
+    except Exception:
+        log.exception("could not read the visual policy")
+        return {}
+
+
+def _with_rule_sync(msg: str, res: dict | None) -> str:
+    """Say what happened to the category's written rule after its pictures moved."""
+    if not res:
+        return msg
+    if res.get("changed"):
+        return (f"{msg} Its Image Policy Rule now {'refuses' if res.get('verdict') == 'refuse' else 'allows'} "
+                "these pictures too.")
+    if res.get("reason") == "conflict":
+        return (f"{msg} Its Image Policy Rule was NOT changed: its wordings clash with another "
+                "rule. Settle it under Image Policy Rules, where the two are shown as out of sync.")
+    if res.get("reason") == "error":
+        return f"{msg} Its Image Policy Rule could not be updated: {res.get('message')}"
+    return msg
 
 
 @admin_images_bp.post("/v1/admin/images/categories")
@@ -128,6 +161,24 @@ def add_category():
         return _err(400, "invalid_input", "Category 'name' is required.")
 
     store = _store()
+    # THE SAME NAME ON THE OTHER SCREEN IS THE SAME SUBJECT. A rule in Image Policy Rules
+    # scores the pictures filed under the category of its own name, so a "new" category
+    # called `weapon` is not new: it is the weapon rule's pictures, and creating it here as if
+    # it were a separate thing is how a subject came to exist twice. The rule's category is
+    # created with it - only a rule older than that link can lack one, and this creates it
+    # with the rule's verdict instead of whatever this form said.
+    key = name.strip().lower().replace(" ", "_")
+    rule = _policy_rules().get(key)
+    if isinstance(rule, dict):
+        verdict = "refuse" if rule.get("unsafe", True) else "allow"
+        if store.get_category(key) is None:
+            store.add_category(key, display_name, "block" if verdict == "refuse" else "allow",
+                               description)
+        return _err(409, "category_exists",
+                    f"'{key}' already exists as an Image Policy Rule ({verdict.upper()}). It is "
+                    "the same subject, so it is listed here as a category - upload its pictures "
+                    "there rather than creating it again.",
+                    name=key, rule={"verdict": verdict})
     try:
         cat = store.add_category(name, display_name, default_action, description)
         return jsonify({"category": cat, "message": f"Category '{cat['name']}' created."}), 201
@@ -151,11 +202,15 @@ def update_category(name: str):
         count = store.set_category_policy(name, act)
         # Marked pictures in this category just changed direction with everything else.
         ex = _resync_exemplars(store.exemplar_ids(category=name))
+        # And so does its written rule, or the two screens now disagree about one subject.
+        from app.admin_policy import sync_rule_to_pictures
+        rule = sync_rule_to_pictures(name, act)
         return jsonify({
-            "message": _note_exemplars(
-                f"Set all {count} images in '{name}' to {act.upper()}.", ex),
+            "message": _with_rule_sync(_note_exemplars(
+                f"Set all {count} images in '{name}' to {act.upper()}.", ex), rule),
             "category": store.get_category(name),
             "exemplars": ex,
+            "policy_rule": rule,
         })
 
     try:
@@ -165,7 +220,12 @@ def update_category(name: str):
             default_action=body.get("default_action"),
             description=body.get("description"),
         )
-        return jsonify({"category": cat, "message": f"Category '{name}' updated."})
+        rule = None
+        if body.get("default_action") is not None:
+            from app.admin_policy import sync_rule_to_pictures
+            rule = sync_rule_to_pictures(name, cat["default_action"])
+        return jsonify({"category": cat, "policy_rule": rule,
+                        "message": _with_rule_sync(f"Category '{name}' updated.", rule)})
     except ValueError as e:
         return _err(404, "not_found", str(e))
 
@@ -379,9 +439,12 @@ def batch_update_images():
         cat = str(body["category"]).lower()
         count = store.set_category_policy(cat, act)
         ex = _resync_exemplars(store.exemplar_ids(category=cat))
+        from app.admin_policy import sync_rule_to_pictures
+        rule = sync_rule_to_pictures(cat, act)
         return jsonify({"success": True, "updated": count, "exemplars": ex,
-                        "message": _note_exemplars(
-                            f"Set category '{cat}' to {act.upper()}.", ex)})
+                        "policy_rule": rule,
+                        "message": _with_rule_sync(_note_exemplars(
+                            f"Set category '{cat}' to {act.upper()}.", ex), rule)})
 
     updates = body.get("updates") or []
     if not isinstance(updates, list):
@@ -429,9 +492,23 @@ def apply_preset():
     if not preset:
         return _err(400, "missing_preset", "Provide 'preset' (e.g. 'child_products' or 'standard').")
 
+    # THE PRESET IS A VERDICT ON `minor`, SO THE WRITTEN RULE FOLLOWS IT. Child-products mode
+    # used to leave the `minor` rule refusing and hide it behind an in-memory bar of 1.01 -
+    # which the dashboard never showed, a restart forgot, and the combined
+    # max(score, unsafe_score) >= reject_min fallback in clip.decides_reject still crossed.
+    # Done BEFORE training: the rebuild reloads prompts.npz, and train_probe's own threshold
+    # override has to land after that, not be wiped by it.
+    rule = None
+    if preset in ("child_products", "baby_care", "mamy_poko", "standard", "default",
+                  "strict_minors"):
+        from app.admin_policy import sync_rule_to_pictures
+        rule = sync_rule_to_pictures(
+            "minor", "allow" if preset in ("child_products", "baby_care", "mamy_poko") else "block")
     trainer = _trainer()
     try:
         result = trainer.apply_preset(preset)
+        if rule:
+            result["policy_rule"] = rule
         return jsonify(result)
     except Exception as e:
         log.exception("Applying preset failed")

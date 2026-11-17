@@ -43,6 +43,8 @@ def test_allow(client, sink):
     recorded = sink.results[0]
     client = recorded.pop("client")
     assert (client["ip"], client["network"]) == ("127.0.0.1", "127.0.0.0/24")
+    # Which model decided - audit bookkeeping for the log's per-model KPIs, like the address.
+    assert recorded.pop("modality") == "text"
     # The audit trail keeps the pipeline's own vocabulary - "allow", not "approved" - so the
     # admin log filters and every row written before the envelope still read the same. Apart
     # from that one word and the keys the envelope adds, the row is still the payload.
