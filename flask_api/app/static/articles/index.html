@@ -13,6 +13,11 @@
       <span class="logo-word"><span class="b">B</span><span class="o">O</span><span class="n">N</span><span class="c">C</span></span>
       <span class="logo-sub">Network</span>
     </a>
+    <!-- Demo only. The real portal sends its signed-in member's id; this reference page has no
+         members, so whatever is typed here goes out as X-User-Id on every moderation call.
+         That is what lets the admin log's repeat-offender panel be tried on localhost. -->
+    <label class="member-as" title="Demo only: the member id sent with every post from this page">Posting as
+      <input id="demo-member" type="text" placeholder="member id (optional)" autocomplete="off" maxlength="128"></label>
     <button class="icon-btn" aria-label="Menu">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>

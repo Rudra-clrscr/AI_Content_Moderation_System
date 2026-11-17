@@ -516,7 +516,92 @@ def get_moderation_logs():
     logs_data = a.store.get_moderation_logs(
         **_log_filters(), limit=limit, offset=offset,
         offender_min=offender_min, offender_rate=offender_rate)
+    blocked = a.store.blocked_members()
+    logs_data["blocked_members"] = sorted(blocked)
+    for u in logs_data["repeat_offenders"]["users"]:
+        u["blocked"] = u["user_id"] in blocked
     return jsonify(logs_data), 200
+
+
+def _offender_rule() -> tuple[int, float]:
+    """The two-part offender rule from the query string: `min_rejects` and `min_rate`.
+
+    `offender_min` / `offender_rate` are accepted too - the names the log list uses - so one
+    link can carry the same rule to either endpoint. Anything malformed falls back to 3 / 0.5.
+    """
+    def pick(*names):
+        for n in names:
+            if request.args.get(n) not in (None, ""):
+                return request.args.get(n)
+        return None
+    try:
+        n = max(1, int(pick("min_rejects", "offender_min") or 3))
+    except (ValueError, TypeError):
+        n = 3
+    try:
+        r = min(1.0, max(0.0, float(pick("min_rate", "offender_rate") or 0.5)))
+    except (ValueError, TypeError):
+        r = 0.5
+    return n, r
+
+
+def _offender_window() -> tuple[float | None, float | None]:
+    """`since`/`until` (epoch or ISO), or `hours` back from now as a shorthand."""
+    since, until = _when(request.args.get("since")), _when(request.args.get("until"))
+    try:
+        hours = float(request.args.get("hours")) if request.args.get("hours") else None
+    except ValueError:
+        hours = None
+    if since is None and hours and hours > 0:
+        since = time.time() - hours * 3600
+    return since, until
+
+
+@admin_bp.get("/v1/admin/moderation-logs/repeat-offenders")
+def list_repeat_offenders():
+    """Members whose submissions are refused too often in a window.
+
+    The same list the log screen highlights, on its own, for a caller that wants only the
+    members - the portal, say, deciding whom to send for manual review.
+    """
+    denied = check_admin()
+    if denied:
+        return denied
+    a: Admin = current_app.extensions["admin"]
+    n, r = _offender_rule()
+    since, until = _offender_window()
+    try:
+        limit = min(500, max(1, int(request.args.get("limit", 50))))
+    except (ValueError, TypeError):
+        limit = 50
+    res = a.store.repeat_offenders(since=since, until=until, min_rejects=n, min_rate=r,
+                                   content_type=request.args.get("content_type") or None,
+                                   modality=request.args.get("modality") or None,
+                                   limit=limit)
+    res["window"] = {"since": since, "until": until}
+    blocked = a.store.blocked_members()
+    for u in res["users"]:
+        u["blocked"] = u["user_id"] in blocked
+    return jsonify(res), 200
+
+
+@admin_bp.get("/v1/admin/moderation-logs/repeat-offenders/<path:user_id>")
+def get_member_record(user_id: str):
+    """One member's record and whether it makes them a repeat offender - yes or no, with
+    the numbers behind it."""
+    denied = check_admin()
+    if denied:
+        return denied
+    a: Admin = current_app.extensions["admin"]
+    user_id = user_id.strip()[:128]
+    if not user_id or user_id == "anonymous":
+        return _err(400, "bad_user", "Give a member id; anonymous submissions cannot be counted.")
+    n, r = _offender_rule()
+    since, until = _offender_window()
+    res = a.store.member_record(user_id, since=since, until=until, min_rejects=n, min_rate=r)
+    res["window"] = {"since": since, "until": until}
+    res["blocked"] = user_id in a.store.blocked_members()
+    return jsonify(res), 200
 
 
 @admin_bp.get("/v1/admin/moderation-logs/export")
@@ -619,9 +704,23 @@ def add_blocked_client():
     value = str(body.get("value", "")).strip()
     scope = str(body.get("scope", "ip")).strip().lower()
     if not value:
-        return _err(400, "missing_value", "Give the address to block.")
-    if scope not in ("ip", "network"):
-        return _err(400, "bad_scope", "scope must be 'ip' or 'network'.")
+        return _err(400, "missing_value", "Give the address or member id to block.")
+    if scope not in ("ip", "network", "member"):
+        return _err(400, "bad_scope", "scope must be 'ip', 'network' or 'member'.")
+
+    a: Admin = current_app.extensions["admin"]
+    who = _session_admin()
+    reason = str(body.get("reason", "")).strip()
+    if scope == "member":
+        # A member id is the portal's own, and this service has no user table to check it
+        # against - so only the shapes that can never name one member are refused.
+        if value.lower() == "anonymous" or len(value) > 128:
+            return _err(400, "bad_member",
+                        "Give a member id; anonymous submissions cannot be blocked by member.")
+        row = a.store.block_client(value, "member", reason=reason,
+                                   created_by=who["email"] if who else "")
+        log.info("admin blocked member %s", value)
+        return jsonify({"blocked": row, "message": f"Blocked member {value}."}), 201
 
     # Validated here so a typo becomes a message rather than a row that silently blocks
     # nothing and is never noticed. A network is stored in the same normal form the resolver
@@ -646,11 +745,9 @@ def add_blocked_client():
                     "your own submissions; the dashboard would still work, but check the "
                     "address before going ahead.")
 
-    a: Admin = current_app.extensions["admin"]
-    # A script authenticating with X-Admin-Token has no session row, so this records nothing
-    # rather than failing - the block is still the right thing to make.
-    who = _session_admin()
-    row = a.store.block_client(value, scope, reason=str(body.get("reason", "")).strip(),
+    # A script authenticating with X-Admin-Token has no session row, so `who` records
+    # nothing rather than failing - the block is still the right thing to make.
+    row = a.store.block_client(value, scope, reason=reason,
                                created_by=who["email"] if who else "")
     log.info("admin blocked %s %s", scope, value)
     return jsonify({"blocked": row,

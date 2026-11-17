@@ -225,6 +225,34 @@
     return range.collapsed ? null : range;
   }
 
+  // DEMO MEMBER. The real portal sends its signed-in member's id with every call; this
+  // reference page has no members, so the "Posting as" box in its header stands in. Kept in
+  // localStorage so it survives a reload, and read fresh on every call so changing it takes
+  // effect on the next post. Nothing is sent when the box is empty.
+  const MEMBER_KEY = "bonc.demoMember";
+  function memberId() {
+    try { return (localStorage.getItem(MEMBER_KEY) || "").trim(); } catch { return ""; }
+  }
+  function memberHeaders() {
+    const id = memberId();
+    return id ? { "X-User-Id": id } : {};
+  }
+  function wireMemberBox() {
+    const box = typeof document !== "undefined" && document.getElementById("demo-member");
+    if (!box) return;
+    box.value = memberId();
+    box.addEventListener("input", () => {
+      try {
+        const v = box.value.trim();
+        if (v) localStorage.setItem(MEMBER_KEY, v); else localStorage.removeItem(MEMBER_KEY);
+      } catch { /* storage blocked: the box simply does not persist */ }
+    });
+  }
+  if (typeof document !== "undefined") {
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireMemberBox);
+    else wireMemberBox();
+  }
+
   /**
    * Moderate an article. Resolves to {result, parts, content}.
    * Throws an Error with .code on HTTP/API errors (e.g. "model_not_ready", "network").
@@ -235,7 +263,7 @@
     try {
       resp = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...memberHeaders() },
         body: JSON.stringify({ content, content_type: "article", content_id: contentId }),
       });
     } catch (e) {
@@ -267,7 +295,7 @@
     if (contentId) form.append("content_id", contentId);
     let resp;
     try {
-      resp = await fetch(endpoint, { method: "POST", body: form });
+      resp = await fetch(endpoint, { method: "POST", body: form, headers: memberHeaders() });
     } catch (e) {
       throw Object.assign(new Error("Could not reach the moderation service."), { code: "network" });
     }
@@ -300,7 +328,7 @@
     try {
       resp = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...memberHeaders() },
         body: JSON.stringify({ content, content_type: contentType, content_id: contentId }),
       });
     } catch (e) {

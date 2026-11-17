@@ -255,7 +255,7 @@ paths:
           description: '`invalid_json`, `invalid_content`, `invalid_content_type`, `invalid_content_id`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "403":
-          description: '`client_blocked` — this address is on the blocklist.'
+          description: '`client_blocked` — this address is on the blocklist. `member_blocked` — the member named by `user_id` / `X-User-Id` is blocked; show them that their account cannot post.'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "413":
           description: '`content_too_long`'
@@ -335,7 +335,7 @@ paths:
           description: '`invalid_file`, `invalid_content_type`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "403":
-          description: '`client_blocked`'
+          description: '`client_blocked` (address) or `member_blocked` (the member sending it)'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "413":
           description: '`media_too_large`, `content_too_long`'
@@ -456,7 +456,7 @@ paths:
           description: '`invalid_request` (neither text nor media provided, or `content` sent together with `Title`/`Body`/`Hashtags`), `invalid_content` (empty string), `invalid_content_type`'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "403":
-          description: '`client_blocked`'
+          description: '`client_blocked` (address) or `member_blocked` (the member sending it)'
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "413":
           description: '`content_too_long`, `media_too_large`'
@@ -1031,6 +1031,12 @@ paths:
         - { name: content_type, in: query, schema: { $ref: '#/components/schemas/ContentType' } }
         - { name: severity, in: query, schema: { type: string, enum: [low, medium, high] } }
         - { name: q, in: query, description: Free-text search, schema: { type: string } }
+        - { name: modality, in: query, description: 'Only text or only image decisions.', schema: { type: string, enum: [text, image] } }
+        - { name: since, in: query, description: 'Epoch seconds or ISO 8601.', schema: { type: string } }
+        - { name: until, in: query, description: 'Epoch seconds or ISO 8601.', schema: { type: string } }
+        - { name: user, in: query, description: "One member's rows only.", schema: { type: string } }
+        - { name: offender_min, in: query, schema: { type: integer, default: 3 } }
+        - { name: offender_rate, in: query, schema: { type: number, default: 0.5 } }
         - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 200 } }
         - { name: offset, in: query, schema: { type: integer, default: 0, minimum: 0 } }
       responses:
@@ -1053,6 +1059,12 @@ paths:
                       revise: { type: integer }
                       reject: { type: integer }
                       total: { type: integer }
+                  by_modality:
+                    type: object
+                    description: 'The same counts per model, `text` and `image`, each with `reject_rate`. The screen shows these two, never a combined total.'
+                  repeat_offenders:
+                    type: object
+                    description: 'As `GET /v1/admin/moderation-logs/repeat-offenders`.'
         "401": { $ref: '#/components/responses/Unauthorized' }
     delete:
       tags: ["Admin: audit"]
@@ -1119,6 +1131,117 @@ paths:
           description: '`export_unavailable` — `openpyxl` is missing. Text and Word still work.'
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
 
+  /v1/admin/moderation-logs/repeat-offenders:
+    get:
+      tags: ["Admin: audit"]
+      summary: Members refused too often
+      operationId: listRepeatOffenders
+      description: |
+        Members whose submissions are refused too often in a window. The same list the
+        admin log screen highlights.
+
+        A member qualifies only when **both** parts of the rule hold: at least
+        `min_rejects` refusals **and** a refusal rate of at least `min_rate`. A count alone
+        would flag the busiest honest member; a rate alone would flag a newcomer with one
+        post refused out of one.
+
+        Counted per `user_id`, which comes from the moderation calls (`user_id` / `userId`
+        in the body, or an `X-User-Id` header). Submissions without one are not counted;
+        `attributed_rows` says how many could be.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: min_rejects, in: query, description: 'Minimum refusals. Alias `offender_min`.', schema: { type: integer, default: 3, minimum: 1 } }
+        - { name: min_rate, in: query, description: 'Minimum share refused, 0-1. Alias `offender_rate`.', schema: { type: number, default: 0.5, minimum: 0, maximum: 1 } }
+        - { name: since, in: query, description: 'Epoch seconds or ISO 8601. Naive times are UTC.', schema: { type: string } }
+        - { name: until, in: query, description: 'Epoch seconds or ISO 8601.', schema: { type: string } }
+        - { name: hours, in: query, description: 'Shorthand for `since` = now minus this many hours. Ignored when `since` is given.', schema: { type: number } }
+        - { name: content_type, in: query, schema: { $ref: '#/components/schemas/ContentType' } }
+        - { name: modality, in: query, description: 'Count only text or only image decisions.', schema: { type: string, enum: [text, image] } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 500 } }
+      responses:
+        "200":
+          description: The members who meet the rule, most refusals first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user_id: { type: string }
+                        total: { type: integer, description: Submissions in the window. }
+                        rejected: { type: integer }
+                        revised: { type: integer }
+                        text_rejected: { type: integer }
+                        image_rejected: { type: integer }
+                        reject_rate: { type: number, description: rejected / total. }
+                        last_reject_at: { type: number, description: Epoch seconds. }
+                        last_at: { type: number, description: Epoch seconds. }
+                        blocked: { type: boolean, description: Already blocked as a member. }
+                  min_rejects: { type: integer }
+                  min_rate: { type: number }
+                  attributed_rows: { type: integer, description: Submissions in the window that carried a member id. }
+                  window:
+                    type: object
+                    properties:
+                      since: { type: number, nullable: true }
+                      until: { type: number, nullable: true }
+              example:
+                users:
+                  - { user_id: member-7781, total: 5, rejected: 4, revised: 0, text_rejected: 3, image_rejected: 1, reject_rate: 0.8, last_reject_at: 1794987600, last_at: 1794987600 }
+                min_rejects: 3
+                min_rate: 0.5
+                attributed_rows: 42
+                window: { since: 1794901200, until: null }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/admin/moderation-logs/repeat-offenders/{user_id}:
+    get:
+      tags: ["Admin: audit"]
+      summary: Is this member a repeat offender?
+      operationId: getMemberModerationRecord
+      description: |
+        One member's record in the window and a yes/no answer, with the numbers behind it
+        either way. Takes the same rule and window parameters as the list.
+      security: [{ AdminToken: [] }, { AdminSession: [] }]
+      parameters:
+        - { name: user_id, in: path, required: true, schema: { type: string, maxLength: 128 } }
+        - { name: min_rejects, in: query, schema: { type: integer, default: 3, minimum: 1 } }
+        - { name: min_rate, in: query, schema: { type: number, default: 0.5, minimum: 0, maximum: 1 } }
+        - { name: since, in: query, schema: { type: string } }
+        - { name: until, in: query, schema: { type: string } }
+        - { name: hours, in: query, schema: { type: number } }
+      responses:
+        "200":
+          description: The member's record.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string }
+                  is_repeat_offender: { type: boolean }
+                  blocked: { type: boolean, description: Already blocked as a member. }
+                  total: { type: integer }
+                  allowed: { type: integer }
+                  revised: { type: integer }
+                  rejected: { type: integer }
+                  text_rejected: { type: integer }
+                  image_rejected: { type: integer }
+                  reject_rate: { type: number, nullable: true, description: Null when the member has no submissions in the window. }
+                  last_reject_at: { type: number, nullable: true }
+                  last_at: { type: number, nullable: true }
+                  min_rejects: { type: integer }
+                  min_rate: { type: number }
+              example: { user_id: member-7781, is_repeat_offender: true, total: 5, allowed: 1, revised: 0, rejected: 4, text_rejected: 3, image_rejected: 1, reject_rate: 0.8, last_reject_at: 1794987600, last_at: 1794987600, min_rejects: 3, min_rate: 0.5, window: { since: null, until: null } }
+        "400":
+          description: '`bad_user` - empty or `anonymous`.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
   /v1/admin/moderation-logs/{request_id}:
     get:
       tags: ["Admin: audit"]
@@ -1155,9 +1278,15 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: ["Admin: blocking"]
-      summary: Block an address or network
+      summary: Block an address, a network or a member
       operationId: addBlockedClient
       description: |
+        `scope: member` blocks one portal member by `user_id`, wherever they post from: their
+        submissions are refused with `403 member_blocked` until unblocked. It works only when
+        the portal sends the member's id on each moderation call. An id that reads like an
+        address blocks only the member, never the address.
+
+
         Blocking stops casual repetition from one connection. It is **not an identity
         control**: a mobile connection changes address by switching to cellular, and a VPN
         changes it by clicking.
@@ -1178,7 +1307,7 @@ paths:
               required: [value]
               properties:
                 value: { type: string, example: 203.0.113.45 }
-                scope: { type: string, enum: [ip, network], default: ip }
+                scope: { type: string, enum: [ip, network, member], default: ip }
                 reason: { type: string, example: repeat scam listings }
       responses:
         "201":
@@ -1191,7 +1320,7 @@ paths:
                   blocked: { $ref: '#/components/schemas/BlockedClient' }
                   message: { type: string }
         "400":
-          description: '`missing_value`, `bad_scope` or `bad_address`'
+          description: '`missing_value`, `bad_scope`, `bad_address` or `bad_member` (`anonymous` or over 128 characters)'
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/CsrfMissing' }
@@ -1207,7 +1336,7 @@ paths:
       security: [{ AdminToken: [] }, { AdminSession: [] }]
       parameters:
         - { name: value, in: path, required: true, schema: { type: string } }
-        - { name: scope, in: query, schema: { type: string, enum: [ip, network] } }
+        - { name: scope, in: query, schema: { type: string, enum: [ip, network, member] } }
       responses:
         "200":
           description: Unblocked.
@@ -2537,7 +2666,7 @@ components:
       type: object
       properties:
         value: { type: string }
-        scope: { type: string, enum: [ip, network] }
+        scope: { type: string, enum: [ip, network, member] }
         reason: { type: string }
         created_by: { type: string, description: Blank when blocked by a token-authenticated script. }
         created_at: { type: string, format: date-time }

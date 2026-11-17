@@ -976,12 +976,26 @@ textarea.input { resize: vertical; min-height: 96px; }
 .pol-ti-meter b { position: absolute; top: -3px; width: 2px; height: 14px; background: #0f172a; }
 
 /* Moderation logs: KPIs per model, time window, repeat offenders */
-.logs-kpi-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin: 10px 0 4px; }
-.logs-kpi-model { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fff; }
-.logs-kpi-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 13px; color: #0f172a; flex-wrap: wrap; }
-.logs-kpi-head .hint { font-weight: 400; font-size: 12px; }
-.logs-kpi-nums { display: flex; gap: 14px; margin-top: 6px; font-size: 13px; color: #475569; flex-wrap: wrap; }
-.logs-kpi-nums b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.logs-kpi-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin: 4px 0 6px; }
+.logs-kpi-model { border: 1px solid var(--line); border-top: 4px solid #475569; border-radius: 12px; padding: 14px 16px 16px; background: #fff; }
+.logs-kpi-model.image { border-top-color: #6d28d9; }
+.logs-kpi-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.logs-kpi-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; color: #0f172a; }
+.logs-kpi-icon { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: #f1f5f9; font-size: 14px; }
+.logs-kpi-model.image .logs-kpi-icon { background: #ede9fe; }
+.logs-kpi-total { font-size: 12.5px; color: var(--muted); }
+.logs-kpi-total b { font-size: 16px; color: #0f172a; font-variant-numeric: tabular-nums; }
+.logs-kpi-split { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: #e5e7eb; margin: 12px 0 12px; }
+.logs-kpi-split i { display: block; height: 100%; }
+.logs-kpi-split i.allow { background: #16a34a; } .logs-kpi-split i.revise { background: #d97706; } .logs-kpi-split i.reject { background: #dc2626; }
+.logs-kpi-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 10px; }
+.logs-kpi-tile { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: #f8fafc; }
+.logs-kpi-tile.allow { background: #f0fdf4; } .logs-kpi-tile.revise { background: #fffbeb; } .logs-kpi-tile.reject { background: #fef2f2; }
+.logs-kpi-num { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.logs-kpi-tile.allow .logs-kpi-num { color: #15803d; } .logs-kpi-tile.revise .logs-kpi-num { color: #b45309; } .logs-kpi-tile.reject .logs-kpi-num { color: #b91c1c; }
+.logs-kpi-lbl { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .4px; }
+.logs-kpi-pct { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.logs-kpi-empty { margin: 14px 0 2px; font-size: 13px; color: var(--muted); }
 .logs-kpi-when { margin: 4px 0 12px; font-size: 12px; color: var(--muted); }
 .logs-range { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: #475569; }
 .logs-range label { display: inline-flex; align-items: center; gap: 4px; }
@@ -1015,3 +1029,14 @@ textarea.input { resize: vertical; min-height: 96px; }
 .hl-ms { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .hl-traffic { margin: 12px 0; font-size: 13px; }
 .hl-traffic .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Demo only: which member the reference pages submit as, so repeat offenders can be tried locally. */
+.member-as { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-left: auto; margin-right: 12px; }
+.member-as input { width: 150px; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12.5px; }
+
+/* Member blocking */
+.blocked-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: #1f2937; color: #fff; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.logs-offender-acts { white-space: nowrap; text-align: right; }
+.logs-offender-acts .btn-xs + .btn-xs, .logs-offender-acts .btn-xs + .blocked-badge { margin-left: 6px; }
+.btn-xs.btn-xs-danger { color: #fff; background: #dc2626; border-color: #dc2626; }
+.btn-xs.btn-xs-danger:hover:not(:disabled) { background: #b91c1c; border-color: #b91c1c; }
