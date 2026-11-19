@@ -1216,6 +1216,11 @@
       let categories = [];
       let imagesData = { items: [], pagination: {}, stats: {} };
       let pendingChanges = new Map(); // id -> { action, is_selected }
+      // Pictures that are live examples, as last loaded: id -> { action, filename }. A
+      // picture's ALLOWED/BLOCKED label and its "allowing/refusing lookalikes" mark are the
+      // same column, so saving a pending label also turns the live mark. This is what lets a
+      // save say so before it does it.
+      const liveMarks = new Map();
       let blurSensitiveMode = true; // Initial blur for nudity and sexual images
       let revealedImageIds = new Set(); // IDs of sensitive images revealed by admin
       let blurredImageIds = new Set(); // IDs of non-sensitive images blurred by admin
@@ -1528,6 +1533,10 @@
 
       function renderGrid(items) {
         const grid = $("img-grid-container");
+        (items || []).forEach((img) => {
+          if (img.is_exemplar) liveMarks.set(img.id, { action: img.action, filename: img.filename });
+          else liveMarks.delete(img.id);
+        });
         if (!items || !items.length) {
           grid.innerHTML = `<div style="text-align:center; padding:40px; background:#f8fafc; border:1px dashed var(--line); border-radius:10px;">
             <p style="font-size:16px; font-weight:700; color:#475569; margin:0 0 6px;">No images found</p>
@@ -1589,7 +1598,8 @@
                 <div class="img-filename" title="${esc(img.filename)}">${esc(img.filename)}</div>
               </div>
               <div class="img-card-foot">
-                <button class="btn-toggle-act" type="button" data-id="${img.id}" data-action="${isAllow ? "block" : "allow"}">
+                <button class="btn-toggle-act" type="button" data-id="${img.id}" data-action="${isAllow ? "block" : "allow"}"
+                  ${img.is_exemplar ? `title="Once saved, this also switches the live lookalike rule below"` : ""}>
                   ${isAllow ? "Switch to BLOCK" : "Switch to ALLOW"}
                 </button>
               </div>
@@ -1664,6 +1674,16 @@
             const apply = async (resolve) => {
               const res = await call("PUT", "/v1/admin/policy/exemplars",
                                      resolve ? { ids: [id], mode, resolve } : { ids: [id], mode });
+              // THE MARK JUST SET MUST SURVIVE THE NEXT SAVE. An unsaved "Switch to BLOCK" on
+              // this card used to stay queued after "Switch to allowing", and Train Model
+              // saves the queue first - so an admin who set "allowing lookalikes" and then
+              // retrained had their mark turned back to refusing, with uploads refused again
+              // while Test an image (run before the retrain) said they would publish.
+              const queued = pendingChanges.get(id);
+              if (queued && "action" in queued) {
+                delete queued.action;
+                if (!("is_selected" in queued)) pendingChanges.delete(id);
+              }
               say(mode === "clear"
                 ? `Stopped using that picture as a live example. ${res.exemplars} still in force.`
                 : `Done — pictures that look like that one will now be ${mode === "block" ? "refused" : "allowed"}. `
@@ -1811,10 +1831,28 @@
 
       // ---- Actions: Submit, Train, Presets, Bulks -------------------------------------
 
+      /** Confirm before saving label flips that would also turn a live lookalike mark.
+       *  Returns false when the admin backs out; their unsaved flips are left as they were. */
+      function confirmMarkFlips() {
+        const flips = [];
+        pendingChanges.forEach((p, id) => {
+          const mark = liveMarks.get(id);
+          if (mark && "action" in p && p.action !== mark.action) flips.push({ ...mark, to: p.action });
+        });
+        if (!flips.length) return true;
+        const lines = flips.map((f) => `• ${f.filename}: ${f.action === "allow" ? "allowing" : "refusing"}`
+          + ` lookalikes → ${f.to === "allow" ? "allowing" : "refusing"}`).join("\n");
+        return window.confirm(
+          `Saving these changes also switches ${flips.length === 1 ? "a live lookalike rule" : "live lookalike rules"},`
+          + ` from the next upload:\n\n${lines}\n\nThe ALLOWED/BLOCKED label and the live`
+          + ` lookalike rule are the same setting on a picture. Continue?`);
+      }
+
       async function submitBatchChanges() {
         if (!pendingChanges.size) {
           return say("No unsaved changes. Select/deselect images or toggle Allow/Block first.", true);
         }
+        if (!confirmMarkFlips()) return;
         const btn = $("btn-submit-changes");
         busy(btn, true, "Saving…");
         try {
@@ -1901,6 +1939,10 @@
         try {
           // If there are pending changes, save them first
           if (pendingChanges.size) {
+            if (!confirmMarkFlips()) {
+              busy(btn, false, "⚡ Train Model");
+              return say("Nothing was saved or trained.", true);
+            }
             await call("PUT", "/v1/admin/images/batch", { updates: Array.from(pendingChanges.values()) });
             pendingChanges.clear();
           }
