@@ -29,17 +29,22 @@ info:
 
     ### Authentication
 
-    - The `/v1/moderate*` endpoints take a **bearer token** (`Bearer`) when `SERVICE_TOKEN`
-      is set, and are **open** when it is not — see that scheme for why both exist and what
-      `GET /ready` reports about it. The two probes are always open, so a load balancer can
-      reach them without a secret.
+    - The `/v1/moderate*` endpoints are called by the BONC .NET server. When `SERVICE_TOKEN`
+      is set it sends `Authorization: Bearer <SERVICE_TOKEN>`; when it is unset they are
+      **open** (`GET /ready` reports `service_auth: "open"` or `"enforced"`). That token is
+      server-to-server only, so this page does not offer it under Authorize. The two probes
+      are always open, so a load balancer can reach them without a secret.
     - **There is no admin login on this service.** Admins sign in on the BONC .NET side
       and bring that sign-in's token as `Authorization: Bearer` (`BoncAdmin`). Each request
       is checked against the .NET endpoint named by `BONC_AUTH_VERIFY_URL`; `GET /ready`
       reports `admin_verifier: bonc` once it is set.
-    - Scripts and ops can use the `X-Admin-Token` header (`AdminToken`) when `ADMIN_TOKEN`
-      is set. A request that carries a bearer token is judged on that token alone.
-    - `POST /v1/admin/model/reload` accepts the **`X-Admin-Token` only**.
+    - **Authorize → BoncAdmin** is the one sign-in on this page: paste the admin's BONC
+      `AuthToken` (without the word `Bearer`).
+    - Scripts and ops can still send the `X-Admin-Token` header when `ADMIN_TOKEN` is set;
+      it is not offered here. A request that carries a bearer token is judged on that token
+      alone.
+    - `POST /v1/admin/model/reload` accepts the **`X-Admin-Token` only**, entered as a field
+      on that endpoint.
     - With neither `BONC_AUTH_VERIFY_URL` nor `ADMIN_TOKEN` set, admin endpoints answer
       `404` ("disabled"), not `401`. With `AUTH_DISABLED=1` they are open.
     - An accepted BONC token is trusted for `BONC_AUTH_CACHE_SECONDS` (default 60) before
@@ -113,7 +118,6 @@ paths:
       # Gated by the bearer token when SERVICE_TOKEN is set, and open when it is not.
       # Declared optional ([] alongside Bearer) because both are real deployments: the
       # token is how this is meant to run, and open is what a local checkout does.
-      security: [{ Bearer: [] }, {}]
       parameters:
         - $ref: '#/components/parameters/MemberIdHeader'
       description: |
@@ -296,7 +300,6 @@ paths:
       # Gated by the bearer token when SERVICE_TOKEN is set, and open when it is not.
       # Declared optional ([] alongside Bearer) because both are real deployments: the
       # token is how this is meant to run, and open is what a local checkout does.
-      security: [{ Bearer: [] }, {}]
       parameters:
         - $ref: '#/components/parameters/MemberIdHeader'
       description: |
@@ -393,7 +396,6 @@ paths:
       tags: [Moderation]
       summary: Unified moderation endpoint (text, image, or both)
       operationId: moderateUnified
-      security: [{ Bearer: [] }, {}]
       parameters:
         - $ref: '#/components/parameters/MemberIdHeader'
       description: |
@@ -531,7 +533,6 @@ paths:
       # Gated by the bearer token when SERVICE_TOKEN is set, and open when it is not.
       # Declared optional ([] alongside Bearer) because both are real deployments: the
       # token is how this is meant to run, and open is what a local checkout does.
-      security: [{ Bearer: [] }, {}]
       description: |
         Only meaningful in async mode. **In sync mode this returns `404 not_supported`**,
         because there is nothing to poll.
@@ -677,7 +678,7 @@ paths:
       description: |
         Who this request is authenticated as. With a BONC token it is the .NET answer, so
         this is the quickest end-to-end check that `BONC_AUTH_VERIFY_URL` is wired up.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: The caller.
@@ -706,7 +707,7 @@ paths:
       summary: The whole levels table
       operationId: getModerationLevels
       description: Every named level, the default policy, and each configured surface.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: The table.
@@ -741,7 +742,7 @@ paths:
         **An unknown surface is `404 no_such_surface`, not `400`** — the difference between
         "there is no such page" and "that value is wrong". An admin who typed `articles`
         (the plural) needs the first.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -823,7 +824,7 @@ paths:
         **Not the same as setting it back to the default's current value**, which freezes a
         copy that stops tracking later changes to the default. An admin undoing an
         experiment means "follow the default", and this is the only way to express it.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: Cleared. `had_override` says whether anything was actually removed.
@@ -849,7 +850,7 @@ paths:
       description: |
         `level` is non-null **only when every surface agrees**. `mixed` is true when they
         do not — a UI should warn before overwriting in that case.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: The flattened view.
@@ -870,7 +871,7 @@ paths:
         If the database write fails the in-memory levels are rolled back, so memory and
         disk keep telling the same story, and the call returns `500 save_failed` having
         changed nothing.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -915,7 +916,12 @@ paths:
 
         Swaps to the bundle in `MODEL_DIR`. **Only swaps if the new model loads and warms
         up**; otherwise the old one stays live and the error names what is still serving.
-      security: [{ AdminToken: [] }, { BoncAdmin: [] }]
+      parameters:
+        - name: X-Admin-Token
+          in: header
+          required: true
+          description: The server's `ADMIN_TOKEN` (a field here, not a sign-in option under Authorize).
+          schema: { type: string }
       responses:
         "200":
           description: Swapped.
@@ -944,7 +950,7 @@ paths:
       summary: List decisions
       operationId: getModerationLogs
       description: Malformed `limit` or `offset` fall back to the defaults rather than erroring.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: decision, in: query, schema: { type: string, enum: [allow, revise, reject] } }
         - { name: content_type, in: query, schema: { $ref: '#/components/schemas/ContentType' } }
@@ -1014,7 +1020,7 @@ paths:
       operationId: clearModerationLogs
       description: |
         > **No confirmation step and no filter — this takes everything.**
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: Cleared.
@@ -1041,7 +1047,7 @@ paths:
 
         Only the Excel path has an optional dependency. Without `openpyxl` it returns
         `503` naming the missing package; text and Word still work.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - name: format
           in: query
@@ -1093,7 +1099,7 @@ paths:
         Counted per `user_id`, which comes from the moderation calls (`user_id` / `userId`
         in the body, or an `X-User-Id` header). Submissions without one are not counted;
         `attributed_rows` says how many could be.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: min_rejects, in: query, description: 'Minimum refusals. Alias `offender_min`.', schema: { type: integer, default: 3, minimum: 1 } }
         - { name: min_rate, in: query, description: 'Minimum share refused, 0-1. Alias `offender_rate`.', schema: { type: number, default: 0.5, minimum: 0, maximum: 1 } }
@@ -1155,7 +1161,7 @@ paths:
         submissions in the window comes back with `total: 0` and `is_repeat_offender: false`,
         not 404. `blocked` says whether they are blocked already; block them with
         `POST /v1/admin/blocked-clients` and `scope: member`.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: user_id, in: path, required: true, description: 'The member id your platform sends as `user_id`.', schema: { type: string, maxLength: 128, example: member-7781 } }
         - { name: min_rejects, in: query, schema: { type: integer, default: 3, minimum: 1 } }
@@ -1201,7 +1207,7 @@ paths:
       tags: ["Admin: audit"]
       summary: One decision in full
       operationId: getModerationLogDetail
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: request_id, in: path, required: true, schema: { type: string } }
       responses:
@@ -1220,7 +1226,7 @@ paths:
       summary: List blocked members, addresses and networks
       operationId: listBlockedClients
       description: Every block, newest first. `scope` says what each one refuses.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: Current blocks.
@@ -1259,7 +1265,7 @@ paths:
 
         Refusing your own connection returns `409 would_block_self` — the screen that
         would undo a self-block sits behind the block.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -1311,7 +1317,7 @@ paths:
         Send the same `value` and `scope` the block was made with. **`scope` defaults to
         `ip`**, so unblocking a member needs `scope=member`, for example
         `DELETE /v1/admin/blocked-clients/member-2045?scope=member`.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: value, in: path, required: true, description: 'The member id, address or network that was blocked.', schema: { type: string, example: member-2045 } }
         - { name: scope, in: query, schema: { type: string, enum: [ip, network, member], default: ip } }
@@ -1338,7 +1344,7 @@ paths:
       tags: ["Admin: images"]
       summary: List categories
       operationId: listImageCategories
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: Categories and the active policy mode.
@@ -1354,7 +1360,7 @@ paths:
       tags: ["Admin: images"]
       summary: Create a category
       operationId: addImageCategory
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -1390,7 +1396,7 @@ paths:
       tags: ["Admin: images"]
       summary: Update a category
       operationId: updateImageCategory
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: name, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -1425,7 +1431,7 @@ paths:
         Also returns `withdrawn_categories`. The grid needs it because an exemplar in a
         withdrawn category still renders as a live rule while the live check is ignoring
         it — which would be the card stating the opposite of the truth.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: category, in: query, schema: { type: string } }
         - { name: action, in: query, schema: { type: string, enum: [allow, block] } }
@@ -1472,7 +1478,7 @@ paths:
       tags: ["Admin: images"]
       summary: One image record
       operationId: getImage
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: image_id, in: path, required: true, schema: { type: integer } }
       responses:
@@ -1490,7 +1496,7 @@ paths:
       summary: The image bytes
       operationId: getImageFile
       description: Cached an hour. `404 file_missing` when the row exists but the file does not.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: image_id, in: path, required: true, schema: { type: integer } }
       responses:
@@ -1513,7 +1519,7 @@ paths:
         The response's `taught` block says what the upload changed — whether the
         description was added as a policy phrasing, and that the image is selected for the
         next retrain.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -1559,7 +1565,7 @@ paths:
 
         Only `action` and `category` reach the live check; `is_selected` is the next
         retrain's business and deliberately does **not** trigger a reload.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -1611,7 +1617,7 @@ paths:
         > **Changes server state.** Refits the probe on the stored embeddings and overwrites
         > `models/img_v1/probe.npz`, which every later image check then uses. There is no
         > dry-run; `POST /v1/admin/policy/reset` restores the startup snapshot.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         content:
           application/json:
@@ -1637,7 +1643,7 @@ paths:
       description: |
         > **Changes server state.** Switches which categories count as blocked and refits
         > accordingly, so it changes live decisions for every caller at once.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -1664,7 +1670,7 @@ paths:
       tags: ["Admin: images"]
       summary: The last ten training runs
       operationId: trainingHistory
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: History.
@@ -1685,7 +1691,7 @@ paths:
       description: |
         > **Changes server state and walks the whole dataset directory.** It embeds every
         > image it finds, so on a populated server this is the slowest call in the API.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: Imported.
@@ -1703,7 +1709,7 @@ paths:
         not this file. `in_sync` says whether the two agree; they differ when someone
         edited the YAML by hand without rebuilding, which is worth showing rather than
         assuming.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: The policy.
@@ -1742,7 +1748,7 @@ paths:
 
         The response's `consequences` block says what the save means for the author and
         for the rest of the policy — decided here and reported nowhere else.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -1792,7 +1798,7 @@ paths:
         **Removing the last allowing rule is refused.** The safe phrasings are what the
         unsafe ones are judged against, so deleting the last one would make every ordinary
         photograph compete only against rules that refuse it.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: Deleted.
@@ -1816,7 +1822,7 @@ paths:
         Going through `PUT` would mean the client reconstructing the existing wordings and
         sending them back — a race with anyone else editing, and a way to lose phrasings
         by accident.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       parameters:
         - { name: name, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -1852,7 +1858,7 @@ paths:
       summary: List exemplars
       operationId: listExemplars
       description: Embeddings are stripped from the rows — they are 2 KB each.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: The marked pictures.
@@ -1884,7 +1890,7 @@ paths:
         With `preview`, nothing is changed and the response reports `would_match`,
         `by_category` and the twelve closest pictures. Grouped by category, because the
         surprise is never "it caught more" but "it caught **those**".
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -1935,7 +1941,7 @@ paths:
         >
         > Read this as a **ranking** — which of your pictures these words pick out — never
         > as a prediction of `reject_min`. A wording is good when it *separates*.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       requestBody:
         required: true
         content:
@@ -1986,7 +1992,7 @@ paths:
 
         Restores the snapshot taken at startup, before any admin could edit it — so this
         always means what it says, rather than whatever the first editor happened to save.
-      security: [{ BoncAdmin: [] }, { AdminToken: [] }]
+      security: [{ BoncAdmin: [] }]
       responses:
         "200":
           description: Reset.
@@ -2030,29 +2036,6 @@ components:
         each request is checked against that .NET endpoint. `401 unauthorized` means the
         token is invalid or its session ended, `403 not_admin` that the account is not an
         admin, and `503 auth_unavailable` that the .NET endpoint could not be reached.
-    Bearer:
-      type: apiKey
-      in: header
-      name: Authorization
-      description: |
-        `Authorization: Bearer <SERVICE_TOKEN>` — the token the main .NET server sends when
-        it calls the moderation endpoints across the network.
-
-        Declared exactly as the company API declares its own `Bearer` scheme (an `apiKey`
-        in the `Authorization` header, not HTTP `bearer`), so the calling side reuses the
-        handler it already has rather than learning a second convention for this service.
-
-        **If `SERVICE_TOKEN` is unset the moderation endpoints are open.** That is what
-        local runs and the test suite depend on, and it is the one setting to get right when
-        deploying this service onto its own host. `GET /ready` reports `service_auth` as
-        `enforced` or `open` so a deploy check can assert which one it got.
-    AdminToken:
-      type: apiKey
-      in: header
-      name: X-Admin-Token
-      description: |
-        The `ADMIN_TOKEN` value, for scripts and operations. Admins use their BONC sign-in
-        (`BoncAdmin`) instead.
   responses:
     BadRequest:
       description: Invalid input.

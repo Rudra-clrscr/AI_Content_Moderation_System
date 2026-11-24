@@ -18,12 +18,10 @@
 <body>
 <div class="bonc-note">
   Served from the API's own origin, so "Try it out" works without CORS.
-  The <code>/v1/moderate*</code> endpoints need <strong>Authorize &rarr; Bearer</strong> (the
-  <code>SERVICE_TOKEN</code> value) &mdash; unless it is unset, in which case they are open and
-  <code>GET /ready</code> says <code>service_auth: "open"</code>.
-  Admin endpoints: <strong>Authorize &rarr; BoncAdmin</strong> with your BONC admin sign-in token
-  (when the server has <code>BONC_AUTH_VERIFY_URL</code>), or <strong>Authorize &rarr; AdminToken</strong>
-  with the server's <code>ADMIN_TOKEN</code>. <code>GET /ready</code> says which: <code>admin_verifier</code>.
+  Admin endpoints: <strong>Authorize &rarr; BoncAdmin</strong> and paste your BONC admin
+  sign-in token (the <code>AuthToken</code>, without the word <code>Bearer</code>).
+  The <code>/v1/moderate*</code> endpoints are open here while the server's
+  <code>SERVICE_TOKEN</code> is unset (<code>GET /ready</code> says <code>service_auth: "open"</code>).
   Check <code>GET /ready</code> first &mdash; if the model did not load, moderation answers 503.
 </div>
 <div id="swagger-ui"></div>
