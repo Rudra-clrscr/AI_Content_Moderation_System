@@ -90,14 +90,14 @@ Values are not written down anywhere but the file itself. Read one with
 | Key | Set to | Why |
 |---|---|---|
 | `GUNICORN_BIND` | `127.0.0.1:8005` | local only; nginx is the way in |
-| `AUTH_DISABLED` | `1` | **all authentication off**: no bearer token on `/v1/moderate*`, no admin check on `/v1/admin/*`. Anyone who can reach the host can change levels, edit the policy and clear the audit log. Chosen on 2026-11-11 so the .NET team can put their own authentication in front. Remove the line, or set it to `0`, and restart to turn the checks below back on. `/ready` shows `admin_auth`. |
+| `AUTH_DISABLED` | `0` (since 2026-11-24) | `1` turns **all authentication off**: no bearer token on `/v1/moderate*`, no admin check on `/v1/admin/*`. Staging ran that way from 2026-11-11 to 2026-11-24; it is now off so admin APIs require a BONC admin sign-in. `/ready` shows `admin_auth: enforced`. |
 | `SERVICE_TOKEN` | empty | the bearer token for `/v1/moderate*`, used only when `AUTH_DISABLED` is off. **Empty means those endpoints are open to anyone.** Only the token goes here, without the word `Bearer`. Don't reuse the old one, which was exposed: generate a new one with the command below. |
 | `ADMIN_TOKEN` | empty for now | if set, scripts can use the admin APIs with `X-Admin-Token: <value>`, and `POST /v1/admin/model/reload` needs it. |
-| `BONC_AUTH_VERIFY_URL` | empty until .NET publishes it | the .NET endpoint that verifies an admin's BONC sign-in token. Once set (and `AUTH_DISABLED` off), admins call `/v1/admin/*` with `Authorization: Bearer <their BONC token>`. `/ready` shows `admin_verifier: bonc`. See `flask_api/ADMIN_SETUP.md`. |
-| `BONC_AUTH_STYLE` | unset (`verify-admin`) | `user-detail` when `BONC_AUTH_VERIFY_URL` is .NET's existing `https://api.boncnetwork.com/api/userService/getUserDetail`: this service then reads the user's roles itself. |
-| `BONC_AUTH_ADMIN_ROLES` | unset (`Admin,SuperAdmin`) | with `user-detail`, the .NET roles that count as admin. |
+| `BONC_AUTH_VERIFY_URL` | `https://api.boncnetwork.com/api/userService/getUserDetail` | the .NET endpoint that verifies an admin's BONC sign-in token. Admins call `/v1/admin/*` with `Authorization: Bearer <their BONC AuthToken>` (Swagger: **Authorize → BoncAdmin**). `/ready` shows `admin_verifier: bonc`. See `flask_api/ADMIN_SETUP.md`. |
+| `BONC_AUTH_STYLE` | `user-detail` | `user-detail` because the URL is .NET's existing `getUserDetail`: this service reads the user's roles itself. `verify-admin` (the default) is for a purpose-built .NET verifier. |
+| `BONC_AUTH_ADMIN_ROLES` | `Admin,SuperAdmin` | with `user-detail`, the .NET roles that count as admin. A signed-in user with neither gets `403 not_admin`. |
 | `BONC_AUTH_CACHE_SECONDS` | unset (60) | how long an accepted BONC token is trusted before .NET is asked again. A BONC sign-out takes up to this long to reach here. `0` checks every request. |
-| `ADMIN_CORS_ORIGINS` | empty | the BONC admin frontend's origin(s), exact, comma-separated, if it calls `/v1/admin/*` from the browser. Empty sends no CORS headers; `*` is refused at startup. |
+| `ADMIN_CORS_ORIGINS` | `https://admin.boncnetwork.com` | the BONC admin frontend's origin(s), exact, comma-separated, if it calls `/v1/admin/*` from the browser. Origin only - a path (`/login`) or `*` is refused at startup. |
 | `TRUST_PROXY_HOPS` | `1` | nginx is in front, so the caller's address is read from `X-Forwarded-For`. Make it `2` once the .NET backend forwards the member's address. |
 | `DEMO_PAGE` | `0` | the browser demo is not served here |
 | `RESULT_SINK` | `log` | results go to the journal, not SQL Server |
