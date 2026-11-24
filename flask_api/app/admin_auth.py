@@ -1,36 +1,32 @@
-"""Admin login, password recovery by emailed code, and the saved moderation settings.
+"""Who may use the admin endpoints, and the saved moderation settings.
+
+THERE IS NO LOGIN HERE ANY MORE. Admins sign in on the BONC .NET side; this service only
+checks what they bring (see check_admin):
+
+    Authorization: Bearer <token>   the admin's BONC sign-in, verified by the .NET endpoint
+                                    at BONC_AUTH_VERIFY_URL (BONC_AUTH_STYLE says which kind)
+    X-Admin-Token: <ADMIN_TOKEN>    for scripts and ops, when ADMIN_TOKEN is set
+    AUTH_DISABLED=1                 no check at all
+
+The email/password accounts, sessions and emailed reset codes that used to live here were
+removed once the .NET sign-in became the way in.
 
 Routes (all JSON):
-    POST /v1/admin/auth/login            {email, password}
-    POST /v1/admin/auth/logout
-    GET  /v1/admin/auth/me
-    POST /v1/admin/auth/password/forgot  {email}                          always the same reply
-    POST /v1/admin/auth/password/verify  {email, code}                    -> {reset_token}
-    POST /v1/admin/auth/password/reset   {email, reset_token, new_password}
+    GET  /v1/admin/auth/me               who the request is authenticated as
     GET  /v1/admin/moderation-settings
     PUT  /v1/admin/moderation-settings   {enabled, level}  applied to EVERY content type
-
-Nothing here registers an administrator over HTTP. Admins are created from the command line
-(python -m app.admin_cli create-admin), so being able to reach the site is never enough.
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import logging
 import os
-import re
-import secrets
 import threading
 import time
-import urllib.error
-import urllib.request
-from collections import defaultdict, deque
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, request, session
-from werkzeug.security import check_password_hash, generate_password_hash
+from flask import Blueprint, current_app, g, jsonify, request
 
 from app.admin_store import AdminStore
 from app.pipeline import ContentType
@@ -38,13 +34,6 @@ from app.pipeline import ContentType
 log = logging.getLogger("app.admin")
 admin_bp = Blueprint("admin_auth", __name__)
 
-OTP_TTL = 10 * 60            # a code works for 10 minutes
-TOKEN_TTL = 10 * 60          # after the code is accepted, the reset form is good for 10 minutes
-OTP_MAX_ATTEMPTS = 5         # wrong guesses allowed per code
-RESEND_COOLDOWN = 60         # seconds between codes for one email
-SESSION_IDLE = 30 * 60       # log out after 30 minutes of no activity
-MIN_PASSWORD = 10
-CSRF_HEADER = ("X-Requested-With", "bonc-admin")
 # A log export is built whole in memory before it is sent, so this is the cap that keeps an
 # operator who has cleared nothing from discovering the limit as a dead server. At the widest
 # columns a row is a few hundred bytes, so this is tens of MB in the worst case; the file says
@@ -54,68 +43,13 @@ MAX_EXPORT_ROWS = 50_000
 # One value per content type the pipeline knows, so no surface is forgotten.
 ALL_SURFACES = [c.value for c in ContentType]
 
-_DUMMY_HASH = generate_password_hash(secrets.token_hex(8))   # makes "no such email" take as long
-
 
 class Admin:
-    """Per-app state: the store, the mailer and the rate limiter."""
+    """Per-app state: the store, and the lock that serialises saved-settings writes."""
 
-    def __init__(self, store: AdminStore, mailer, mail_async: bool = True):
-        self.store, self.mailer, self.mail_async = store, mailer, mail_async
-        self._hits: dict[str, deque] = defaultdict(deque)
-        self._lock = threading.Lock()
+    def __init__(self, store: AdminStore):
+        self.store = store
         self.settings_lock = threading.Lock()
-
-    def limited(self, key: str, limit: int, window: float) -> int:
-        """0 if allowed (and counts the hit); otherwise seconds to wait. In-memory, per process."""
-        now = time.monotonic()
-        with self._lock:
-            q = self._hits[key]
-            while q and now - q[0] > window:
-                q.popleft()
-            if len(q) >= limit:
-                return int(window - (now - q[0])) + 1
-            q.append(now)
-            return 0
-
-
-# ---- email ---------------------------------------------------------------------------
-
-class MailError(RuntimeError):
-    pass
-
-
-class BrevoMailer:
-    """Sends through Brevo's transactional email API (free plan: 300 emails a day).
-
-    The sender address must be verified in the Brevo dashboard first. The API key is read
-    from EMAIL_PROVIDER_API_KEY and is never sent to the browser or written to a log.
-    """
-    URL = "https://api.brevo.com/v3/smtp/email"
-
-    def __init__(self, api_key: str, sender_email: str, sender_name: str = "BONC Network"):
-        self.api_key, self.sender_email, self.sender_name = api_key, sender_email, sender_name
-
-    def send(self, to: str, subject: str, text: str) -> None:
-        body = json.dumps({"sender": {"email": self.sender_email, "name": self.sender_name},
-                           "to": [{"email": to}], "subject": subject, "textContent": text}).encode()
-        req = urllib.request.Request(self.URL, data=body, method="POST", headers={
-            "api-key": self.api_key, "content-type": "application/json", "accept": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status >= 300:
-                    raise MailError(f"email provider answered {resp.status}")
-        except urllib.error.HTTPError as exc:
-            raise MailError(f"email provider answered {exc.code}") from None
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise MailError(f"email provider unreachable: {type(exc).__name__}") from None
-
-
-def mailer_from_env():
-    key, sender = os.environ.get("EMAIL_PROVIDER_API_KEY", ""), os.environ.get("EMAIL_FROM", "")
-    if not key or not sender:
-        return None
-    return BrevoMailer(key, sender, os.environ.get("EMAIL_FROM_NAME", "BONC Network"))
 
 
 # ---- setup ---------------------------------------------------------------------------
@@ -124,22 +58,42 @@ def default_db_path() -> str:
     return os.environ.get("ADMIN_DB_PATH") or str(Path(__file__).resolve().parent.parent / "data" / "admin.db")
 
 
-def init_admin(app, store: AdminStore | None = None, mailer=None, mail_async: bool = True) -> Admin:
-    secret = os.environ.get("SECRET_KEY", "")
-    if not secret:
-        secret = secrets.token_hex(32)
-        log.warning("SECRET_KEY is not set: admin logins will end whenever the server restarts. "
-                    "Set it in .env (see .env.example).")
-    app.secret_key = secret
-    app.config.update(
-        SESSION_COOKIE_NAME="bonc_admin", SESSION_COOKIE_HTTPONLY=True,
-        SESSION_COOKIE_SAMESITE="Strict",
-        SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
-    )
-    admin = Admin(store or AdminStore(default_db_path()), mailer or mailer_from_env(), mail_async)
+def init_admin(app, store: AdminStore | None = None) -> Admin:
+    admin = Admin(store or AdminStore(default_db_path()))
     app.extensions["admin"] = admin
+    settings = app.extensions["moderation"].settings
+    app.extensions["bonc_auth"] = bonc_verifier(settings)
     app.register_blueprint(admin_bp)
+    if settings.admin_cors_origins:
+        app.after_request(_admin_cors)
+        log.info("admin endpoints accept browser calls from %s",
+                 ", ".join(settings.admin_cors_origins))
     return admin
+
+
+# ---- CORS for the BONC admin frontend --------------------------------------------------
+# Only /v1/admin/*, only the listed origins, and no credentials: the frontend sends the BONC
+# token in Authorization, so there is no cookie for a browser to attach on its own. Flask
+# answers the preflight OPTIONS itself (the views never run, so check_admin is not asked),
+# and this hook adds the headers to that answer and to every real response - errors included,
+# or the frontend could not read why a call was refused.
+_CORS_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+_CORS_HEADERS = "Authorization, Content-Type"
+_CORS_EXPOSE = "Content-Disposition, X-Export-Rows, X-Export-Total, Retry-After"
+
+
+def _admin_cors(resp):
+    if not request.path.startswith("/v1/admin/"):
+        return resp
+    origin = (request.headers.get("Origin") or "").rstrip("/").lower()
+    resp.vary.add("Origin")
+    if origin and origin in current_app.extensions["moderation"].settings.admin_cors_origins:
+        resp.headers["Access-Control-Allow-Origin"] = request.headers["Origin"].rstrip("/")
+        resp.headers["Access-Control-Allow-Methods"] = _CORS_METHODS
+        resp.headers["Access-Control-Allow-Headers"] = _CORS_HEADERS
+        resp.headers["Access-Control-Expose-Headers"] = _CORS_EXPOSE
+        resp.headers["Access-Control-Max-Age"] = "600"
+    return resp
 
 
 def restore_levels(levels, store: AdminStore) -> None:
@@ -205,46 +159,234 @@ def _err(status: int, code: str, message: str, **extra):
     return resp
 
 
-def _session_admin():
-    a: Admin = current_app.extensions["admin"]
-    aid, sv, ts = session.get("aid"), session.get("sv"), session.get("ts", 0)
-    if not aid:
+BONC_AUTH_STYLES = ("verify-admin", "user-detail")
+
+
+def bonc_verifier(settings):
+    """The .NET admin-token verifier, or None when BONC_AUTH_VERIFY_URL is unset.
+
+    BONC_AUTH_STYLE picks which .NET endpoint the URL is:
+        verify-admin  a purpose-built verifier answering {adminId, role, sessionId} / 401 / 403
+                      (the bonc-auth package's contract)
+        user-detail   the existing GET /api/userService/getUserDetail; this service reads the
+                      roles itself (UserDetailAuth)
+
+    Built once at startup, so a bad URL (plain http to a remote host, say) stops the server
+    with the reason instead of failing every admin request later. A missing package stops it
+    too: a deployment configured to trust the .NET sign-in must not quietly come up
+    without it.
+    """
+    url = getattr(settings, "bonc_auth_verify_url", None)
+    if not url:
         return None
-    row = a.store.get_admin_by_id(aid)
-    if row is None or row["session_version"] != sv or time.time() - ts > SESSION_IDLE:
-        session.clear()
-        return None
-    session["ts"] = time.time()              # activity keeps the login alive
-    session.permanent = True
-    return row
+    style = getattr(settings, "bonc_auth_style", "verify-admin")
+    if style not in BONC_AUTH_STYLES:
+        raise ValueError(f"BONC_AUTH_STYLE must be one of {', '.join(BONC_AUTH_STYLES)}, "
+                         f"not {style!r}")
+    try:
+        from bonc_auth import BoncAuth
+    except ImportError as exc:
+        raise RuntimeError("BONC_AUTH_VERIFY_URL is set but the bonc-auth package is not "
+                           "installed: pip install -r requirements.txt") from exc
+    if style == "user-detail":
+        roles = tuple(getattr(settings, "bonc_auth_admin_roles", ()) or ())
+        if not roles:
+            raise ValueError("BONC_AUTH_STYLE=user-detail needs BONC_AUTH_ADMIN_ROLES "
+                             "(e.g. Admin,SuperAdmin): with none, nobody could ever get in")
+        verifier = UserDetailAuth(url, admin_roles=roles, timeout=settings.bonc_auth_timeout)
+    else:
+        verifier = BoncAuth(url, method=settings.bonc_auth_method,
+                            timeout=settings.bonc_auth_timeout)
+    ttl = float(getattr(settings, "bonc_auth_cache_seconds", 0) or 0)
+    log.info("admin endpoints accept BONC bearer tokens, verified at %s (%s)%s", url, style,
+             f", accepted tokens trusted for {ttl:g} s" if ttl else "")
+    return CachedVerifier(verifier, ttl) if ttl > 0 else verifier
+
+
+def _jwt_claims(token: str) -> dict:
+    """The payload of a JWT, NOT signature-checked - .NET does that on the same request.
+
+    Read only to learn which user the token claims to be, so that user's details can be
+    asked for and the answer compared with it. Nothing here is trusted on its own.
+    """
+    import base64
+    import json
+    parts = token.split(".")
+    if len(parts) != 3 or len(token) > 8192:
+        return {}
+    try:
+        raw = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
+        claims = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def _role_names(detail: dict) -> list[str]:
+    """Every role the .NET user record names. `UserRoles` is a string ("Basic", or several
+    joined with commas); `RoleNames`/`RoleName` are read too in case a build fills those."""
+    import re
+    out: list[str] = []
+    for key in ("UserRoles", "RoleNames", "RoleName"):
+        v = detail.get(key)
+        items = v if isinstance(v, list) else [v]
+        for item in items:
+            if isinstance(item, str):
+                out += [r.strip() for r in re.split(r"[,;|]", item) if r.strip()]
+    return out
+
+
+class UserDetailAuth:
+    """Admin check built on the .NET API that exists today:
+
+        GET /api/userService/getUserDetail?userRowId=<the token's UserRowId>
+        Authorization: Bearer <token>
+
+    .NET checks the token (401 when it is missing, invalid or expired) and returns the user
+    record, wrapped in its {Success, Data} envelope. This service then decides: an active
+    user whose roles include one of `admin_roles` is an admin; anyone else signed in is a 403.
+
+    The user asked about is the one the token itself names, and the answer must be that same
+    user - so a .NET quirk that returned some other record (an admin's, say) is a 503, never
+    someone else's access. Same exceptions as bonc-auth's BoncAuth, so _bonc_admin and
+    CachedVerifier treat the two alike.
+    """
+
+    def __init__(self, verify_url: str, *, admin_roles, timeout: float = 5.0):
+        from bonc_auth import BoncAuth
+        BoncAuth(verify_url, timeout=timeout)       # same URL rules: absolute, HTTPS off-box
+        self.verify_url, self.timeout = verify_url, timeout
+        self.admin_roles = {r.strip().lower(): r.strip() for r in admin_roles if r.strip()}
+
+    def verify(self, token: str) -> dict:
+        import httpx
+        from bonc_auth import AuthServiceUnavailable, Forbidden, InvalidToken
+
+        if not token:
+            raise InvalidToken("Bearer token is empty.")
+        user_id = str(_jwt_claims(token).get("UserRowId") or "").strip()
+        if not user_id or len(user_id) > 128:
+            raise InvalidToken("Not a BONC sign-in token (no UserRowId claim).")
+        try:
+            resp = httpx.get(self.verify_url, params={"userRowId": user_id},
+                             headers={"Accept": "application/json",
+                                      "Authorization": f"Bearer {token}"},
+                             timeout=self.timeout, follow_redirects=False)
+        except httpx.RequestError as exc:
+            raise AuthServiceUnavailable("Could not reach BONC authentication service.") from exc
+        if resp.status_code == 401:
+            raise InvalidToken("Token is invalid, expired, or the session is no longer active.")
+        if resp.status_code == 403:
+            raise Forbidden("Admin access is required.")
+        if resp.status_code != 200:
+            raise AuthServiceUnavailable(f"BONC getUserDetail returned HTTP {resp.status_code}.")
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise AuthServiceUnavailable("BONC returned an invalid JSON response.") from exc
+        if not isinstance(body, dict):
+            raise AuthServiceUnavailable("BONC getUserDetail did not return a JSON object.")
+        if body.get("Success") is False:
+            raise AuthServiceUnavailable(
+                f"BONC getUserDetail said Success=false: {str(body.get('Message'))[:200]}")
+        detail = body["Data"] if isinstance(body.get("Data"), dict) else body
+        if str(detail.get("UserRowId") or "").strip().lower() != user_id.lower():
+            raise AuthServiceUnavailable(
+                "BONC getUserDetail answered for a different user than the token names.")
+        if detail.get("IsActive") is False:
+            raise InvalidToken("This BONC account is deactivated.")
+        roles = [self.admin_roles[r.lower()] for r in _role_names(detail)
+                 if r.lower() in self.admin_roles]
+        if not roles:
+            raise Forbidden("Admin access is required.")
+        return {"adminId": str(detail["UserRowId"]), "role": roles[0], "sessionId": None}
+
+
+class CachedVerifier:
+    """Remembers tokens .NET accepted, for `ttl` seconds, so a page of calls costs one check.
+
+    ONLY ACCEPTANCES ARE KEPT. A refusal (401/403) or a failure is asked again every time:
+    caching a 503 would hold an outage open after .NET recovers, and caching a 401 would lock
+    out an admin who has just signed in again with the same token. Keys are SHA-256 of the
+    token, so the raw token is never held. Per process - each gunicorn worker keeps its own.
+    """
+
+    MAX_ENTRIES = 2000
+
+    def __init__(self, inner, ttl: float, clock=time.monotonic):
+        self.inner, self.ttl, self._clock = inner, ttl, clock
+        self._seen: dict[str, tuple[float, dict]] = {}
+        self._lock = threading.Lock()
+
+    def verify(self, token: str) -> dict:
+        key = hashlib.sha256(token.encode()).hexdigest()
+        now = self._clock()
+        with self._lock:
+            hit = self._seen.get(key)
+            if hit and hit[0] > now:
+                return dict(hit[1])
+        who = self.inner.verify(token)            # raises on refusal: nothing is stored
+        with self._lock:
+            if len(self._seen) >= self.MAX_ENTRIES:
+                self._seen = {k: v for k, v in self._seen.items() if v[0] > now}
+                if len(self._seen) >= self.MAX_ENTRIES:
+                    self._seen.clear()
+            self._seen[key] = (now + self.ttl, dict(who))
+        return dict(who)
+
+
+def _bonc_admin(verifier):
+    """Verify the request's bearer token with .NET. None if it is a live admin session.
+
+    On success the verified identity is in `g.admin` ({"adminId", "role", "sessionId"}).
+    Fails closed: an unreachable or confused verifier is a 503, never a pass.
+    """
+    from bonc_auth import AuthServiceUnavailable, Forbidden, InvalidToken
+    from bonc_auth.client import extract_bearer_token
+    try:
+        g.admin = verifier.verify(extract_bearer_token(request.headers.get("Authorization")))
+    except InvalidToken:
+        return _err(401, "unauthorized",
+                    "Your BONC admin session is invalid or has ended. Sign in again.")
+    except Forbidden:
+        return _err(403, "not_admin", "This BONC account does not have admin access.")
+    except AuthServiceUnavailable as exc:
+        log.error("BONC admin verification unavailable: %s", exc)
+        return _err(503, "auth_unavailable",
+                    "Admin sign-in could not be checked just now. Try again shortly.")
+    return None
+
+
+def _actor() -> str:
+    """Who is acting, for `created_by` columns: the .NET admin id, or "" for a script."""
+    who = getattr(g, "admin", None)
+    return str(who.get("adminId", "")) if isinstance(who, dict) else ""
 
 
 def check_admin():
     """None if the caller may use admin endpoints, otherwise a ready-made error response.
 
-    Accepted: a logged-in admin session, or (for scripts/ops) the X-Admin-Token header -
-    or anyone at all when AUTH_DISABLED is on (see Settings.auth_disabled).
+    Accepted: a BONC .NET admin token (Authorization: Bearer, when BONC_AUTH_VERIFY_URL is
+    set), or for scripts/ops the X-Admin-Token header (when ADMIN_TOKEN is set) - or anyone
+    at all when AUTH_DISABLED is on (see Settings.auth_disabled).
+
+    A request that brings a bearer token is judged on that token alone: a rejected one is
+    refused, not retried against X-Admin-Token, so the .NET answer is the answer. Neither
+    credential carries any risk of CSRF - a browser never attaches either on its own.
     """
-    if current_app.extensions["moderation"].settings.auth_disabled:
+    settings = current_app.extensions["moderation"].settings
+    if settings.auth_disabled:
         return None
-    row = _session_admin()
-    if row is not None:
-        if request.method not in ("GET", "HEAD", "OPTIONS") \
-                and request.headers.get(CSRF_HEADER[0]) != CSRF_HEADER[1]:
-            return _err(403, "forbidden", "missing request header")
-        return None
-    token = current_app.extensions["moderation"].settings.admin_token
-    admin: Admin = current_app.extensions["admin"]
+    verifier = current_app.extensions.get("bonc_auth")
+    if verifier is not None and request.headers.get("Authorization", "").strip():
+        return _bonc_admin(verifier)
+    token = settings.admin_token
     if token and hmac.compare_digest(request.headers.get("X-Admin-Token", ""), token):
         return None
-    if not token and admin.store.admin_count() == 0:
-        return _err(404, "not_found", "admin endpoints disabled (no admin created, ADMIN_TOKEN unset)")
-    return _err(401, "unauthorized", "please log in")
-
-
-# ---- validation -----------------------------------------------------------------------
-
-_EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}\.[^@\s]{2,}$")
+    if verifier is None and not token:
+        return _err(404, "not_found", "admin endpoints are disabled: set BONC_AUTH_VERIFY_URL "
+                                      "(the .NET admin sign-in) or ADMIN_TOKEN")
+    return _err(401, "unauthorized", "Sign in to BONC as an admin to use this.")
 
 
 def _body() -> dict:
@@ -252,145 +394,18 @@ def _body() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _email(value) -> str | None:
-    value = value.strip().lower() if isinstance(value, str) else ""
-    return value if value and len(value) <= 320 and _EMAIL.match(value) else None
-
-
-def password_problem(pw: str, email: str = "") -> str | None:
-    if not isinstance(pw, str) or len(pw) < MIN_PASSWORD:
-        return f"Use at least {MIN_PASSWORD} characters."
-    if len(pw) > 200:
-        return "That password is too long."
-    if not (re.search(r"[A-Za-z]", pw) and re.search(r"\d", pw)):
-        return "Use both letters and numbers."
-    if email and pw.lower() == email.lower():
-        return "The password can't be your email address."
-    return None
-
-
-def _hash_secret(value: str) -> str:
-    return hmac.new(current_app.secret_key.encode(), value.encode(), hashlib.sha256).hexdigest()
-
-
-def _ip() -> str:
-    return request.remote_addr or "?"
-
-
-# ---- login / logout / me --------------------------------------------------------------
-
-@admin_bp.post("/v1/admin/auth/login")
-def login():
-    a: Admin = current_app.extensions["admin"]
-    data = _body()
-    email, password = _email(data.get("email")), data.get("password")
-    if email is None or not isinstance(password, str) or not password:
-        return _err(400, "invalid_request", "Enter your email address and password.")
-    wait = max(a.limited(f"login-ip:{_ip()}", 20, 900), a.limited(f"login-email:{email}", 5, 900))
-    if wait:
-        resp = _err(429, "rate_limited", f"Too many attempts. Try again in {wait // 60 + 1} minute(s).")
-        resp.headers["Retry-After"] = str(wait)
-        return resp
-    row = a.store.get_admin(email)
-    ok = check_password_hash(row["password_hash"] if row else _DUMMY_HASH, password)
-    if not (row and ok):
-        log.warning("failed admin login from %s", _ip())
-        return _err(401, "invalid_credentials", "Incorrect email or password.")
-    session.clear()
-    session.update(aid=row["id"], sv=row["session_version"], ts=time.time())
-    session.permanent = True
-    return jsonify({"email": row["email"]}), 200
-
-
-@admin_bp.post("/v1/admin/auth/logout")
-def logout():
-    session.clear()
-    return jsonify({"ok": True}), 200
-
-
 @admin_bp.get("/v1/admin/auth/me")
 def me():
-    row = _session_admin()
-    if row is None:
-        return _err(401, "unauthorized", "please log in")
-    return jsonify({"email": row["email"]}), 200
-
-
-# ---- password recovery ----------------------------------------------------------------
-
-GENERIC_FORGOT = {"ok": True, "message": "If that email belongs to an administrator, "
-                                          "we have sent a 6-digit code to it."}
-
-
-def _deliver(a: Admin, email: str, code: str) -> None:
-    try:
-        if a.mailer is None:
-            log.error("password reset requested but email is not configured "
-                      "(EMAIL_PROVIDER_API_KEY / EMAIL_FROM); no code was sent")
-            return
-        a.mailer.send(email, "Your BONC admin verification code",
-                      f"Your BONC admin verification code is {code}.\n\n"
-                      f"It works for {OTP_TTL // 60} minutes and only once. "
-                      "If you did not ask for it, ignore this email: your password has not changed.")
-    except MailError as exc:
-        log.error("could not send reset email: %s", exc)       # never log the code
-
-
-@admin_bp.post("/v1/admin/auth/password/forgot")
-def forgot():
-    a: Admin = current_app.extensions["admin"]
-    email = _email(_body().get("email"))
-    if email is None:
-        return _err(400, "invalid_request", "Enter a valid email address.")
-    if a.limited(f"forgot-ip:{_ip()}", 10, 3600) or a.limited(f"forgot-email:{email}", 5, 3600):
-        return jsonify(GENERIC_FORGOT), 200      # same reply: a limit must not reveal anything
-    if a.store.get_admin(email) is not None:
-        existing = a.store.get_code(email)
-        if existing is None or time.time() - existing["created_at"] >= RESEND_COOLDOWN:
-            code = f"{secrets.randbelow(10**6):06d}"
-            a.store.put_code(email, _hash_secret(f"{email}:{code}"), OTP_TTL)   # replaces older codes
-            if a.mail_async:
-                threading.Thread(target=_deliver, args=(a, email, code), daemon=True).start()
-            else:
-                _deliver(a, email, code)
-    return jsonify(GENERIC_FORGOT), 200
-
-
-@admin_bp.post("/v1/admin/auth/password/verify")
-def verify():
-    a: Admin = current_app.extensions["admin"]
-    data = _body()
-    email, code = _email(data.get("email")), data.get("code")
-    if email is None or not isinstance(code, str) or not re.fullmatch(r"\d{6}", code.strip()):
-        return _err(400, "invalid_request", "Enter the 6-digit code.")
-    if a.limited(f"verify-ip:{_ip()}", 30, 900):
-        return _err(429, "rate_limited", "Too many attempts. Wait a few minutes.")
-    token = secrets.token_urlsafe(32)
-    result = a.store.verify_code(email, _hash_secret(f"{email}:{code.strip()}"), OTP_MAX_ATTEMPTS,
-                                 _hash_secret(token), TOKEN_TTL)
-    if result == "ok":
-        return jsonify({"reset_token": token}), 200
-    msg = {"expired": "That code has expired. Request a new one.",
-           "locked": "Too many wrong codes. Request a new one."}.get(result, "That code is not correct.")
-    return _err(400, "invalid_code", msg)
-
-
-@admin_bp.post("/v1/admin/auth/password/reset")
-def reset():
-    a: Admin = current_app.extensions["admin"]
-    data = _body()
-    email, token, new = _email(data.get("email")), data.get("reset_token"), data.get("new_password")
-    if email is None or not isinstance(token, str) or not token:
-        return _err(400, "invalid_request", "Start again from Forgot password.")
-    problem = password_problem(new, email)
-    if problem:
-        return _err(400, "weak_password", problem)
-    if a.limited(f"reset-ip:{_ip()}", 20, 900):
-        return _err(429, "rate_limited", "Too many attempts. Wait a few minutes.")
-    if not a.store.reset_password(email, _hash_secret(token), generate_password_hash(new)):
-        return _err(400, "invalid_token", "This reset link has expired. Start again from Forgot password.")
-    session.clear()
-    return jsonify({"ok": True, "message": "Password changed. You can log in now."}), 200
+    """Who this request is authenticated as. The quickest end-to-end check for the .NET side."""
+    denied = check_admin()
+    if denied:
+        return denied
+    who = getattr(g, "admin", None)
+    if isinstance(who, dict):
+        return jsonify({"admin_id": who.get("adminId"), "role": who.get("role"),
+                        "session_id": who.get("sessionId"), "via": "bonc"}), 200
+    via = "open" if current_app.extensions["moderation"].settings.auth_disabled else "admin_token"
+    return jsonify({"admin_id": None, "role": None, "session_id": None, "via": via}), 200
 
 
 # ---- moderation settings (one setting, every content type) -----------------------------
@@ -709,7 +724,7 @@ def add_blocked_client():
         return _err(400, "bad_scope", "scope must be 'ip', 'network' or 'member'.")
 
     a: Admin = current_app.extensions["admin"]
-    who = _session_admin()
+    who = _actor()
     reason = str(body.get("reason", "")).strip()
     if scope == "member":
         # A member id is the portal's own, and this service has no user table to check it
@@ -718,7 +733,7 @@ def add_blocked_client():
             return _err(400, "bad_member",
                         "Give a member id; anonymous submissions cannot be blocked by member.")
         row = a.store.block_client(value, "member", reason=reason,
-                                   created_by=who["email"] if who else "")
+                                   created_by=who)
         log.info("admin blocked member %s", value)
         return jsonify({"blocked": row, "message": f"Blocked member {value}."}), 201
 
@@ -745,10 +760,9 @@ def add_blocked_client():
                     "your own submissions; the dashboard would still work, but check the "
                     "address before going ahead.")
 
-    # A script authenticating with X-Admin-Token has no session row, so `who` records
-    # nothing rather than failing - the block is still the right thing to make.
+    # A script on X-Admin-Token has no admin id, so `who` is blank - the block still stands.
     row = a.store.block_client(value, scope, reason=reason,
-                               created_by=who["email"] if who else "")
+                               created_by=who)
     log.info("admin blocked %s %s", scope, value)
     return jsonify({"blocked": row,
                     "message": f"Blocked {scope} {value}."}), 201

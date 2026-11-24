@@ -100,14 +100,10 @@ A padlock on an operation means it is gated. **With `SERVICE_TOKEN` unset the mo
 endpoints are open**, so "Try it out" works on them without authorising at all - `GET /ready`
 reports `service_auth: "open"` when that is the case, and `"enforced"` when it is not.
 
-For admin calls, sign in with `POST /v1/admin/auth/login` using the admin's email and
-password; the session lasts from then on. The session cookie also requires an
-`X-Requested-With: bonc-admin` header on every PUT, POST and DELETE (the CSRF defence), and
-this page adds that header to every request it sends, so there is nothing else to do.
-`AdminToken` works too, for scripts.
-
-If you see `403 forbidden` with "missing request header" on an admin call, the page is the
-old one: hard-refresh it (Ctrl+F5).
+For admin calls there is no login on this service: admins sign in on BONC and use
+**Authorize -> BoncAdmin** with that sign-in's token (when the server has
+`BONC_AUTH_VERIFY_URL`), or scripts use **Authorize -> AdminToken** with `ADMIN_TOKEN`.
+`GET /ready` says which the server takes, as `admin_verifier`.
 
 ### If "Try it out" says "Failed to fetch"
 

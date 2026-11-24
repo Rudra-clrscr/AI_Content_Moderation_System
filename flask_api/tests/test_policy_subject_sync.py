@@ -21,7 +21,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from werkzeug.security import generate_password_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -30,8 +29,7 @@ from app import create_app  # noqa: E402
 from app.config import load_settings  # noqa: E402
 from app.system_store import SystemStore  # noqa: E402
 
-EMAIL, PW = "subject_sync@example.com", "AdminTestPass123"
-HDR = {"X-Requested-With": "bonc-admin"}
+TOKEN = "test-admin-token"   # the ADMIN_TOKEN these tests run under
 POLICY = ROOT / "config" / "visual_policy.yaml"
 ENCODER = ROOT / "models" / "img_v1" / "text_model.onnx"
 needs_encoder = pytest.mark.skipif(
@@ -42,16 +40,14 @@ needs_encoder = pytest.mark.skipif(
 def app(tmp_path):
     store = SystemStore(path=tmp_path / "sync.db", images_dir=tmp_path / "no-images")
     app = create_app(load_settings(), system_store=store)
-    admin = app.extensions["admin"]
-    admin.store.create_admin(EMAIL, "scrypt:32768:8:1$dummy$dummy")
-    admin.store.set_password(EMAIL, generate_password_hash(PW))
+    app.extensions["moderation"].settings.admin_token = TOKEN
     return app
 
 
 @pytest.fixture
 def client(app):
     c = app.test_client()
-    assert c.post("/v1/admin/auth/login", json={"email": EMAIL, "password": PW}).status_code == 200
+    c.environ_base["HTTP_X_ADMIN_TOKEN"] = TOKEN
     return c
 
 
@@ -72,7 +68,7 @@ def _png(color=(200, 200, 200)) -> io.BytesIO:
 def test_new_rule_does_not_replace_an_existing_rule(client):
     name = sorted(_rules())[0]
     before = POLICY.read_bytes()
-    r = client.put(f"/v1/admin/policy/labels/{name}", headers=HDR,
+    r = client.put(f"/v1/admin/policy/labels/{name}",
                    json={"create": True, "unsafe": True, "prompts": ["a photo of something"]})
     assert r.status_code == 409
     assert r.get_json()["Data"]["code"] == "rule_exists"
@@ -81,7 +77,7 @@ def test_new_rule_does_not_replace_an_existing_rule(client):
 
 def test_new_category_refuses_the_name_of_a_rule(client, app):
     name = next(iter(sorted(_rules())))
-    r = client.post("/v1/admin/images/categories", headers=HDR,
+    r = client.post("/v1/admin/images/categories",
                     json={"name": name, "default_action": "allow"})
     assert r.status_code == 409
     assert r.get_json()["Data"]["code"] == "category_exists"
@@ -92,7 +88,7 @@ def test_new_category_refuses_the_name_of_a_rule(client, app):
 def test_new_rule_on_an_existing_category_asks_first(client, app):
     app.extensions["system_store"].add_category("kite_flying", "Kite flying", "block")
     before = POLICY.read_bytes()
-    r = client.put("/v1/admin/policy/labels/kite_flying", headers=HDR,
+    r = client.put("/v1/admin/policy/labels/kite_flying",
                    json={"create": True, "unsafe": True, "prompts": ["a photo of a kite"]})
     assert r.status_code == 409
     d = r.get_json()["Data"]
@@ -111,10 +107,10 @@ def test_disagreement_is_reported_and_can_be_settled_toward_the_rule(client, app
     name = refusing[0]
     store.set_category_policy(name, "allow")          # the pictures, behind the rule's back
 
-    s = client.get("/v1/admin/policy/sync", headers=HDR).get_json()
+    s = client.get("/v1/admin/policy/sync").get_json()
     assert name in s["disagreeing"]
 
-    r = client.post(f"/v1/admin/policy/sync/{name}", headers=HDR, json={"keep": "rule"})
+    r = client.post(f"/v1/admin/policy/sync/{name}", json={"keep": "rule"})
     assert r.status_code == 200, r.get_json()
     assert store.get_category(name)["default_action"] == "block"
     assert name not in r.get_json()["sync"]["disagreeing"]
@@ -123,7 +119,7 @@ def test_disagreement_is_reported_and_can_be_settled_toward_the_rule(client, app
 @needs_encoder
 def test_rule_and_pictures_follow_each_other(client, app):
     store = app.extensions["system_store"]
-    r = client.put("/v1/admin/policy/labels/kite_flying", headers=HDR,
+    r = client.put("/v1/admin/policy/labels/kite_flying",
                    json={"create": True, "unsafe": True,
                          "prompts": ["a photo of a kite flying in the sky"]})
     assert r.status_code == 200, r.get_json()
@@ -131,13 +127,13 @@ def test_rule_and_pictures_follow_each_other(client, app):
     assert store.get_category("kite_flying")["default_action"] == "block"
 
     # ALLOW ALL on the Fine-Tuning screen turns the rule to allow.
-    r = client.put("/v1/admin/images/categories/kite_flying", headers=HDR, json={"action": "allow"})
+    r = client.put("/v1/admin/images/categories/kite_flying", json={"action": "allow"})
     assert r.status_code == 200
     assert r.get_json()["policy_rule"]["changed"] is True
     assert _rules()["kite_flying"]["unsafe"] is False
 
     # And Start refusing on the rule moves the category back.
-    r = client.put("/v1/admin/policy/labels/kite_flying", headers=HDR,
+    r = client.put("/v1/admin/policy/labels/kite_flying",
                    json={"unsafe": True, "prompts": ["a photo of a kite flying in the sky"]})
     assert r.status_code == 200
     assert store.get_category("kite_flying")["default_action"] == "block"
@@ -146,14 +142,14 @@ def test_rule_and_pictures_follow_each_other(client, app):
 # ---- test an image -------------------------------------------------------------------
 
 def test_test_image_needs_a_file(client):
-    assert client.post("/v1/admin/policy/test-image", headers=HDR, data={},
+    assert client.post("/v1/admin/policy/test-image", data={},
                        content_type="multipart/form-data").status_code == 400
 
 
 def test_test_image_rejects_a_file_that_is_not_a_picture(client, app):
     if not app.extensions["moderation"].settings.visual.ready:
         pytest.skip("visual model not installed")
-    r = client.post("/v1/admin/policy/test-image", headers=HDR,
+    r = client.post("/v1/admin/policy/test-image",
                     data={"file": (io.BytesIO(b"not an image at all"), "x.png")},
                     content_type="multipart/form-data")
     assert r.status_code == 422
@@ -164,7 +160,7 @@ def test_test_image_reports_the_live_decision(client, app):
     if not visual.ready:
         pytest.skip("visual model not installed")
     log_rows = app.extensions["admin"].store.count_moderation_logs()
-    r = client.post("/v1/admin/policy/test-image", headers=HDR,
+    r = client.post("/v1/admin/policy/test-image",
                     data={"file": (_png(), "grey.png")}, content_type="multipart/form-data")
     assert r.status_code == 200, r.get_json()
     d = r.get_json()

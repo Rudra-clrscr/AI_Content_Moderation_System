@@ -85,6 +85,26 @@ class Settings:
     # levels, edit the policy and clear the audit log, so it is logged loudly at startup and
     # reported by /ready, and it is a switch rather than deleted code so it can go back on.
     auth_disabled: bool = False
+    # THE .NET BACKEND'S ADMIN SIGN-IN. When set, an admin request carrying
+    # "Authorization: Bearer <token>" is accepted only if this endpoint says the token is a
+    # live admin session (the bonc-auth package does the call). Unset - the default, and
+    # every deployment until the .NET team publishes the endpoint - changes nothing.
+    bonc_auth_verify_url: str | None = None
+    # Which .NET endpoint that URL is. "verify-admin": a purpose-built verifier answering
+    # {adminId, role, sessionId} / 401 / 403. "user-detail": the existing
+    # GET /api/userService/getUserDetail, with this service checking the roles itself
+    # against bonc_auth_admin_roles (admin_auth.UserDetailAuth).
+    bonc_auth_style: str = "verify-admin"
+    bonc_auth_admin_roles: tuple[str, ...] = ("Admin", "SuperAdmin")
+    bonc_auth_method: str = "GET"
+    bonc_auth_timeout: float = 5.0
+    # How long a token .NET has accepted is trusted without asking again. One page of the
+    # Image Fine-Tuning grid is ~25 admin calls; without this each one is a round trip to .NET.
+    # The price: a BONC sign-out takes up to this long to reach this service. 0 asks every time.
+    bonc_auth_cache_seconds: float = 60.0
+    # Browser origins allowed to call /v1/admin/* directly (the BONC admin frontend), exact
+    # scheme://host[:port]. Empty - the default - sends no CORS headers at all.
+    admin_cors_origins: tuple[str, ...] = ()
     # HOW MANY PROXIES SIT IN FRONT OF THIS SERVICE. 0 means none, and the caller's address is
     # the socket's - the only value that cannot be forged. Above 0, that many hops are stripped
     # from the right of X-Forwarded-For and the next one is the caller.
@@ -195,6 +215,15 @@ def load_settings(path: str | Path | None = None) -> Settings:
         admin_token=env("ADMIN_TOKEN") or None,
         service_token=env("SERVICE_TOKEN") or None,
         auth_disabled=_as_bool(env("AUTH_DISABLED", False)),
+        bonc_auth_verify_url=(env("BONC_AUTH_VERIFY_URL") or "").strip() or None,
+        bonc_auth_style=(env("BONC_AUTH_STYLE") or "verify-admin").strip().lower(),
+        bonc_auth_admin_roles=tuple(r.strip() for r in
+                                    (env("BONC_AUTH_ADMIN_ROLES") or "Admin,SuperAdmin").split(",")
+                                    if r.strip()),
+        bonc_auth_method=(env("BONC_AUTH_METHOD") or "GET").strip().upper(),
+        bonc_auth_timeout=float(env("BONC_AUTH_TIMEOUT") or 5.0),
+        bonc_auth_cache_seconds=max(0.0, float(env("BONC_AUTH_CACHE_SECONDS") or 60.0)),
+        admin_cors_origins=_cors_origins(env("ADMIN_CORS_ORIGINS") or ""),
         trust_proxy_hops=max(0, int(env("TRUST_PROXY_HOPS", raw.get("trust_proxy_hops", 0)) or 0)),
         db_server=env("DB_SERVER"),
         db_name=env("DB_NAME"),
@@ -266,6 +295,28 @@ def load_settings(path: str | Path | None = None) -> Settings:
             device=str(env("VISUAL_DEVICE", vis.get("device", "auto"))),
         )),
     )
+
+
+def _cors_origins(raw: str) -> tuple[str, ...]:
+    """ADMIN_CORS_ORIGINS, comma-separated, as exact origins.
+
+    A wildcard is refused rather than honoured: these endpoints change the policy and clear
+    the audit log, and "any site may call them" is never what someone setting this meant.
+    """
+    out = []
+    for part in raw.split(","):
+        o = part.strip().rstrip("/").lower()
+        if not o:
+            continue
+        if o == "*" or "://" not in o:
+            raise ValueError(f"ADMIN_CORS_ORIGINS: {part.strip()!r} is not an exact origin "
+                             "like https://admin.boncnetwork.com (wildcards are not allowed)")
+        if "/" in o.split("://", 1)[1]:
+            # A browser's Origin header never carries a path, so this could never match.
+            raise ValueError(f"ADMIN_CORS_ORIGINS: {part.strip()!r} has a path; give the "
+                             "origin only, like https://admin.boncnetwork.com")
+        out.append(o)
+    return tuple(dict.fromkeys(out))
 
 
 def _as_bool(value: str | bool) -> bool:

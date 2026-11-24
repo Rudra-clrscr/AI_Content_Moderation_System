@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from werkzeug.security import generate_password_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -20,31 +19,29 @@ from app.admin_auth import restore_levels  # noqa: E402
 from app.config import load_settings  # noqa: E402
 from app.levels import ModerationLevels  # noqa: E402
 
-EMAIL, PW = "settings_audit@example.com", "AdminTestPass123"
-HDR = {"X-Requested-With": "bonc-admin"}
+TOKEN = "test-admin-token"   # the ADMIN_TOKEN these tests run under
 
 
 @pytest.fixture
 def app():
     a = create_app(load_settings())
-    a.extensions["admin"].store.create_admin(EMAIL, "scrypt:32768:8:1$dummy$dummy")
-    a.extensions["admin"].store.set_password(EMAIL, generate_password_hash(PW))
+    a.extensions["moderation"].settings.admin_token = TOKEN
     return a
 
 
 @pytest.fixture
 def client(app):
     c = app.test_client()
-    assert c.post("/v1/admin/auth/login", json={"email": EMAIL, "password": PW}).status_code == 200
+    c.environ_base["HTTP_X_ADMIN_TOKEN"] = TOKEN
     return c
 
 
 def set_page(client, ct, **body):
-    return client.put(f"/v1/admin/moderation-levels/{ct}", json=body, headers=HDR)
+    return client.put(f"/v1/admin/moderation-levels/{ct}", json=body)
 
 
 def set_all(client, **body):
-    return client.put("/v1/admin/moderation-settings", json=body, headers=HDR)
+    return client.put("/v1/admin/moderation-settings", json=body)
 
 
 # ---- what a restart keeps ---------------------------------------------------------------

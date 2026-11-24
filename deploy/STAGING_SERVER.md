@@ -90,12 +90,14 @@ Values are not written down anywhere but the file itself. Read one with
 | Key | Set to | Why |
 |---|---|---|
 | `GUNICORN_BIND` | `127.0.0.1:8005` | local only; nginx is the way in |
-| `AUTH_DISABLED` | `1` | **all authentication off**: no bearer token on `/v1/moderate*`, no login on `/v1/admin/*`. Anyone who can reach the host can change levels, edit the policy and clear the audit log. Chosen on 2026-11-11 so the .NET team can put their own authentication in front. Remove the line, or set it to `0`, and restart to turn the checks below back on. `/ready` shows `admin_auth`. |
+| `AUTH_DISABLED` | `1` | **all authentication off**: no bearer token on `/v1/moderate*`, no admin check on `/v1/admin/*`. Anyone who can reach the host can change levels, edit the policy and clear the audit log. Chosen on 2026-11-11 so the .NET team can put their own authentication in front. Remove the line, or set it to `0`, and restart to turn the checks below back on. `/ready` shows `admin_auth`. |
 | `SERVICE_TOKEN` | empty | the bearer token for `/v1/moderate*`, used only when `AUTH_DISABLED` is off. **Empty means those endpoints are open to anyone.** Only the token goes here, without the word `Bearer`. Don't reuse the old one, which was exposed: generate a new one with the command below. |
-| `ADMIN_TOKEN` | empty for now | if set, scripts can use the admin APIs with `X-Admin-Token: <value>`. Admins log in with email and password regardless. |
-| `SECRET_KEY` | 64 hex chars | signs admin login sessions; changing it logs every admin out |
-| `ADMIN_EMAIL` | the first admin's address | default for `admin_cli` |
-| `SESSION_COOKIE_SECURE` | `1` | admin cookies only over HTTPS. Admin login over plain `http://` will not work, deliberately. |
+| `ADMIN_TOKEN` | empty for now | if set, scripts can use the admin APIs with `X-Admin-Token: <value>`, and `POST /v1/admin/model/reload` needs it. |
+| `BONC_AUTH_VERIFY_URL` | empty until .NET publishes it | the .NET endpoint that verifies an admin's BONC sign-in token. Once set (and `AUTH_DISABLED` off), admins call `/v1/admin/*` with `Authorization: Bearer <their BONC token>`. `/ready` shows `admin_verifier: bonc`. See `flask_api/ADMIN_SETUP.md`. |
+| `BONC_AUTH_STYLE` | unset (`verify-admin`) | `user-detail` when `BONC_AUTH_VERIFY_URL` is .NET's existing `https://api.boncnetwork.com/api/userService/getUserDetail`: this service then reads the user's roles itself. |
+| `BONC_AUTH_ADMIN_ROLES` | unset (`Admin,SuperAdmin`) | with `user-detail`, the .NET roles that count as admin. |
+| `BONC_AUTH_CACHE_SECONDS` | unset (60) | how long an accepted BONC token is trusted before .NET is asked again. A BONC sign-out takes up to this long to reach here. `0` checks every request. |
+| `ADMIN_CORS_ORIGINS` | empty | the BONC admin frontend's origin(s), exact, comma-separated, if it calls `/v1/admin/*` from the browser. Empty sends no CORS headers; `*` is refused at startup. |
 | `TRUST_PROXY_HOPS` | `1` | nginx is in front, so the caller's address is read from `X-Forwarded-For`. Make it `2` once the .NET backend forwards the member's address. |
 | `DEMO_PAGE` | `0` | the browser demo is not served here |
 | `RESULT_SINK` | `log` | results go to the journal, not SQL Server |
@@ -110,18 +112,19 @@ sudo systemctl restart moderation-api
 Changing `SERVICE_TOKEN` locks out everyone using the old one, including the .NET backend.
 Hand the new value over privately: not in a group chat, not in a screenshot.
 
-## Admin accounts
+## Admin access
+
+There are no admin accounts on this server: admins sign in on BONC (.NET), and this
+service checks their token against `BONC_AUTH_VERIFY_URL`. `SECRET_KEY`,
+`SESSION_COOKIE_SECURE` and `ADMIN_EMAIL` in `.env` are left over from the old
+email/password login and are no longer read; they can be deleted. The `admin` table in
+`data/admin.db` is left as it was and is no longer read either.
+
+To check the wiring once the URL is set:
 
 ```bash
-cd /opt/moderation/flask_api
-sudo -u moderation ../.venv/bin/python -m app.admin_cli list
-sudo -u moderation ../.venv/bin/python -m app.admin_cli create-admin --email someone@boncnetwork.com
-sudo -u moderation ../.venv/bin/python -m app.admin_cli set-password --email someone@boncnetwork.com
+curl -s -H "Authorization: Bearer <a BONC admin token>" https://boncaistageapi.boncnetwork.com/v1/admin/auth/me
 ```
-
-Email is not configured (no Brevo settings), so "forgot password" sends nothing. Reset
-passwords with `set-password`. Give each colleague their own admin account rather than
-sharing one.
 
 ---
 
@@ -217,7 +220,7 @@ the newest archive off the box (`scp` it to your own machine).
 | Service restarting in a loop | startup crash, or `check_deploy.py` failing before start | `sudo journalctl -u moderation-api -n 80` |
 | `ModuleNotFoundError: sklearn` at start | requirements not installed after a pull | `pip install -r flask_api/requirements.txt` |
 | 401 `a valid bearer token is required` | wrong token, or `Bearer ` missing from the header | the header must be `Authorization: Bearer <token>`. In Swagger, type `Bearer ` in the box too. |
-| Admin login works on `https://` but not `http://` | `SESSION_COOKIE_SECURE=1` | intended. Use the domain. |
+| `503 auth_unavailable` on admin calls | the .NET verifier at `BONC_AUTH_VERIFY_URL` is unreachable or answered something other than 200/401/403 | `journalctl -u moderation-api` names the cause; check the URL and that .NET is up |
 | "Welcome to nginx!" or nginx 404 on the domain | the nginx site is not enabled | `ls -l /etc/nginx/sites-enabled/` |
 | Every request comes from the same IP in the audit log | `TRUST_PROXY_HOPS` doesn't match the proxies in front | see the `.env` table |
 | Hindi text in pictures not read | Devanagari OCR model missing | `check_deploy.py`, then `scripts/fetch_ocr_langs.py devanagari` |

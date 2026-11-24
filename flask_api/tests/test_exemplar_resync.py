@@ -24,7 +24,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from werkzeug.security import generate_password_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -33,8 +32,7 @@ from app import create_app  # noqa: E402
 from app.config import load_settings  # noqa: E402
 from app.system_store import SystemStore  # noqa: E402
 
-EMAIL, PW = "exemplar_resync@example.com", "AdminTestPass123"
-HDR = {"X-Requested-With": "bonc-admin"}
+TOKEN = "test-admin-token"   # the ADMIN_TOKEN these tests run under
 
 
 def _vec(*xs) -> bytes:
@@ -57,10 +55,7 @@ def app(tmp_path):
     # VisualConfig is frozen and VisualCheck.model_dir is derived from it, so the redirect
     # goes through a replaced config. Absolute, so it is not resolved against visual.root.
     visual.config = dataclasses.replace(visual.config, model_dir=str(model_dir))
-
-    admin = app.extensions["admin"]
-    admin.store.create_admin(EMAIL, "scrypt:32768:8:1$dummy$dummy")
-    admin.store.set_password(EMAIL, generate_password_hash(PW))
+    app.extensions["moderation"].settings.admin_token = TOKEN
     app.config["_model_dir"] = model_dir
     return app
 
@@ -68,7 +63,7 @@ def app(tmp_path):
 @pytest.fixture
 def client(app):
     c = app.test_client()
-    assert c.post("/v1/admin/auth/login", json={"email": EMAIL, "password": PW}).status_code == 200
+    c.environ_base["HTTP_X_ADMIN_TOKEN"] = TOKEN
     return c
 
 
@@ -80,7 +75,7 @@ def marked(app, client):
                           category="safe", action="block", is_selected=1,
                           embedding=_vec(1.0, 0.0, 0.0))
     res = client.put("/v1/admin/policy/exemplars",
-                     json={"ids": [row["id"]], "mode": "block"}, headers=HDR)
+                     json={"ids": [row["id"]], "mode": "block"})
     assert res.status_code == 200, res.get_json()
     assert _live(app)["actions"] == ["block"]
     return row["id"]
@@ -102,7 +97,7 @@ def test_switching_a_marked_card_to_allow_moves_the_live_rule(app, client, marke
     """The reported bug, in one assertion. Refusing -> allowing, through the grid's own
     toggle and Submit Changes, must reach the file the live check reads."""
     res = client.put("/v1/admin/images/batch",
-                     json={"updates": [{"id": marked, "action": "allow"}]}, headers=HDR)
+                     json={"updates": [{"id": marked, "action": "allow"}]})
     assert res.status_code == 200, res.get_json()
     assert _live(app)["actions"] == ["allow"]
 
@@ -112,7 +107,7 @@ def test_the_response_says_the_live_rule_moved(app, client, marked):
     the next upload, so saying so is the difference between the admin testing it now and
     waiting for a retrain that was never needed."""
     res = client.put("/v1/admin/images/batch",
-                     json={"updates": [{"id": marked, "action": "allow"}]}, headers=HDR)
+                     json={"updates": [{"id": marked, "action": "allow"}]})
     body = res.get_json()
     assert body["exemplars"]["allowing"] == 1
     assert body["exemplars"]["refusing"] == 0
@@ -121,14 +116,14 @@ def test_the_response_says_the_live_rule_moved(app, client, marked):
 
 def test_category_allow_all_moves_its_marked_pictures(app, client, marked):
     """ALLOW ALL on a category goes through a different endpoint and had the same hole."""
-    res = client.put("/v1/admin/images/categories/safe", json={"action": "allow"}, headers=HDR)
+    res = client.put("/v1/admin/images/categories/safe", json={"action": "allow"})
     assert res.status_code == 200, res.get_json()
     assert _live(app)["actions"] == ["allow"]
 
 
 def test_bulk_action_on_the_batch_endpoint_moves_its_marked_pictures(app, client, marked):
     res = client.put("/v1/admin/images/batch",
-                     json={"bulk_action": "allow", "category": "safe"}, headers=HDR)
+                     json={"bulk_action": "allow", "category": "safe"})
     assert res.status_code == 200, res.get_json()
     assert _live(app)["actions"] == ["allow"]
 
@@ -137,7 +132,7 @@ def test_moving_a_marked_picture_to_another_category_is_rebaked(app, client, mar
     """The baked category is what the withdrawn-category check tests, so a stale one means a
     mark that cannot be silenced by withdrawing the category it now sits in."""
     res = client.put("/v1/admin/images/batch",
-                     json={"updates": [{"id": marked, "category": "weapon"}]}, headers=HDR)
+                     json={"updates": [{"id": marked, "category": "weapon"}]})
     assert res.status_code == 200, res.get_json()
     assert _live(app)["categories"] == ["weapon"]
 
@@ -149,7 +144,7 @@ def test_saving_train_checkboxes_does_not_rebake(app, client, marked):
     matcher on every checkbox in a 24-card grid for a change it cannot see."""
     before = (app.config["_model_dir"] / "exemplars.npz").stat().st_mtime_ns
     res = client.put("/v1/admin/images/batch",
-                     json={"updates": [{"id": marked, "is_selected": 0}]}, headers=HDR)
+                     json={"updates": [{"id": marked, "is_selected": 0}]})
     assert res.status_code == 200
     assert res.get_json()["exemplars"] is None
     assert (app.config["_model_dir"] / "exemplars.npz").stat().st_mtime_ns == before
@@ -162,7 +157,7 @@ def test_changing_an_unmarked_picture_does_not_rebake(app, client, marked):
                             category="safe", action="block", is_selected=1,
                             embedding=_vec(0.0, 1.0, 0.0))
     res = client.put("/v1/admin/images/batch",
-                     json={"updates": [{"id": other["id"], "action": "allow"}]}, headers=HDR)
+                     json={"updates": [{"id": other["id"], "action": "allow"}]})
     assert res.status_code == 200
     assert res.get_json()["exemplars"] is None
     assert _live(app)["actions"] == ["block"]
