@@ -228,36 +228,9 @@ def test_article_content_type_accepted(client):
     assert r.status_code == 200
 
 
-def test_the_swagger_page_sends_the_csrf_header_so_a_signed_in_admin_can_write(client):
-    """Admins sign in with email and password, and that session is only honoured on a write
-    that also carries X-Requested-With. The page adds it to every request through Swagger
-    UI's requestInterceptor; without it, every admin PUT from /docs answers 403.
-
-    The page is JavaScript, so this checks the setting is there. It was confirmed in a real
-    browser that Swagger UI then sends the header on its own requests.
-    """
+def test_the_swagger_page_points_admins_at_the_bonc_sign_in(client):
+    """There is no login route to point at any more: admins authorize with their BONC token
+    (or scripts with ADMIN_TOKEN), and nothing on the page sends a session-era header."""
     page = client.get("/docs").get_data(as_text=True)
-    assert "requestInterceptor" in page
-    assert 'req.headers["X-Requested-With"] = "bonc-admin"' in page
-
-
-def test_a_signed_in_admin_with_the_header_can_change_a_level(make_settings, scorer):
-    """The server half of the same promise: session cookie plus the header is enough."""
-    from werkzeug.security import generate_password_hash
-
-    from app.admin_store import AdminStore
-
-    app = create_app(make_settings(admin_token=None), scorer=scorer,
-                     admin_store=AdminStore(":memory:"))
-    app.extensions["admin"].store.create_admin("admin@example.com",
-                                               generate_password_hash("Correct-horse-9"))
-    c = app.test_client()
-    r = c.post("/v1/admin/auth/login",
-               json={"email": "admin@example.com", "password": "Correct-horse-9"})
-    assert r.status_code == 200, r.get_json()
-
-    without = c.put("/v1/admin/moderation-levels/post", json={"level": "medium"})
-    assert without.status_code == 403
-    with_header = c.put("/v1/admin/moderation-levels/post", json={"level": "medium"},
-                        headers={"X-Requested-With": "bonc-admin"})
-    assert with_header.status_code == 200
+    assert "BoncAdmin" in page and "auth/login" not in page
+    assert "X-Requested-With" not in page

@@ -128,22 +128,65 @@
 
   class SessionExpired extends Error {}
 
+  // ---- who the dashboard is signed in as ----------------------------------------------
+  // THERE IS NO PASSWORD LOGIN. Admins sign in on BONC (.NET); this page carries the token
+  // that sign-in issued and sends it with every call. `mode` comes from /ready:
+  //   "bonc"  - the server verifies BONC tokens (BONC_AUTH_VERIFY_URL): Authorization: Bearer
+  //   "local" - no BONC verifier yet: the token is the server's ADMIN_TOKEN, as X-Admin-Token
+  //   "open"  - AUTH_DISABLED: nothing is sent and nothing is asked for
+  // Kept in sessionStorage, so it ends with the tab; a blocked storage keeps it in memory.
+  const TOKEN_KEY = "bonc.adminToken";
+  const adminAuth = { mode: "local", memory: "" };
+  function readToken() {
+    try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch { return adminAuth.memory; }
+  }
+  function saveToken(t) {
+    adminAuth.memory = t || "";
+    try {
+      if (t) sessionStorage.setItem(TOKEN_KEY, t); else sessionStorage.removeItem(TOKEN_KEY);
+    } catch { /* storage blocked: the in-memory copy above is used */ }
+  }
+  function authHeaders() {
+    const t = readToken();
+    if (!t || adminAuth.mode === "open") return {};
+    return adminAuth.mode === "bonc" ? { Authorization: `Bearer ${t}` } : { "X-Admin-Token": t };
+  }
+  const SIGNED_OUT = "Your sign-in has ended or the token was not accepted. Sign in again.";
+
+  /** Load admin-only pictures. An <img src> cannot carry a token header, so each one marked
+   *  data-admin-src is fetched with the headers and shown from a blob URL. */
+  function loadAdminImages(scope) {
+    scope.querySelectorAll("img[data-admin-src]").forEach(async (im) => {
+      const url = im.dataset.adminSrc;
+      im.removeAttribute("data-admin-src");
+      try {
+        const res = await fetch(url, { headers: authHeaders() });
+        if (!res.ok) throw new Error(String(res.status));
+        const href = URL.createObjectURL(await res.blob());
+        im.addEventListener("load", () => URL.revokeObjectURL(href), { once: true });
+        im.src = href;
+      } catch {
+        if (typeof im.onerror === "function") im.onerror();
+      }
+    });
+  }
+
   async function call(method, url, body) {
     const isForm = body instanceof FormData;
     const res = await fetch(url, {
       method,
-      credentials: "same-origin",
       headers: {
         ...(isForm ? {} : { "Content-Type": "application/json" }),
-        "X-Requested-With": "bonc-admin",
+        ...authHeaders(),
       },
       ...(body ? { body: isForm ? body : JSON.stringify(body) } : {}),
     });
     let data = {};
     try { data = await res.json(); } catch { /* not JSON */ }
     if (res.ok) return data;
-    if (res.status === 401 && !url.includes("/auth/login") && !url.includes("/password/")) {
-      throw new SessionExpired("Your session has ended. Please log in again.");
+    if (res.status === 401) {
+      saveToken("");
+      throw new SessionExpired(data.Message || SIGNED_OUT);
     }
     // The error carries the server's code and body, not just a sentence. Some failures are
     // decisions for the admin rather than things that went wrong - a policy conflict needs
@@ -162,20 +205,17 @@
 
   /** GET a file and hand it to the browser as a download, keeping failures on the page.
    *
-   * Not `window.location = url`: that works - the session cookie goes with it - but an expired
-   * session or a server error would navigate the admin away from the dashboard and show them
+   * Not `window.location = url`: a navigation cannot carry the admin token, and an expired
+   * sign-in or a server error would navigate the admin away from the dashboard and show them
    * raw JSON, with whatever they were doing lost. Fetching it means a failure is an ordinary
    * error in the view that asked for it, the same as every other call here.
    */
   async function download(url, fallbackName) {
-    const res = await fetch(url, {
-      credentials: "same-origin",
-      headers: { "X-Requested-With": "bonc-admin" },
-    });
+    const res = await fetch(url, { headers: authHeaders() });
     if (!res.ok) {
       let data = {};
       try { data = await res.json(); } catch { /* a failure need not be JSON */ }
-      if (res.status === 401) throw new SessionExpired("Your session has ended. Please log in again.");
+      if (res.status === 401) { saveToken(""); throw new SessionExpired(data.Message || SIGNED_OUT); }
       const d = data.Data || {};
       const err = new Error(data.Message || d.message || `The download failed (${res.status}).`);
       err.code = d.code || `http_${res.status}`;
@@ -203,9 +243,7 @@
   }
 
   function mount(root) {
-    let email = "";            // kept only while the forgot-password steps are on screen
-    let resetToken = "";
-    let cooldownTimer = null;
+    let cooldownTimer = null;  // the health screen's refresh; frame() clears it
     let currentAdmin = "";
 
     const $ = (id) => root.querySelector("#" + id);
@@ -249,135 +287,51 @@
       }));
     }
 
-    // ---- login ------------------------------------------------------------------------
+    // ---- sign in: paste the token BONC issued --------------------------------------------
     function loginView(notice = "", ok = false) {
-      frame("Admin login", "Only authorised administrators can change moderation settings.", `
+      const bonc = adminAuth.mode === "bonc";
+      frame("Admin sign-in", bonc
+        ? "Admins sign in on BONC. Paste the admin access token from your BONC sign-in."
+        : "This server is not connected to the BONC sign-in yet. Paste the ADMIN_TOKEN it was started with.", `
         <div style="max-width: 480px;">
-          <div class="field"><label for="adm-email">Email address</label>
-            <input class="input" id="adm-email" type="email" autocomplete="username" value="${esc(email)}"></div>
-          ${passwordField("adm-pass", "Password", "current-password")}
-          <div class="adm-row"><button class="btn btn-primary" id="adm-login">Log in</button>
-            <button class="btn-link" id="adm-forgot" type="button">Forgot password?</button></div>
+          ${passwordField("adm-token", bonc ? "BONC admin token" : "Admin token", "off")}
+          <div class="adm-row"><button class="btn btn-primary" id="adm-signin">Sign in</button></div>
+          <p class="hint">${bonc
+            ? "Each request is checked with BONC, so signing out of BONC ends access here too."
+            : "Once the server is given BONC_AUTH_VERIFY_URL, admins use their BONC sign-in instead."}
+            The token stays in this tab only.</p>
         </div>`);
       wireEyes();
       say(notice, ok);
       const submit = async () => {
-        const e = $("adm-email").value.trim(), p = $("adm-pass").value;
-        if (!e) return say("Enter your email address.");
-        if (!/^\S+@\S+\.\S+$/.test(e)) return say("That doesn't look like an email address.");
-        if (!p) return say("Enter your password.");
-        const btn = $("adm-login");
-        busy(btn, true, "Logging in…");
-        try {
-          const r = await call("POST", "/v1/admin/auth/login", { email: e, password: p });
-          email = "";
-          signedIn(r.email, false);
-        } catch (err) {
-          say(err.message);
-          busy(btn, false, "Log in");
-        }
-      };
-      $("adm-login").addEventListener("click", submit);
-      root.querySelectorAll("input").forEach((i) => i.addEventListener("keydown", (ev) => { if (ev.key === "Enter") submit(); }));
-      $("adm-forgot").addEventListener("click", () => { email = $("adm-email").value.trim(); forgotView(); });
-    }
-
-    // ---- forgot password --------------------------------------------------------------
-    function forgotView() {
-      frame("Forgot password", "We will email a 6-digit code to the administrator's address.", `
-        <div style="max-width: 480px;">
-          <div class="field"><label for="adm-email">Registered email address</label>
-            <input class="input" id="adm-email" type="email" autocomplete="username" value="${esc(email)}"></div>
-          <div class="adm-row"><button class="btn btn-primary" id="adm-send">Send code</button>
-            <button class="btn-link" id="adm-back" type="button">Back to login</button></div>
-        </div>`);
-      $("adm-back").addEventListener("click", () => loginView());
-      $("adm-send").addEventListener("click", async () => {
-        const e = $("adm-email").value.trim();
-        if (!/^\S+@\S+\.\S+$/.test(e)) return say("Enter a valid email address.");
-        const btn = $("adm-send");
-        busy(btn, true, "Sending…");
-        try {
-          const r = await call("POST", "/v1/admin/auth/password/forgot", { email: e });
-          email = e;
-          codeView(r.message);
-        } catch (err) {
-          say(err.message);
-          busy(btn, false, "Send code");
-        }
-      });
-    }
-
-    function codeView(notice) {
-      frame("Enter the code", "Check your email. The code works for 10 minutes and only once.", `
-        <div style="max-width: 480px;">
-          <div class="field"><label for="adm-code">6-digit code</label>
-            <input class="input" id="adm-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div>
-          <div class="adm-row"><button class="btn btn-primary" id="adm-verify">Verify code</button>
-            <button class="btn btn-outline" id="adm-resend" type="button" disabled>Resend code</button>
-            <button class="btn-link" id="adm-back" type="button">Back to login</button></div>
-        </div>`);
-      say(notice, true);
-      let left = 60;
-      const resend = $("adm-resend");
-      const tick = () => {
-        resend.textContent = left > 0 ? `Resend code (${left}s)` : "Resend code";
-        resend.disabled = left > 0;
-        if (left-- <= 0) clearInterval(cooldownTimer);
-      };
-      tick();
-      cooldownTimer = setInterval(tick, 1000);
-      $("adm-back").addEventListener("click", () => loginView());
-      resend.addEventListener("click", async () => {
-        resend.disabled = true;
-        try {
-          const r = await call("POST", "/v1/admin/auth/password/forgot", { email });
-          say(r.message, true);
-          left = 60; tick(); clearInterval(cooldownTimer); cooldownTimer = setInterval(tick, 1000);
-        } catch (err) { say(err.message); }
-      });
-      const submit = async () => {
-        const code = $("adm-code").value.trim();
-        if (!/^\d{6}$/.test(code)) return say("Enter the 6 digits from the email.");
-        const btn = $("adm-verify");
+        const t = $("adm-token").value.trim().replace(/^Bearer\s+/i, "");
+        if (!t) return say("Paste the token first.");
+        const btn = $("adm-signin");
         busy(btn, true, "Checking…");
+        saveToken(t);
         try {
-          const r = await call("POST", "/v1/admin/auth/password/verify", { email, code });
-          resetToken = r.reset_token;
-          newPasswordView();
+          signedIn(whoLabel(await call("GET", "/v1/admin/auth/me")), false);
         } catch (err) {
+          saveToken("");
           say(err.message);
-          busy(btn, false, "Verify code");
+          busy(btn, false, "Sign in");
         }
       };
-      $("adm-verify").addEventListener("click", submit);
-      $("adm-code").addEventListener("keydown", (ev) => { if (ev.key === "Enter") submit(); });
-      $("adm-code").focus();
+      $("adm-signin").addEventListener("click", submit);
+      $("adm-token").addEventListener("keydown", (ev) => { if (ev.key === "Enter") submit(); });
+      $("adm-token").focus();
     }
 
-    function newPasswordView() {
-      frame("Choose a new password", "At least 10 characters, with letters and numbers.", `
-        <div style="max-width: 480px;">
-          ${passwordField("adm-new", "New password", "new-password")}
-          ${passwordField("adm-new2", "Confirm new password", "new-password")}
-          <div class="adm-row"><button class="btn btn-primary" id="adm-reset">Save new password</button></div>
-        </div>`);
-      wireEyes();
-      $("adm-reset").addEventListener("click", async () => {
-        const a = $("adm-new").value, b = $("adm-new2").value;
-        if (a.length < 10) return say("Use at least 10 characters.");
-        if (a !== b) return say("The two passwords don't match.");
-        const btn = $("adm-reset");
-        busy(btn, true, "Saving…");
-        try {
-          await call("POST", "/v1/admin/auth/password/reset", { email, reset_token: resetToken, new_password: a });
-          resetToken = "";
-          loginView("Password changed. You can log in with the new password.", true);
-        } catch (err) {
-          say(err.message);
-          busy(btn, false, "Save new password");
-        }
-      });
+    /** What "Signed in as" says, from GET /v1/admin/auth/me. */
+    function whoLabel(me) {
+      if (me.via === "bonc") return `BONC admin ${me.admin_id || ""}`.trim();
+      if (me.via === "open") return "nobody - sign-in is switched off (AUTH_DISABLED)";
+      return "the server's ADMIN_TOKEN";
+    }
+
+    function signOut(notice) {
+      saveToken("");
+      loginView(notice || "Signed out. The token was removed from this tab.", true);
     }
 
     // ---- signed in dashboard -----------------------------------------------------------
@@ -386,7 +340,7 @@
       frame("Admin Dashboard", "Manage AI content moderation, visual model policies, and fine-tuning.", `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
           <p class="adm-who" style="margin:0;">Signed in as <b>${esc(who)}</b></p>
-          <button class="btn btn-outline" id="adm-logout" type="button">Log out</button>
+          ${adminAuth.mode === "open" ? "" : `<button class="btn btn-outline" id="adm-logout" type="button">Sign out</button>`}
         </div>
 
         <div class="adm-dash-grid">
@@ -464,10 +418,7 @@
       $("adm-policy-btn").addEventListener("click", () => policyView());
       $("adm-logs-btn").addEventListener("click", () => logsView());
       $("adm-health-btn").addEventListener("click", () => healthView());
-      $("adm-logout").addEventListener("click", async () => {
-        try { await call("POST", "/v1/admin/auth/logout"); } catch { /* ignore */ }
-        loginView("You have been logged out.", true);
-      });
+      if ($("adm-logout")) $("adm-logout").addEventListener("click", () => signOut());
       if (openPopup) settingsModal();
     }
 
@@ -1571,7 +1522,7 @@
                   <input class="img-check-input" type="checkbox" data-id="${img.id}" ${isSelected ? "checked" : ""}>
                   <span>Train</span>
                 </label>
-                <img class="img-thumb" src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}" loading="lazy" title="${isBlurred ? 'Image blurred. Click View Image to reveal.' : 'Click to preview full size'}" onerror="this.src=\'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\'><rect width=\'100\' height=\'100\' fill=\'%23eee\'/><text x=\'50%\' y=\'50%\' fill=\'%23aaa\' dominant-baseline=\'middle\' text-anchor=\'middle\'>No preview</text></svg>\'">
+                <img class="img-thumb" src="data:," data-admin-src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}" loading="lazy" title="${isBlurred ? 'Image blurred. Click View Image to reveal.' : 'Click to preview full size'}" onerror="this.src=\'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\'><rect width=\'100\' height=\'100\' fill=\'%23eee\'/><text x=\'50%\' y=\'50%\' fill=\'%23aaa\' dominant-baseline=\'middle\' text-anchor=\'middle\'>No preview</text></svg>\'">
                 <div class="img-sensitive-overlay">
                   <div class="img-sensitive-badge ${isSensitive ? "" : "neutral"}">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
@@ -1632,6 +1583,7 @@
         });
         html += `</div>`;
         grid.innerHTML = html;
+        loadAdminImages(grid);
 
         // Teaching by example applies IMMEDIATELY rather than joining pendingChanges, and the
         // difference is deliberate. The other controls on a card describe what the next
@@ -2537,7 +2489,7 @@
               <button class="btn-link" id="prev-close-x" type="button" aria-label="Close">✕</button>
             </div>
             <div class="img-preview-modal-body" id="prev-body">
-              <img class="img-preview-modal-img ${modalBlurred ? "blurred" : ""}" id="prev-img" src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}">
+              <img class="img-preview-modal-img ${modalBlurred ? "blurred" : ""}" id="prev-img" src="data:," data-admin-src="/v1/admin/images/${img.id}/file" alt="${esc(img.filename)}">
               <div class="img-preview-modal-overlay" id="prev-overlay" style="${modalBlurred ? "" : "display:none;"}">
                 <div class="img-sensitive-badge ${isSens ? "" : "neutral"}" style="font-size:12px; padding:4px 10px;">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
@@ -2578,6 +2530,7 @@
         back.querySelector("#prev-close-btn").addEventListener("click", close);
         back.addEventListener("click", (e) => { if (e.target === back) close(); });
 
+        loadAdminImages(back);
         const prevImg = back.querySelector("#prev-img");
         const prevOverlay = back.querySelector("#prev-overlay");
         const toggleBtn = back.querySelector("#prev-toggle-blur-btn");
@@ -3527,7 +3480,7 @@
               <button class="btn btn-primary adm-danger" id="mm-yes" type="button">Yes, turn it OFF</button></div></div>` : ""}`;
         q("mm-foot").innerHTML = confirming ? "" : `
           <button class="btn btn-outline" id="mm-cancel" type="button">Cancel</button>
-          <button class="btn btn-outline" id="mm-logout" type="button">Log out</button>
+          ${adminAuth.mode === "open" ? "" : `<button class="btn btn-outline" id="mm-logout" type="button">Sign out</button>`}
           <button class="btn btn-primary" id="mm-save" type="button">Save settings</button>`;
         bind(confirming);
       }
@@ -3618,10 +3571,7 @@
             }));
         }
         q("mm-cancel").addEventListener("click", close);
-        q("mm-logout").addEventListener("click", async () => {
-          try { await call("POST", "/v1/admin/auth/logout"); } catch { /* ignore */ }
-          close(); loginView("You have been logged out.", true);
-        });
+        if (q("mm-logout")) q("mm-logout").addEventListener("click", () => { close(); signOut(); });
         q("mm-save").addEventListener("click", () => {
           if (!draft.level) return draw("Choose a moderation level.");
           if (!globalDirty && !Object.keys(overrides).length) return draw("No changes to save.", true);
@@ -3697,9 +3647,22 @@
       })();
     }
 
-    // ---- start: are we already logged in? ----------------------------------------------
-    root.innerHTML = `<p class="adm-loading"><span class="spinner dark"></span> Checking your login…</p>`;
-    call("GET", "/v1/admin/auth/me").then((r) => signedIn(r.email, false)).catch(() => loginView());
+    // ---- start: which sign-in does this server take, and is this tab signed in? ---------
+    root.innerHTML = `<p class="adm-loading"><span class="spinner dark"></span> Checking your sign-in…</p>`;
+    (async () => {
+      try {
+        // /ready answers 503 while a model is still loading, with the same body - so the
+        // status is not checked, only the fields.
+        const d = ((await (await fetch("/ready")).json()) || {}).Data || {};
+        adminAuth.mode = d.admin_auth === "open" ? "open" : (d.admin_verifier === "bonc" ? "bonc" : "local");
+      } catch { /* keep "local": the sign-in screen still works, and says what to paste */ }
+      if (adminAuth.mode !== "open" && !readToken()) return loginView();
+      try {
+        signedIn(whoLabel(await call("GET", "/v1/admin/auth/me")), false);
+      } catch (err) {
+        loginView(err instanceof SessionExpired ? "" : err.message);
+      }
+    })();
   }
 
   window.BONCAdmin = { mount };

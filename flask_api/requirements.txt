@@ -44,3 +44,7 @@ openpyxl>=3.1
 # so without it the server does not boot at all: gunicorn exits with
 # ModuleNotFoundError: sklearn. That is how the first Contabo deploy failed.
 scikit-learn>=1.5
+
+# Verifies .NET admin bearer tokens when BONC_AUTH_VERIFY_URL is set (unused otherwise).
+# Pinned to a reviewed commit: the repo has no release tags, and @main can change under us.
+bonc-auth @ git+https://github.com/Shreyansh2025/bonc-auth.git@1a314e3e6db9959bc9a1f47db7a15d8bded155e7

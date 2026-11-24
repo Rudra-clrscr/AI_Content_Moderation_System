@@ -23,7 +23,6 @@ from app.admin_store import AdminStore  # noqa: E402
 from app.log_export import render, to_doc, to_txt, to_xlsx  # noqa: E402
 
 COLUMNS = AdminStore.EXPORT_COLUMNS
-HDR = {"X-Requested-With": "bonc-admin"}
 
 
 def rows(n=3):
@@ -163,7 +162,7 @@ def client(make_settings, tmp_path):
 def get(client, **params):
     qs = "&".join(f"{k}={v}" for k, v in params.items())
     return client.get(f"/v1/admin/moderation-logs/export?{qs}",
-                      headers={**HDR, "X-Admin-Token": "secret"})
+                      headers={"X-Admin-Token": "secret"})
 
 
 def test_the_export_needs_an_admin(client):

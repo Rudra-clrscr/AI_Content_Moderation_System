@@ -8,8 +8,7 @@ from app import create_app
 from app.config import load_settings
 from app.system_store import SystemStore
 
-EMAIL, PW = "test_image_admin@example.com", "AdminTestPass123"
-HDR = {"X-Requested-With": "bonc-admin"}
+TOKEN = "test-admin-token"   # the ADMIN_TOKEN these tests run under
 
 
 @pytest.fixture
@@ -19,19 +18,14 @@ def test_app(tmp_path):
     store = SystemStore(path=db_path)
 
     app = create_app(settings, system_store=store)
-    admin = app.extensions["admin"]
-    admin.store.create_admin(EMAIL, "scrypt:32768:8:1$dummy$dummy")
-    # Set known password
-    from werkzeug.security import generate_password_hash
-    admin.store.set_password(EMAIL, generate_password_hash(PW))
+    app.extensions["moderation"].settings.admin_token = TOKEN
     return app
 
 
 @pytest.fixture
 def client(test_app):
     c = test_app.test_client()
-    login_res = c.post("/v1/admin/auth/login", json={"email": EMAIL, "password": PW})
-    assert login_res.status_code == 200
+    c.environ_base["HTTP_X_ADMIN_TOKEN"] = TOKEN
     return c
 
 
@@ -53,7 +47,7 @@ def test_add_custom_category(client):
         "display_name": "Pediatric Health & Care",
         "default_action": "allow",
         "description": "Healthcare products for infants and children"
-    }, headers=HDR)
+    })
     assert res.status_code == 201
     cat = res.get_json()["category"]
     assert cat["name"] == "pediatric_health"
@@ -92,7 +86,7 @@ def test_batch_update_images(client):
             {"id": id1, "action": "allow", "is_selected": 1},
             {"id": id2, "action": "block", "is_selected": 0},
         ]
-    }, headers=HDR)
+    })
     assert res.status_code == 200
     assert res.get_json()["updated"] == 2
 
@@ -107,7 +101,7 @@ def test_batch_update_images(client):
 
 def test_bulk_category_policy_update(client):
     # Set all minor images to allow
-    res = client.put("/v1/admin/images/categories/minor", json={"action": "allow"}, headers=HDR)
+    res = client.put("/v1/admin/images/categories/minor", json={"action": "allow"})
     assert res.status_code == 200
 
     minors = client.get("/v1/admin/images?category=minor").get_json()["items"]
@@ -115,7 +109,7 @@ def test_bulk_category_policy_update(client):
         assert m["action"] == "allow"
 
     # Set back to block
-    res2 = client.put("/v1/admin/images/categories/minor", json={"action": "block"}, headers=HDR)
+    res2 = client.put("/v1/admin/images/categories/minor", json={"action": "block"})
     assert res2.status_code == 200
     minors2 = client.get("/v1/admin/images?category=minor").get_json()["items"]
     for m in minors2:
@@ -135,7 +129,7 @@ def test_upload_image_to_category(client):
         "category": "child_products",
         "action": "allow",
         "description": "Sample diaper image for testing"
-    }, content_type="multipart/form-data", headers=HDR)
+    }, content_type="multipart/form-data")
     assert res.status_code == 201
     img = res.get_json()["image"]
     assert img["filename"] == "test_diaper_sample.png"
@@ -150,7 +144,7 @@ def test_upload_image_to_category(client):
 
 def test_apply_presets_and_fine_tune(client):
     # Test applying child_products preset
-    res = client.post("/v1/admin/images/preset", json={"preset": "child_products"}, headers=HDR)
+    res = client.post("/v1/admin/images/preset", json={"preset": "child_products"})
     assert res.status_code == 200
     data = res.get_json()
     assert data["success"] is True
@@ -162,7 +156,7 @@ def test_apply_presets_and_fine_tune(client):
     assert hist["active_policy_mode"] == "child_products"
 
     # Test applying standard preset
-    res_std = client.post("/v1/admin/images/preset", json={"preset": "standard"}, headers=HDR)
+    res_std = client.post("/v1/admin/images/preset", json={"preset": "standard"})
     assert res_std.status_code == 200
     assert "BLOCKED" in res_std.get_json()["minor_policy"]
 
@@ -189,7 +183,7 @@ def test_sensitive_nudity_and_sexual_image_detection(client):
         "category": "sexual",
         "action": "block",
         "description": "Explicit adult nudity sample"
-    }, content_type="multipart/form-data", headers=HDR)
+    }, content_type="multipart/form-data")
     assert res_sex.status_code == 201
     sex_img = res_sex.get_json()["image"]
     assert sex_img["is_sensitive"] is True
@@ -204,7 +198,7 @@ def test_sensitive_nudity_and_sexual_image_detection(client):
         "category": "safe",
         "action": "allow",
         "description": "Living room desk lamp"
-    }, content_type="multipart/form-data", headers=HDR)
+    }, content_type="multipart/form-data")
     assert res_safe.status_code == 201
     safe_img = res_safe.get_json()["image"]
     assert safe_img["is_sensitive"] is False

@@ -22,7 +22,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from werkzeug.security import generate_password_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -30,18 +29,16 @@ sys.path.insert(0, str(ROOT))
 from app import create_app  # noqa: E402
 from app.config import load_settings  # noqa: E402
 
-EMAIL, PW = "levels_admin@example.com", "AdminTestPass123"
+TOKEN = "test-admin-token"   # the ADMIN_TOKEN these tests run under
 
 
 @pytest.fixture
 def client(tmp_path):
     settings = load_settings()
     app = create_app(settings)
-    admin = app.extensions["admin"]
-    admin.store.create_admin(EMAIL, "scrypt:32768:8:1$dummy$dummy")
-    admin.store.set_password(EMAIL, generate_password_hash(PW))
+    app.extensions["moderation"].settings.admin_token = TOKEN
     c = app.test_client()
-    assert c.post("/v1/admin/auth/login", json={"email": EMAIL, "password": PW}).status_code == 200
+    c.environ_base["HTTP_X_ADMIN_TOKEN"] = TOKEN
     return c
 
 
@@ -52,13 +49,11 @@ def settings_view(c) -> dict:
 
 
 def set_page(c, ct, **body):
-    return c.put(f"/v1/admin/moderation-levels/{ct}", json=body,
-                 headers={"X-Requested-With": "bonc-admin"})
+    return c.put(f"/v1/admin/moderation-levels/{ct}", json=body)
 
 
 def set_everything(c, **body):
-    return c.put("/v1/admin/moderation-settings", json=body,
-                 headers={"X-Requested-With": "bonc-admin"})
+    return c.put("/v1/admin/moderation-settings", json=body)
 
 
 # ---- one page at a time ---------------------------------------------------------------
@@ -151,8 +146,7 @@ def test_an_unknown_level_is_refused(client):
 
 
 def delete_page(c, ct):
-    return c.delete(f"/v1/admin/moderation-levels/{ct}",
-                    headers={"X-Requested-With": "bonc-admin"})
+    return c.delete(f"/v1/admin/moderation-levels/{ct}")
 
 
 def test_clearing_a_page_reverts_it_to_inheriting_default(client):

@@ -162,16 +162,21 @@ knowing to someone guessing.
 
 `check_admin()` in `app/admin_auth.py` implements the admin tier:
 
-- A logged-in session (Flask cookie, set by `POST /v1/admin/auth/login`) is accepted.
-  On any non-GET method the request must also carry **`X-Requested-With: bonc-admin`**
-  or it is refused `403 forbidden`. This is the CSRF defence — a custom header cannot be
-  set cross-origin without a preflight the server never answers.
-- Failing that, `X-Admin-Token: <ADMIN_TOKEN>` is compared with `hmac.compare_digest`.
-- If no admin account exists *and* `ADMIN_TOKEN` is unset, admin endpoints return
-  `404 not_found` rather than `401` — they are considered disabled, not protected.
+- **There is no login on this service.** Admins sign in on BONC (.NET). When
+  `BONC_AUTH_VERIFY_URL` is set, a request carrying `Authorization: Bearer <token>` is
+  forwarded to that endpoint by the `bonc-auth` package: `200` with `adminId` lets it in (the
+  identity is in `g.admin`), `401` gives `401 unauthorized`, `403` gives `403 not_admin`, and
+  anything else - timeout, 5xx, a body without `adminId` - gives `503 auth_unavailable`. A
+  request with a bearer token is judged on that token alone.
+- Otherwise `X-Admin-Token: <ADMIN_TOKEN>` is compared with `hmac.compare_digest`.
+- With neither `BONC_AUTH_VERIFY_URL` nor `ADMIN_TOKEN` set, admin endpoints return
+  `404 not_found` rather than `401` - they are considered disabled, not protected.
+- `AUTH_DISABLED=1` skips all of it.
+
+Neither credential is attached by a browser on its own, so there is no CSRF check.
 
 `POST /v1/admin/model/reload` deliberately does **not** use `check_admin()`. It accepts
-the token only, so a logged-in dashboard session cannot hot-swap the model.
+`ADMIN_TOKEN` only, so a BONC admin sign-in cannot hot-swap the model.
 
 ### Client identification and blocking
 
@@ -805,56 +810,19 @@ bare `404`.
 
 # 6. Admin — authentication
 
-`app/admin_auth.py`. Session cookies are Flask's signed, permanent sessions carrying the
-admin id, a `session_version` (bumped to invalidate every existing session) and a
-timestamp.
+`app/admin_auth.py`. There is no login, logout or password reset here: admins sign in on
+BONC (.NET), and `check_admin()` (section above) verifies what each request brings. The
+email/password accounts, sessions and emailed reset codes were removed.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/v1/admin/auth/login` | Sign in, set the session cookie |
-| `POST` | `/v1/admin/auth/logout` | Clear the session |
-| `GET` | `/v1/admin/auth/me` | `{email}` for the current session, else `401` |
-| `POST` | `/v1/admin/auth/password/forgot` | Request a 6-digit code by email |
-| `POST` | `/v1/admin/auth/password/verify` | Exchange the code for a reset token |
-| `POST` | `/v1/admin/auth/password/reset` | Set the new password |
+| `GET` | `/v1/admin/auth/me` | Who the request is authenticated as: `{admin_id, role, session_id, via}`, `via` being `bonc`, `admin_token` or `open` |
 
-## `POST /v1/admin/auth/login`
+`/v1/admin/auth/me` is the quickest end-to-end check of `BONC_AUTH_VERIFY_URL`: with a BONC
+token it returns exactly what the .NET endpoint answered.
 
-```json
-{ "email": "admin@example.com", "password": "…" }
-```
-
-Returns `200 {"email": "…"}` and sets the cookie. `401 invalid_credentials` on failure —
-the same message whether the account exists or not, and a dummy hash is checked when it
-does not, so response timing does not reveal which.
-
-**Rate limited:** 20 attempts per IP and 5 per email address, each per 15 minutes.
-Exceeding either gives `429 rate_limited` with a `Retry-After` header.
-
-## The password reset flow
-
-Three steps, and each resists a different attack.
-
-1. **`password/forgot`** — `{email}`. **Always returns the same `200` body**, whether or
-   not the address belongs to an admin, so it cannot be used to enumerate accounts. A
-   limit being hit returns that same body too. A 6-digit code is hashed with the app
-   secret before storage, expires after `OTP_TTL`, replaces any older code, and is subject
-   to a resend cooldown. It is delivered on a background thread, and **never written to
-   the log**. If no mailer is configured the failure is logged and nothing is sent.
-   *Limits: 10 per IP and 5 per email, per hour.*
-
-2. **`password/verify`** — `{email, code}`. Returns `200 {"reset_token": "…"}`.
-   The code is checked against a maximum attempt count and the token is stored hashed.
-   Failures distinguish `expired`, `locked` (too many wrong codes) and plain wrong, but
-   all return `400 invalid_code`. *Limit: 30 per IP per 15 minutes.*
-
-3. **`password/reset`** — `{email, reset_token, new_password}`. Validates the password
-   (at least `MIN_PASSWORD` characters, must mix letters and digits, must not be the email
-   address, at most 200 characters) and **clears the session** on success, so an attacker
-   holding a stolen cookie loses it. *Limit: 20 per IP per 15 minutes.*
-
-> **Note.** Rate limiting exists only on these five auth endpoints. There is none on
-> `/v1/moderate`. See section 12.
+> **Note.** There is no rate limiting anywhere in this service, `/v1/moderate` included. See
+> section 12.
 
 ---
 
@@ -1353,12 +1321,7 @@ nothing has been edited yet, so there is nothing to go back to.
 
 | Method | Path |
 |---|---|
-| `POST` | `/v1/admin/auth/login` |
-| `POST` | `/v1/admin/auth/logout` |
 | `GET` | `/v1/admin/auth/me` |
-| `POST` | `/v1/admin/auth/password/forgot` |
-| `POST` | `/v1/admin/auth/password/verify` |
-| `POST` | `/v1/admin/auth/password/reset` |
 | `GET` `PUT` | `/v1/admin/moderation-settings` |
 | `GET` | `/v1/admin/moderation-logs` |
 | `GET` | `/v1/admin/moderation-logs/export` |
@@ -1469,14 +1432,13 @@ Environment overrides exist for several of these — `THRESHOLD_ALLOW_MAX`,
 
 | Code | Status |
 |---|---|
-| `invalid_request`, `weak_password`, `invalid_code`, `invalid_token`, `bad_format`, `bad_scope`, `bad_address`, `missing_value`, `bad_ids`, `bad_mode`, `missing_ids`, `missing_preset`, `missing_phrasing`, `invalid_updates` | 400 |
-| `unauthorized`, `invalid_credentials` | 401 |
-| `forbidden` (missing CSRF header) | 403 |
+| `invalid_request`, `bad_format`, `bad_scope`, `bad_address`, `missing_value`, `bad_ids`, `bad_mode`, `missing_ids`, `missing_preset`, `missing_phrasing`, `invalid_updates` | 400 |
+| `unauthorized` | 401 |
+| `not_admin` (a BONC sign-in without admin access) | 403 |
 | `not_found`, `no_such_surface`, `no_such_label`, `not_blocked`, `file_missing`, `no_such_image` | 404 |
 | `policy_conflict`, `would_block_self`, `category_exists`, `no_default`, `no_embeddings` | 409 |
-| `rate_limited` | 429 |
 | `save_failed`, `policy_build_failed`, `reload_failed`, `training_error`, `preset_error` | 500 |
-| `export_unavailable` | 503 |
+| `export_unavailable`, `auth_unavailable` (the BONC verifier could not answer) | 503 |
 
 ## 12.5 Known gaps
 

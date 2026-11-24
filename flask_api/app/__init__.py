@@ -42,8 +42,6 @@ def create_app(
     enqueue: Enqueue | None = None,
     fetch_result: FetchResult | None = None,
     admin_store=None,
-    mailer=None,
-    mail_async: bool = True,
     system_store=None,
 ) -> Flask:
     """`scorer`, `sink`, `enqueue`, `fetch_result` are injection points for tests
@@ -88,10 +86,10 @@ def create_app(
         fetch_result=fetch_result,
     )
 
-    # Admin accounts, password recovery and the saved moderation settings. Saved settings are
+    # The admin store (saved settings, audit log, blocklist) and the admin sign-in check.
     # re-applied here so a restart changes nothing.
     from app.admin_auth import init_admin, restore_levels
-    admin = init_admin(app, admin_store, mailer, mail_async)
+    admin = init_admin(app, admin_store)
     restore_levels(app.extensions["moderation"].levels, admin.store)
 
     # Every decision is also written to the admin database's audit log - the table the

@@ -1108,6 +1108,9 @@ def ready():
         "service_auth": "open" if svc.settings.auth_disabled or not svc.settings.service_token
                         else "enforced",
         "admin_auth": "open" if svc.settings.auth_disabled else "enforced",
+        # "bonc" once BONC_AUTH_VERIFY_URL is set: .NET bearer tokens are accepted.
+        "admin_verifier": "bonc" if current_app.extensions.get("bonc_auth") is not None
+                          else "local",
     }
     if svc.settings.mode == "sync":
         body.update(model_ready=svc.models.ready, model_version=svc.models.version,
@@ -1219,7 +1222,7 @@ def admin_health():
 
 
 def _require_admin():
-    """None if the caller is an admin (logged-in session or X-Admin-Token), else an error response."""
+    """None if the caller is an admin (BONC token, X-Admin-Token or AUTH_DISABLED), else an error response."""
     from app.admin_auth import check_admin
     return check_admin()
 
