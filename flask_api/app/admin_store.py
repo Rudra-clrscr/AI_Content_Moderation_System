@@ -96,8 +96,12 @@ class AdminStore:
         client_ip was added. Additive and idempotent: ALTER TABLE ADD COLUMN on SQLite is a
         metadata-only change, existing rows read NULL, and nothing here rewrites or drops.
         """
+        # original_decision / overridden_*: an admin overturning a verdict. `decision` becomes
+        # the admin's, so every count and filter follows it; the model's own is kept here.
         wanted = {"moderation_log": {"client_ip": "TEXT", "client_network": "TEXT",
-                                     "modality": "TEXT"}}
+                                     "modality": "TEXT", "original_decision": "TEXT",
+                                     "overridden_by": "TEXT", "overridden_at": "REAL",
+                                     "override_reason": "TEXT"}}
         for table, columns in wanted.items():
             have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
             if not have:
@@ -287,7 +291,8 @@ class AdminStore:
     EXPORT_COLUMNS = [
         ("created_at", "Timestamp"), ("request_id", "Request ID"), ("user_id", "User"),
         ("content_id", "Content ID"), ("content_type", "Surface"), ("modality", "Model"),
-        ("decision", "Decision"),
+        ("decision", "Decision"), ("original_decision", "Model's decision (if overridden)"),
+        ("overridden_by", "Overridden by"), ("override_reason", "Override reason"),
         ("severity", "Severity"), ("risk_score", "Risk score"), ("decided_by", "Decided by"),
         ("predicted_label", "Predicted label"), ("model_version", "Model version"),
         ("latency_ms", "Latency (ms)"), ("client_ip", "Device IP"),
@@ -374,7 +379,8 @@ class AdminStore:
                        decision, decided_by, severity, risk_score, predicted_label,
                        feedback_title, feedback_message, content_preview,
                        model_version, latency_ms, client_ip, client_network,
-                       created_at, decided_at, raw_result, modality
+                       created_at, decided_at, raw_result, modality,
+                       original_decision, overridden_by, overridden_at, override_reason
                 FROM moderation_log
                 {where_sql}
                 ORDER BY created_at DESC, id DESC
@@ -589,6 +595,56 @@ class AdminStore:
                 except Exception:
                     pass
             return item
+
+    def find_request_id(self, content_type: str, content_id: str) -> str | None:
+        """The newest decision recorded for one piece of content, by the platform's own ids."""
+        with self._tx() as db:
+            row = db.execute(
+                "SELECT request_id FROM moderation_log WHERE content_type = ? AND content_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (content_type, str(content_id))).fetchone()
+            return row["request_id"] if row else None
+
+    def override_decision(self, request_id: str, decision: str, *, by: str,
+                          reason: str) -> dict | None:
+        """An admin overturns a verdict. None if there is no such request.
+
+        `decision` becomes the admin's, so the log's filters, its counts and the
+        repeat-offender rule all follow it: a refusal an admin approved on review no longer
+        counts against the member. The model's verdict is kept in `original_decision`, set
+        once - a second override replaces the first, never what the model said. Overriding
+        back to the model's own verdict is an undo, and clears the override.
+        """
+        with self._tx() as db:
+            row = db.execute("SELECT decision, original_decision FROM moderation_log "
+                             "WHERE request_id = ?", (request_id,)).fetchone()
+            if row is None:
+                return None
+            model_said = row["original_decision"] or row["decision"]
+            if decision.lower() == str(model_said).lower():
+                db.execute("UPDATE moderation_log SET decision = ?, original_decision = NULL, "
+                           "overridden_by = NULL, overridden_at = NULL, override_reason = NULL "
+                           "WHERE request_id = ?", (model_said, request_id))
+            else:
+                db.execute("UPDATE moderation_log SET decision = ?, original_decision = ?, "
+                           "overridden_by = ?, overridden_at = ?, override_reason = ? "
+                           "WHERE request_id = ?",
+                           (decision, model_said, by, time.time(), reason or None, request_id))
+        return self.get_moderation_log_by_request_id(request_id)
+
+    def clear_override(self, request_id: str) -> dict | None:
+        """Put the model's verdict back. None if there is no such request."""
+        with self._tx() as db:
+            row = db.execute("SELECT decision, original_decision FROM moderation_log "
+                             "WHERE request_id = ?", (request_id,)).fetchone()
+            if row is None:
+                return None
+            if row["original_decision"]:
+                db.execute("UPDATE moderation_log SET decision = original_decision, "
+                           "original_decision = NULL, overridden_by = NULL, "
+                           "overridden_at = NULL, override_reason = NULL WHERE request_id = ?",
+                           (request_id,))
+        return self.get_moderation_log_by_request_id(request_id)
 
     def clear_moderation_logs(self) -> int:
         with self._tx() as db:
