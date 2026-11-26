@@ -34,8 +34,9 @@ GraphQL and no gRPC anywhere in this project.
 
 ## 0. Every endpoint at a glance
 
-All 50 operations in Swagger (`/docs`), plus four the admin dashboard uses that are not in
-Swagger yet (marked †). Each links to its full description below.
+All 54 operations. Every one is also in Swagger (`/docs`), where it can be tried out, and
+Swagger and this list hold exactly the routes the service serves. Each links to its full
+description below.
 
 **Who may call it** (details in [Authentication](#authentication--four-tiers)):
 
@@ -72,7 +73,7 @@ Swagger yet (marked †). Each links to its full description below.
 | Method | Path | What it does | Who |
 |---|---|---|---|
 | `GET` | [`/v1/admin/auth/me`](#6-admin--authentication) | Says who the request is signed in as (the BONC `UserRowId` and role). The quickest check that a BONC token works. | admin |
-| `GET` | [`/v1/admin/health`](#get-v1adminhealth-) † | Runs each model and database once and reports what actually works, plus request traffic for the last hour and day. Powers the dashboard's health panel. | admin |
+| `GET` | [`/v1/admin/health`](#get-v1adminhealth) | Runs each model and database once and reports what actually works, plus request traffic for the last hour and day. Powers the dashboard's health panel. | admin |
 
 ### Admin: moderation levels
 
@@ -136,9 +137,9 @@ Swagger yet (marked †). Each links to its full description below.
 | `PUT` | [`/v1/admin/policy/exemplars`](#exemplars--refuse-things-like-this) | Marks or unmarks pictures that way, or with `preview` shows what a mark would catch first. | admin |
 | `POST` | [`/v1/admin/policy/preview`](#post-v1adminpolicypreview) | Ranks the stored pictures against candidate phrasings, to try wording before saving it. Changes nothing. | admin |
 | `POST` | [`/v1/admin/policy/reset`](#post-v1adminpolicyreset) | Puts the policy back to how it shipped. | admin |
-| `GET` | [`/v1/admin/policy/sync`](#get-v1adminpolicysync-) † | For each subject, says whether its rule and its Fine-Tuning category agree on refuse or allow. | admin |
-| `POST` | [`/v1/admin/policy/sync/{name}`](#post-v1adminpolicysyncname-) † | Settles one disagreement by keeping either the rule's verdict or the pictures'. | admin |
-| `POST` | [`/v1/admin/policy/test-image`](#post-v1adminpolicytest-image-) † | Runs one picture through the live visual check and says whether it would be refused, by which rule, and how close the others came. Stores nothing. | admin |
+| `GET` | [`/v1/admin/policy/sync`](#get-v1adminpolicysync) | For each subject, says whether its rule and its Fine-Tuning category agree on refuse or allow. | admin |
+| `POST` | [`/v1/admin/policy/sync/{name}`](#post-v1adminpolicysyncname) | Settles one disagreement by keeping either the rule's verdict or the pictures'. | admin |
+| `POST` | [`/v1/admin/policy/test-image`](#post-v1adminpolicytest-image) | Runs one picture through the live visual check and says whether it would be refused, by which rule, and how close the others came. Stores nothing. | admin |
 
 ---
 
@@ -902,9 +903,9 @@ them from published content:
 If the model fails to load at boot, the process **keeps serving**: `/ready` and
 `/v1/moderate` return `503` until an admin reload succeeds, rather than crash-looping.
 
-## `GET /v1/admin/health` †
+## `GET /v1/admin/health`
 
-**Auth:** admin. **Not in Swagger yet**; the dashboard's health panel calls it.
+**Auth:** admin. The dashboard's health panel calls it; in Swagger under **Admin: health**.
 
 `/ready` says what is **loaded**; this says what **works**. It exercises each part once —
 one ordinary sentence through the text model, one blank picture through the vision encoder
@@ -1639,9 +1640,9 @@ phrasings, then a dot product.
 Back to the policy as it shipped, from the startup snapshot. `409 no_default` when
 nothing has been edited yet, so there is nothing to go back to.
 
-## `GET /v1/admin/policy/sync` †
+## `GET /v1/admin/policy/sync`
 
-**Not in Swagger yet**; the dashboard's policy screen calls it.
+The dashboard's policy screen calls it.
 
 A subject such as `physique` can exist on two screens: as a **rule** here (refuse or
 allow) and as a **category** on Image Fine-Tuning (default action block or allow, plus its
@@ -1666,9 +1667,9 @@ pictures). This says, for every subject on either screen, whether the two halves
 every one of its pictures does. A mix is not a disagreement: 42 of 72 pictures refused is an
 admin's per-picture judgement and is left alone.
 
-## `POST /v1/admin/policy/sync/<name>` †
+## `POST /v1/admin/policy/sync/<name>`
 
-**Not in Swagger yet.** Settles one disagreement:
+Settles one disagreement:
 
 ```json
 { "keep": "rule" }        // move the category and its pictures to the rule's verdict
@@ -1686,9 +1687,9 @@ Returns `{status: "ok", kept, …, sync}`, where `sync` is the fresh `GET /sync`
 | `409 policy_conflict` | keeping the pictures' verdict contradicts another rule |
 | `500 sync_failed` / `policy_build_failed` | the change could not be applied; nothing half-done is left live |
 
-## `POST /v1/admin/policy/test-image` †
+## `POST /v1/admin/policy/test-image`
 
-**Not in Swagger yet**; the dashboard's "Test a picture" button calls it.
+The dashboard's "Test a picture" button calls it.
 
 Runs one picture through the **live** visual check and says what it would do, and why.
 It is the same decision an upload gets, not an imitation of it. **Nothing is stored**: no
@@ -1738,12 +1739,11 @@ The full list, with what each endpoint does and who may call it, is
 
 | Source file | Flask blueprint | Endpoints |
 |---|---|---|
-| `app/api.py` | `moderation` | `/v1/moderate`, `/v1/moderate/media`, `/v1/moderate/unified`, `/v1/moderate/<request_id>`, `/health`, `/ready`, `/demo`, `/articles…`, `/docs`, `/openapi.yaml`, `/v1/admin/health` †, `/v1/admin/moderation-levels…`, `/v1/admin/model/reload` |
+| `app/api.py` | `moderation` | `/v1/moderate`, `/v1/moderate/media`, `/v1/moderate/unified`, `/v1/moderate/<request_id>`, `/health`, `/ready`, `/demo`, `/articles…`, `/docs`, `/openapi.yaml`, `/v1/admin/health`, `/v1/admin/moderation-levels…`, `/v1/admin/model/reload` |
 | `app/admin_auth.py` | `admin_auth` | `/v1/admin/auth/me`, `/v1/admin/moderation-settings`, `/v1/admin/moderation-logs…` (including export, repeat offenders and overrides), `/v1/admin/blocked-clients…` |
 | `app/admin_images.py` | `admin_images` | `/v1/admin/images…` |
-| `app/admin_policy.py` | `admin_policy` | `/v1/admin/policy/labels…`, `/v1/admin/policy/exemplars`, `/v1/admin/policy/preview`, `/v1/admin/policy/reset`, `/v1/admin/policy/sync…` †, `/v1/admin/policy/test-image` † |
+| `app/admin_policy.py` | `admin_policy` | `/v1/admin/policy/labels…`, `/v1/admin/policy/exemplars`, `/v1/admin/policy/preview`, `/v1/admin/policy/reset`, `/v1/admin/policy/sync…`, `/v1/admin/policy/test-image` |
 
-† not in Swagger (`docs/openapi.yaml`) yet.
 
 ## 12.2 Enums
 
