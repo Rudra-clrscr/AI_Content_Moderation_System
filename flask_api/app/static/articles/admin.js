@@ -151,6 +151,14 @@
     if (!t || adminAuth.mode === "open") return {};
     return adminAuth.mode === "bonc" ? { Authorization: `Bearer ${t}` } : { "X-Admin-Token": t };
   }
+  // The Articles tab asks the moderation log whether an admin overturned its decisions
+  // (articles.js syncOverrides), with whatever sign-in this dashboard holds.
+  window.boncAdminHeaders = authHeaders;
+  /** Tell the Articles tab, which plays the BONC platform here, that a verdict changed. */
+  function announceOverride(res) {
+    try { window.dispatchEvent(new CustomEvent("bonc:decision-overridden", { detail: res })); }
+    catch { /* an old browser without CustomEvent: the tab catches up when next opened */ }
+  }
   const SIGNED_OUT = "Your sign-in has ended or the token was not accepted. Sign in again.";
 
   /** Load admin-only pictures. An <img src> cannot carry a token header, so each one marked
@@ -2890,6 +2898,7 @@
               `/v1/admin/moderation-logs/${encodeURIComponent(row.request_id)}/override`,
               { decision: approve ? "approved" : "reject",
                 reason: back.querySelector("#ovr-reason").value.trim() });
+            announceOverride(res);
             close();
             await loadLogs(res.overridden
               ? `Overridden: this ${row.content_type || "submission"} is now ${String(res.Action).toUpperCase()} (the model said ${String(res.model_decision).toUpperCase()}).`
@@ -2911,6 +2920,7 @@
         try {
           const res = await call("DELETE",
             `/v1/admin/moderation-logs/${encodeURIComponent(row.request_id)}/override`);
+          announceOverride(res);
           await loadLogs(`Override undone: back to ${String(res.Action).toUpperCase()}, as the model decided.`, true);
         } catch (e) {
           if (e instanceof SessionExpired) return loginView(e.message);
