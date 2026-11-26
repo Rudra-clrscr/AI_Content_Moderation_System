@@ -2825,6 +2825,99 @@
         }
       }
 
+      // ---- an admin overturning a decision ----------------------------------------------
+      // The record changes here - the row's verdict, the counts, the member's repeat-offender
+      // tally. Publishing is the BONC platform's job, and the dialog says so, because "Approve"
+      // on a screen like this otherwise reads as "it is live now".
+
+      const WORD = { allow: "approved", revise: "sent back to revise", reject: "refused" };
+
+      /** One line: what the model said, who overturned it, when and why. "" if nobody did. */
+      function overrideNote(row) {
+        if (!row.original_decision) return "";
+        // No id when nobody signed in to BONC: a script on the admin token, or a local demo
+        // with sign-in switched off.
+        const by = row.overridden_by ? `by ${row.overridden_by}` : "without a BONC sign-in";
+        return `The model ${WORD[String(row.original_decision).toLowerCase()] || row.original_decision}`
+          + ` this; overridden ${by}`
+          + (row.overridden_at ? ` on ${formatTime(row.overridden_at)}` : "")
+          + (row.override_reason ? ` — “${row.override_reason}”` : "");
+      }
+
+      function overrideModal(row) {
+        const dec = (row.decision || "").toLowerCase();
+        const approve = dec !== "allow";           // refused or sent back -> approve; approved -> refuse
+        const back = document.createElement("div");
+        back.className = "backdrop";
+        back.innerHTML = `
+          <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="ovr-title">
+            <div class="modal-head"><h2 id="ovr-title">${approve ? "Approve this content?" : "Refuse this content?"}</h2>
+              <button class="btn-link" id="ovr-x" aria-label="Close" type="button">✕</button></div>
+            <div class="modal-body">
+              <div id="ovr-msg" class="adm-msg" role="status"></div>
+              <p style="margin-top:0;">The model <b>${esc(WORD[dec] || dec)}</b> this
+                ${esc(row.content_type || "submission")}${row.content_id ? ` (<code>${esc(row.content_id)}</code>)` : ""}
+                from <code>${esc(row.user_id || "anonymous")}</code>.</p>
+              <div class="detail-content-box" style="max-height:120px; overflow:auto;">${esc(row.content_preview || "(no preview)")}</div>
+              <p class="hint">${approve
+                ? "Your decision replaces the model's in the audit log, and this refusal stops counting towards the member's repeat-offender record."
+                : "Your decision replaces the model's in the audit log, and counts as a refusal on the member's record."}
+                The BONC platform publishes the content, or keeps it refused, from this decision —
+                this screen does not publish anything by itself. You can undo it later.</p>
+              <div class="field">
+                <label for="ovr-reason">Reason</label>
+                <input class="input" id="ovr-reason" autocomplete="off" maxlength="1000"
+                       placeholder="${approve ? "e.g. quoting a news headline, not abuse" : "e.g. a scam the model missed"}">
+                <p class="hint">Shown to the next admin who reads this log.</p>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-outline" id="ovr-cancel" type="button">Cancel</button>
+              <button class="btn btn-primary ${approve ? "ovr-approve" : "adm-danger"}" id="ovr-go" type="button">${approve ? "Approve" : "Refuse"}</button>
+            </div>
+          </div>`;
+        document.body.appendChild(back);
+        const close = () => back.remove();
+        back.querySelector("#ovr-x").addEventListener("click", close);
+        back.querySelector("#ovr-cancel").addEventListener("click", close);
+        back.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+        back.querySelector("#ovr-reason").focus();
+        back.querySelector("#ovr-go").addEventListener("click", async () => {
+          const foot = back.querySelector(".modal-foot");
+          foot.innerHTML = `<button class="btn btn-primary" disabled><span class="spinner"></span> Saving…</button>`;
+          try {
+            const res = await call("POST",
+              `/v1/admin/moderation-logs/${encodeURIComponent(row.request_id)}/override`,
+              { decision: approve ? "approved" : "reject",
+                reason: back.querySelector("#ovr-reason").value.trim() });
+            close();
+            await loadLogs(res.overridden
+              ? `Overridden: this ${row.content_type || "submission"} is now ${String(res.Action).toUpperCase()} (the model said ${String(res.model_decision).toUpperCase()}).`
+              : `Back to the model's verdict: ${String(res.Action).toUpperCase()}.`, true);
+          } catch (e) {
+            if (e instanceof SessionExpired) { close(); return loginView(e.message); }
+            const m = back.querySelector("#ovr-msg");
+            m.className = "adm-msg err";
+            m.textContent = e.message;
+            foot.innerHTML = `<button class="btn btn-outline" id="ovr-cancel2" type="button">Cancel</button>`;
+            back.querySelector("#ovr-cancel2").addEventListener("click", close);
+          }
+        });
+      }
+
+      async function undoOverride(row) {
+        const model = WORD[String(row.original_decision || "").toLowerCase()] || row.original_decision;
+        if (!window.confirm(`Undo the override? The model's verdict stands again: ${model}.`)) return;
+        try {
+          const res = await call("DELETE",
+            `/v1/admin/moderation-logs/${encodeURIComponent(row.request_id)}/override`);
+          await loadLogs(`Override undone: back to ${String(res.Action).toUpperCase()}, as the model decided.`, true);
+        } catch (e) {
+          if (e instanceof SessionExpired) return loginView(e.message);
+          render(e.message);
+        }
+      }
+
       /** A Date as the value a datetime-local input takes, in the admin's own time zone. */
       function localInput(d) {
         const pad = (n) => String(n).padStart(2, "0");
@@ -3044,7 +3137,8 @@
                         ? `<span class="blocked-badge" title="This member's submissions are being refused">🚫 blocked</span>` : ""}</td>
                       <td><span class="surface-badge">${esc(row.content_type)}</span>
                         <span class="modality-badge ${esc(row.modality || "text")}">${row.modality === "image" ? "🖼 image" : "✎ text"}</span></td>
-                      <td><span class="badge-dec ${esc(dec)}">${esc(dec.toUpperCase())}</span></td>
+                      <td><span class="badge-dec ${esc(dec)}">${esc(dec.toUpperCase())}</span>${row.original_decision
+                        ? `<span class="override-badge" title="${esc(overrideNote(row))}">✎ by admin</span>` : ""}</td>
                       <td><span class="badge-sev ${esc(sev)}">${esc(sev)}</span></td>
                       <td><span class="score-pill ${scoreClass}">${esc(score)}</span></td>
                       <td style="font-size:12px; font-family:monospace; color:#475569;">${esc(row.decided_by || "—")}</td>
@@ -3075,6 +3169,13 @@
                       <td><div class="log-preview-text" title="${esc(row.content_preview || "")}">${esc(row.content_preview || "—")}</div></td>
                       <td style="white-space:nowrap;">
                         <button class="btn btn-outline log-inspect-btn" type="button" data-id="${esc(row.request_id)}" style="padding:4px 8px; font-size:12px;">Inspect</button>
+                        ${row.original_decision
+                          ? `<button class="btn btn-outline log-undo-btn" type="button" data-id="${esc(row.request_id)}"
+                                style="padding:4px 8px; font-size:12px;"
+                                title="${esc(overrideNote(row))}">Undo override</button>`
+                          : `<button class="btn btn-outline log-override-btn ${dec === "allow" ? "to-reject" : "to-approve"}" type="button"
+                                data-id="${esc(row.request_id)}" style="padding:4px 8px; font-size:12px;"
+                                title="${dec === "allow" ? "Refuse this even though the model approved it" : "Approve this even though the model refused it"}">${dec === "allow" ? "Reject" : "Approve"}</button>`}
                         ${row.client_ip || member ? `<button class="btn btn-outline log-block-btn" type="button"
                               data-ip="${esc(row.client_ip || "")}" data-net="${esc(row.client_network || "")}"
                               data-member="${esc(member)}"
@@ -3209,6 +3310,11 @@
             if (item) logDetailModal(item);
           });
         });
+        const rowOf = (b) => (logsData.logs || []).find((x) => x.request_id === b.dataset.id);
+        root.querySelectorAll(".log-override-btn").forEach((b) =>
+          b.addEventListener("click", () => { const r = rowOf(b); if (r) overrideModal(r); }));
+        root.querySelectorAll(".log-undo-btn").forEach((b) =>
+          b.addEventListener("click", () => { const r = rowOf(b); if (r) undoOverride(r); }));
       }
 
       function logDetailModal(item) {
@@ -3231,6 +3337,11 @@
                 <span class="surface-badge">${esc(item.content_type)}</span>
                 <span style="font-size:12px; color:var(--muted); margin-left:auto;">${esc(formatTime(item.decided_at || item.created_at))}</span>
               </div>
+
+              ${item.original_decision ? `
+                <div class="override-box">
+                  <b>Overridden by an admin.</b> ${esc(overrideNote(item))}
+                </div>` : ""}
 
               <div class="detail-grid">
                 <div class="detail-item">
@@ -3263,7 +3374,8 @@
               <div class="detail-content-box">${esc(item.content_preview || "(Empty content)")}</div>
 
               ${item.feedback_title || item.feedback_message ? `
-                <div class="detail-lbl" style="margin-bottom:6px; color:#b91c1c;">Author Feedback Triggered</div>
+                <div class="detail-lbl" style="margin-bottom:6px; color:#b91c1c;">${item.original_decision
+                  ? "Author feedback from the model's original decision" : "Author Feedback Triggered"}</div>
                 <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px; margin-bottom:14px; font-size:13px; color:#991b1b;">
                   <b>${esc(item.feedback_title || "Policy Feedback")}</b>
                   <p style="margin:4px 0 0;">${esc(item.feedback_message || "")}</p>
@@ -3274,6 +3386,10 @@
               <pre class="detail-json-pre"><code>${esc(JSON.stringify(item.raw_result || item, null, 2))}</code></pre>
             </div>
             <div class="modal-foot">
+              ${item.original_decision
+                ? `<button class="btn btn-outline" id="det-undo" type="button">Undo override</button>`
+                : `<button class="btn btn-outline ${dec === "allow" ? "adm-danger" : ""}" id="det-override" type="button">${
+                    dec === "allow" ? "Reject (override)" : "Approve (override)"}</button>`}
               <button class="btn btn-primary" id="det-close-btn" type="button">Close</button>
             </div>
           </div>
@@ -3282,6 +3398,10 @@
         const close = () => back.remove();
         back.querySelector("#det-close-x").addEventListener("click", close);
         back.querySelector("#det-close-btn").addEventListener("click", close);
+        const ovr = back.querySelector("#det-override");
+        if (ovr) ovr.addEventListener("click", () => { close(); overrideModal(item); });
+        const undo = back.querySelector("#det-undo");
+        if (undo) undo.addEventListener("click", () => { close(); undoOverride(item); });
         back.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
       }
 

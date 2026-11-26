@@ -1040,3 +1040,13 @@ textarea.input { resize: vertical; min-height: 96px; }
 .logs-offender-acts .btn-xs + .btn-xs, .logs-offender-acts .btn-xs + .blocked-badge { margin-left: 6px; }
 .btn-xs.btn-xs-danger { color: #fff; background: #dc2626; border-color: #dc2626; }
 .btn-xs.btn-xs-danger:hover:not(:disabled) { background: #b91c1c; border-color: #b91c1c; }
+
+/* An admin overturning a decision (Moderation Logs). */
+.override-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: #ede9fe; color: #5b21b6; border: 1px solid #ddd6fe; font-size: 10.5px; font-weight: 700; white-space: nowrap; cursor: help; }
+.override-box { background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 13px; color: #4c1d95; }
+.log-override-btn.to-approve { color: #15803d; border-color: #bbf7d0; }
+.log-override-btn.to-approve:hover:not(:disabled) { background: #f0fdf4; }
+.log-override-btn.to-reject { color: var(--danger, #b91c1c); border-color: #fecaca; }
+.log-override-btn.to-reject:hover:not(:disabled) { background: #fef2f2; }
+.btn.ovr-approve { background: #16a34a; border-color: #16a34a; color: #fff; }
+.btn.ovr-approve:hover:not(:disabled) { background: #15803d; border-color: #15803d; }
