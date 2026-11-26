@@ -91,6 +91,8 @@ tags:
     description: The product. Submit content, get a decision.
   - name: "Admin: auth"
     description: Who a request is signed in as. Sign-in itself happens on BONC (.NET).
+  - name: "Admin: health"
+    description: Whether each model and database actually works right now, and recent traffic.
   - name: "Admin: levels"
     description: How strictly each surface is moderated.
   - name: "Admin: audit"
@@ -347,7 +349,7 @@ paths:
                   type: string
                   description: Optional. The member who submitted, as your platform identifies them. Recorded in the moderation log so admins can see repeat offenders; never affects the decision, but a member an admin has blocked is refused with `403 member_blocked`. Also accepted as userId / UserId or an X-User-Id header.
             encoding:
-              file: { contentType: image/png, image/jpeg, application/pdf, video/mp4 }
+              file: { contentType: "image/png, image/jpeg, application/pdf, video/mp4" }
       responses:
         "200":
           description: |
@@ -687,11 +689,11 @@ paths:
               schema:
                 type: object
                 properties:
-                  admin_id: { type: string, nullable: true, description: The .NET adminId; null for a script or open access. }
-                  role: { type: string, nullable: true }
-                  session_id: { type: string, nullable: true }
+                  admin_id: { type: string, nullable: true, description: "The admin's BONC `UserRowId`; null for a script or open access." }
+                  role: { type: string, nullable: true, description: "The admin role that let them in: `Admin` or `SuperAdmin`." }
+                  session_id: { type: string, nullable: true, description: "Always null with `BONC_AUTH_STYLE=user-detail` - the .NET token carries none." }
                   via: { type: string, enum: [bonc, admin_token, open] }
-              example: { admin_id: "7f3c2a", role: Admin, session_id: "s-91d0", via: bonc }
+              example: { admin_id: "01e94826-352a-4f6c-993b-43ec8fbd9453", role: SuperAdmin, session_id: null, via: bonc }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403":
           description: '`not_admin` - a valid BONC sign-in, but not an admin.'
@@ -699,6 +701,74 @@ paths:
         "503":
           description: '`auth_unavailable` - the .NET verification endpoint could not be reached.'
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  # ---- Admin: health ----------------------------------------------------------------
+  /v1/admin/health:
+    get:
+      tags: ["Admin: health"]
+      summary: What actually works right now
+      operationId: adminHealth
+      description: |
+        `/ready` says what is **loaded**; this says what **works**. Each part is exercised
+        once: one ordinary sentence through the text model, one blank picture through the
+        vision encoder and through OCR, and a count from each database. A model can be loaded
+        and still fail on every call, which is exactly what an admin cannot see while uploads
+        quietly fail. Traffic comes from the audit log, so "no requests in the last hour" is
+        as visible as "requests failing".
+
+        Each check is `ok`, `off` (switched off in settings) or `down`. The overall `status`
+        is `down` when the text model is down, `degraded` when anything else is, otherwise
+        `ok`. Takes a second or two, because it really runs the models.
+      security: [{ BoncAdmin: [] }]
+      responses:
+        "200":
+          description: One entry per check, plus traffic.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok, degraded, down] }
+                  checked_at: { type: number, description: Epoch seconds. }
+                  uptime_s: { type: integer }
+                  mode: { type: string, enum: [sync, async] }
+                  checks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        status: { type: string, enum: [ok, off, down] }
+                        detail: { type: string }
+                        ms: { type: number, description: How long the check took. }
+                  traffic:
+                    type: object
+                    properties:
+                      last_hour: { $ref: '#/components/schemas/TrafficWindow' }
+                      last_day: { $ref: '#/components/schemas/TrafficWindow' }
+                  service_auth: { type: string, enum: [open, enforced] }
+                  moderation_disabled_for: { type: array, items: { type: string } }
+              example:
+                status: ok
+                checked_at: 1764150000.0
+                uptime_s: 3600
+                mode: sync
+                checks:
+                  - { name: Text moderation model, status: ok, detail: "bonc-v9-ver3 (onnx) - scored a test sentence", ms: 41.2 }
+                  - { name: Image moderation model, status: ok, detail: "CPUExecutionProvider - 16 rules, probe loaded", ms: 180.5 }
+                  - { name: OCR (text in images), status: ok, detail: reads writing inside pictures, ms: 95.0 }
+                  - { name: Audit log database, status: ok, detail: "12,345 moderation log rows", ms: 2.1 }
+                  - { name: Image store database, status: ok, detail: 17 image categories, ms: 1.4 }
+                traffic:
+                  last_hour:
+                    window_s: 3600
+                    text: { requests: 42, rejected: 5, latency_ms_avg: 88.1, latency_ms_p95: 210.4 }
+                    image: { requests: 7, rejected: 1, latency_ms_avg: 950.2, latency_ms_p95: 1800.0 }
+                    last_decision_at: 1764149990.0
+                  last_day: { window_s: 86400, text: { requests: 610, rejected: 48, latency_ms_avg: 91.0, latency_ms_p95: 230.0 }, image: { requests: 95, rejected: 12, latency_ms_avg: 990.0, latency_ms_p95: 1900.0 }, last_decision_at: 1764149990.0 }
+                service_auth: open
+                moderation_disabled_for: []
+        "401": { $ref: '#/components/responses/Unauthorized' }
 
   # ---- Admin: levels ----------------------------------------------------------------
   /v1/admin/moderation-levels:
@@ -887,9 +957,9 @@ paths:
             # Same reason as the per-surface PUT: pick one of these rather than typing the
             # body. This endpoint writes EVERY surface at once - see the description.
             examples:
-              allStrict: { summary: Every surface on, strict, value: { enabled: true, level: strict } }
-              allMedium: { summary: Every surface on, medium, value: { enabled: true, level: medium } }
-              allLenient: { summary: Every surface on, lenient, value: { enabled: true, level: lenient } }
+              allStrict: { summary: "Every surface on, strict", value: { enabled: true, level: strict } }
+              allMedium: { summary: "Every surface on, medium", value: { enabled: true, level: medium } }
+              allLenient: { summary: "Every surface on, lenient", value: { enabled: true, level: lenient } }
               allOff:
                 summary: Stop moderating EVERYTHING (read the description first)
                 value: { enabled: false, level: strict }
@@ -973,7 +1043,7 @@ paths:
                 type: object
                 properties:
                   logs: { type: array, items: { type: object } }
-                  total: { type: integer, description: Rows matching the filters, not rows returned. }
+                  total: { type: integer, description: "Rows matching the filters, not rows returned." }
                   limit: { type: integer }
                   offset: { type: integer }
                   stats:
@@ -2094,6 +2164,171 @@ paths:
         "409":
           description: '`no_default` — nothing has been edited yet, so there is nothing to go back to.'
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
+
+  /v1/admin/policy/sync:
+    get:
+      tags: ["Admin: policy"]
+      summary: Do the rules and the Image Fine-Tuning categories agree?
+      operationId: getPolicySync
+      description: |
+        A subject such as `physique` can exist on two screens: as a **rule** here (refuse or
+        allow) and as a **category** on Image Fine-Tuning (default action block or allow,
+        plus its pictures). This lists every subject on either screen and whether the two
+        halves agree.
+
+        `state` is `in_sync`, `disagree`, `rule_only` (a rule with no category) or
+        `pictures_only` (a category with no rule). They **disagree** when the category's
+        default points the other way from the rule, or when every one of its pictures does.
+        A mix is not a disagreement: 42 of 72 pictures refused is an admin's per-picture
+        judgement and is left alone.
+      security: [{ BoncAdmin: [] }]
+      responses:
+        "200":
+          description: Every subject and its state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicySync' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/admin/policy/sync/{name}:
+    post:
+      tags: ["Admin: policy"]
+      summary: Settle one disagreement between a rule and its pictures
+      operationId: resolvePolicySync
+      description: |
+        > **Changes server state.** `keep: rule` moves the category and its pictures to the
+        > rule's verdict; `keep: pictures` rewrites the rule's verdict and rebuilds the policy.
+
+        With `keep: pictures`, flipping the rule can clash with another rule: that is the
+        same `409 policy_conflict` as editing a rule, answered by resending with `resolve`.
+      security: [{ BoncAdmin: [] }]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string }, example: physique }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [keep]
+              properties:
+                keep: { type: string, enum: [rule, pictures], description: Whose verdict stands. }
+                resolve: { type: string, enum: [refuse, allow], description: "Only after a `409 policy_conflict`: which side of the clash stands." }
+            examples:
+              rule: { summary: Move the pictures to the rule's verdict, value: { keep: rule } }
+              pictures: { summary: Change the rule to the pictures' verdict, value: { keep: pictures } }
+      responses:
+        "200":
+          description: Settled. `sync` is the fresh state of every subject.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  kept: { type: string, enum: [rule, pictures] }
+                  fine_tuning: { type: object, description: "With `keep: rule` - what moved on Image Fine-Tuning." }
+                  policy_rule: { type: object, description: "With `keep: pictures` - the rule as saved." }
+                  sync: { $ref: '#/components/schemas/PolicySync' }
+        "400":
+          description: '`bad_keep` - keep is not `rule` or `pictures`.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404":
+          description: '`not_both` - the subject lacks either a rule or a category, so there is nothing to sync.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "409":
+          description: '`policy_conflict` - keeping the pictures'' verdict contradicts another rule. Resend with `resolve`.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "500":
+          description: '`sync_failed` or `policy_build_failed` - the change could not be applied.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /v1/admin/policy/test-image:
+    post:
+      tags: ["Admin: policy"]
+      summary: Would this picture be refused, and by what?
+      operationId: testImage
+      description: |
+        Runs one picture through the **live** visual check, the same decision an upload gets,
+        and says what it would do and why. **Nothing is stored**: no audit row, no moderation
+        result, and the picture never reaches the dataset.
+
+        **It does not read writing in the picture.** On a real upload OCR runs as well and
+        the text is moderated as text, so a picture can publish here and still be refused for
+        its caption.
+      security: [{ BoncAdmin: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: The picture to test. }
+      responses:
+        "200":
+          description: The verdict and every rule's score.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checked: { type: boolean }
+                  filename: { type: string }
+                  verdict: { type: string, enum: [refuse, publish] }
+                  decided_by:
+                    type: string
+                    nullable: true
+                    enum: [policy, probe, exemplar, allow_exemplar, null]
+                    description: "What refused it: a written rule (`policy`), the trained probe, or a \"refuse things like this\" mark (`exemplar`). `allow_exemplar` when an \"allow\" mark overruled a rule."
+                  rule: { type: string, nullable: true, description: The deciding rule. }
+                  category: { type: string, nullable: true, description: The category it reports under. }
+                  author_sees: { type: string, nullable: true, description: The category name the author would be shown. }
+                  top_label: { type: string }
+                  labels:
+                    type: array
+                    description: Every rule's score, highest first, so you can see how close the others came.
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        score: { type: number }
+                        unsafe: { type: boolean }
+                        bar: { type: number, nullable: true, description: The score at which this rule refuses; null for allowing rules. }
+                        over: { type: boolean }
+                  reject_min: { type: number }
+                  note: { type: string }
+                  probe: { type: object, description: "The trained probe's view: `unsafe`, `bar`, `top_class`, `withheld`. Present when the probe is loaded." }
+                  exemplar: { type: object, description: "How close the nearest marked pictures were: `block`, `allow`, `bar`, `margin`, `matched`. Present when any mark came close." }
+              example:
+                checked: true
+                filename: gym.jpg
+                verdict: refuse
+                decided_by: policy
+                rule: physique
+                category: physique_display
+                author_sees: Physique display
+                top_label: physique
+                labels:
+                  - { name: physique, score: 0.81, unsafe: true, bar: 0.55, over: true }
+                  - { name: safe, score: 0.12, unsafe: false, bar: null, over: false }
+                reject_min: 0.9
+                note: Only the picture itself was judged. On a real upload any writing in the image is also read and moderated as text.
+        "400":
+          description: '`no_file` or `empty_file`.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "413":
+          description: '`media_too_large` - over the upload limit.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "422":
+          description: The file is not a readable image.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        "503":
+          description: '`visual_unavailable` or `media_not_checkable` - the visual check is not running, or failed on this picture.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         "500":
           description: '`policy_build_failed`'
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminError' } } }
@@ -2225,6 +2460,55 @@ components:
         longer do, and new references should use `Error`.
       allOf:
         - $ref: '#/components/schemas/Error'
+
+    TrafficWindow:
+      type: object
+      description: Requests over a window, from the audit log, for each model.
+      properties:
+        window_s: { type: number }
+        text: { $ref: '#/components/schemas/TrafficCounts' }
+        image: { $ref: '#/components/schemas/TrafficCounts' }
+        last_decision_at: { type: number, nullable: true, description: Epoch seconds of the newest decision. }
+
+    TrafficCounts:
+      type: object
+      properties:
+        requests: { type: integer }
+        rejected: { type: integer }
+        latency_ms_avg: { type: number, nullable: true }
+        latency_ms_p95: { type: number, nullable: true }
+
+    PolicySync:
+      type: object
+      properties:
+        subjects:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              rule:
+                type: object
+                properties:
+                  verdict: { type: string, enum: [refuse, allow] }
+              pictures:
+                type: object
+                properties:
+                  default_action: { type: string, enum: [block, allow] }
+                  images: { type: integer }
+                  allowed: { type: integer }
+                  blocked: { type: integer }
+                  display_name: { type: string, nullable: true }
+              state: { type: string, enum: [in_sync, disagree, rule_only, pictures_only] }
+        disagreeing: { type: array, items: { type: string }, description: Names whose state is `disagree`. }
+        pictures_only: { type: array, items: { type: string }, description: Names with a category but no rule. }
+      example:
+        subjects:
+          - { name: physique, rule: { verdict: refuse }, pictures: { default_action: block, images: 72, allowed: 30, blocked: 42, display_name: Physique display }, state: in_sync }
+          - { name: animal, rule: { verdict: allow }, pictures: { default_action: block, images: 12, allowed: 0, blocked: 12, display_name: Animals }, state: disagree }
+          - { name: house, rule: { verdict: refuse }, state: rule_only }
+        disagreeing: [animal]
+        pictures_only: []
 
     OverrideRequest:
       type: object
