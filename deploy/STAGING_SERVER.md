@@ -97,7 +97,7 @@ Values are not written down anywhere but the file itself. Read one with
 | `BONC_AUTH_STYLE` | `user-detail` | `user-detail` because the URL is .NET's existing `getUserDetail`: this service reads the user's roles itself. `verify-admin` (the default) is for a purpose-built .NET verifier. |
 | `BONC_AUTH_ADMIN_ROLES` | `Admin,SuperAdmin` | with `user-detail`, the .NET roles that count as admin. A signed-in user with neither gets `403 not_admin`. |
 | `BONC_AUTH_CACHE_SECONDS` | unset (60) | how long an accepted BONC token is trusted before .NET is asked again. A BONC sign-out takes up to this long to reach here. `0` checks every request. |
-| `ADMIN_CORS_ORIGINS` | `https://admin.boncnetwork.com` | the BONC admin frontend's origin(s), exact, comma-separated, if it calls `/v1/admin/*` from the browser. Origin only - a path (`/login`) or `*` is refused at startup. |
+| `ADMIN_CORS_ORIGINS` | `https://admin.boncnetwork.com,https://stageadmin.boncnetwork.com,http://localhost:5173` | the BONC admin frontend's origin(s), exact, comma-separated, if it calls `/v1/admin/*` from the browser. Origin only - a path (`/login`) or `*` is refused at startup. |
 | `TRUST_PROXY_HOPS` | `1` | nginx is in front, so the caller's address is read from `X-Forwarded-For`. Make it `2` once the .NET backend forwards the member's address. |
 | `DEMO_PAGE` | `0` | the browser demo is not served here |
 | `RESULT_SINK` | `log` | results go to the journal, not SQL Server |

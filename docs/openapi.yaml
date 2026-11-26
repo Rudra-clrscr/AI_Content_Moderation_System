@@ -1219,6 +1219,93 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "404": { $ref: '#/components/responses/NotFound' }
 
+  /v1/admin/moderation-logs/{request_id}/override:
+    post:
+      tags: ["Admin: audit"]
+      summary: Overturn a decision (approve a refusal, or refuse an approval)
+      operationId: overrideDecision
+      description: |
+        An admin's verdict replaces the model's **in this service's record**: the log, its
+        filters and counts, and the repeat-offender rule all follow it, so a refusal approved
+        on review no longer counts against the member. The model's verdict is kept as
+        `model_decision`.
+
+        **This does not publish anything.** The .NET side owns the content: after a `200`,
+        it publishes (`Action: "approved"`) or keeps the content refused (`Action: "reject"`).
+
+        A second override replaces the first; the model's verdict is never lost. Overriding
+        back to the model's own verdict is an undo. `request_id` is in every moderation
+        response; without it, use `POST /v1/admin/moderation-logs/override`.
+      security: [{ BoncAdmin: [] }]
+      parameters:
+        - { name: request_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OverrideRequest' }
+            examples:
+              approve: { summary: Approve a refusal, value: { decision: approved, reason: "Quoting a news headline, not abuse." } }
+              refuse: { summary: Refuse an approval, value: { decision: reject, reason: "Scam the model missed." } }
+      responses:
+        "200":
+          description: The verdict that now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverrideResult' }
+        "400": { description: "`bad_decision` - decision is not `approved` or `reject`.", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: ["Admin: audit"]
+      summary: Undo an override
+      operationId: clearDecisionOverride
+      description: The model's verdict stands again. Undoing a decision that was never overridden is not an error.
+      security: [{ BoncAdmin: [] }]
+      parameters:
+        - { name: request_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The verdict that now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverrideResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/admin/moderation-logs/override:
+    post:
+      tags: ["Admin: audit"]
+      summary: Overturn a decision, found by the platform's content id
+      operationId: overrideDecisionByContent
+      description: |
+        The same as `POST /v1/admin/moderation-logs/{request_id}/override`, for when the
+        platform kept its own ids rather than the `request_id`. Applies to the **newest**
+        decision recorded for that `content_type` + `content_id`.
+      security: [{ BoncAdmin: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OverrideRequest'
+                - type: object
+                  required: [content_type, content_id]
+                  properties:
+                    content_type: { $ref: '#/components/schemas/ContentType' }
+                    content_id: { type: string, example: "123" }
+            example: { content_type: article, content_id: "123", decision: approved, reason: "Fine on review." }
+      responses:
+        "200":
+          description: The verdict that now stands.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverrideResult' }
+        "400": { description: "`missing_content` (no content_type / content_id) or `bad_decision`.", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   # ---- Admin: blocking --------------------------------------------------------------
   /v1/admin/blocked-clients:
     get:
@@ -2138,6 +2225,46 @@ components:
         longer do, and new references should use `Error`.
       allOf:
         - $ref: '#/components/schemas/Error'
+
+    OverrideRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, reject]
+          description: "`approved` publishes it, `reject` keeps it refused. `Action` is accepted as the same field."
+        reason:
+          type: string
+          maxLength: 1000
+          description: Why, for the next admin reading the log. `Note` is accepted as the same field.
+
+    OverrideResult:
+      type: object
+      properties:
+        request_id: { type: string }
+        content_type: { type: string }
+        content_id: { type: string, nullable: true }
+        user_id: { type: string, nullable: true }
+        Action: { type: string, enum: [approved, reject, revise], description: "The verdict that now stands - what .NET acts on." }
+        decision: { type: string, enum: [approved, reject, revise], description: The same as `Action`. }
+        overridden: { type: boolean, description: Whether an admin's verdict is in force. }
+        model_decision: { type: string, enum: [approved, reject, revise], description: What the model decided. }
+        overridden_by: { type: string, nullable: true, description: "The admin's BONC `UserRowId` (blank for a script)." }
+        overridden_at: { type: number, nullable: true, description: Epoch seconds. }
+        reason: { type: string, nullable: true }
+      example:
+        request_id: 3f1c9a52-8d7e-4b1a-9c55-0e2f4d6a7b81
+        content_type: article
+        content_id: "123"
+        user_id: member-42
+        Action: approved
+        decision: approved
+        overridden: true
+        model_decision: reject
+        overridden_by: 01e94826-352a-4f6c-993b-43ec8fbd9453
+        overridden_at: 1764150000.0
+        reason: Quoting a news headline, not abuse.
 
     ModalityCounts:
       type: object

@@ -6,7 +6,8 @@ Every HTTP endpoint this service exposes, what it does, and how it behaves.
 (`gunicorn -w 4 wsgi:app` on Linux, `waitress-serve` on Windows). There is no SOAP, no
 GraphQL and no gRPC anywhere in this project.
 
-**Base URL:** `http://<host>:8000` by default (`flask_api/wsgi.py`).
+**Base URL:** `http://<host>:8000` by default (`flask_api/wsgi.py`). Staging:
+`https://boncaistageapi.boncnetwork.com` (Swagger at `/docs`).
 
 **Versioning:** everything functional sits under `/v1/`. The unversioned paths are
 `/health`, `/ready`, `/docs`, `/openapi.yaml`, `/demo` and `/articles`.
@@ -15,6 +16,7 @@ GraphQL and no gRPC anywhere in this project.
 
 ## Table of contents
 
+0. [**Every endpoint at a glance**](#0-every-endpoint-at-a-glance) ← start here
 1. [Conventions](#1-conventions)
 2. [**The moderation API — text**](#2-the-moderation-api--text) ← the main endpoint
 3. [**The moderation API — images, PDFs and video**](#3-the-moderation-api--images-pdfs-and-video)
@@ -27,6 +29,116 @@ GraphQL and no gRPC anywhere in this project.
 10. [Admin — image dataset and training](#10-admin--image-dataset-and-training)
 11. [Admin — visual policy](#11-admin--visual-policy)
 12. [Appendix: enums, limits, error codes](#12-appendix)
+
+---
+
+## 0. Every endpoint at a glance
+
+All 50 operations in Swagger (`/docs`), plus four the admin dashboard uses that are not in
+Swagger yet (marked †). Each links to its full description below.
+
+**Who may call it** (details in [Authentication](#authentication--four-tiers)):
+
+* **service**: the BONC .NET server. It sends `Authorization: Bearer <SERVICE_TOKEN>`, and
+  the endpoint is open when `SERVICE_TOKEN` is unset, as on staging.
+* **open**: anyone.
+* **admin**: a BONC admin sign-in (`Authorization: Bearer <AuthToken>`, Swagger
+  **Authorize → BoncAdmin**). Scripts can send `X-Admin-Token` instead.
+* **token**: `X-Admin-Token` only.
+
+### Moderation: what the platform calls
+
+| Method | Path | What it does | Who |
+|---|---|---|---|
+| `POST` | [`/v1/moderate`](#post-v1moderate) | Moderates a piece of member-written text (post, article, listing, profile…) and returns `approved`, `revise` or `reject`, with the offending spans highlighted and a reason the author can read. | service |
+| `POST` | [`/v1/moderate/media`](#post-v1moderatemedia) | Moderates an uploaded image: the visual check looks at the picture and OCR reads any writing in it. PDFs and video are accepted but not checked. | service |
+| `POST` | [`/v1/moderate/unified`](#post-v1moderateunified) | One call for text, an image, or both. It runs only the checks it has input for and returns one combined verdict. | service |
+| `GET` | [`/v1/moderate/{request_id}`](#get-v1moderaterequest_id) | Fetches the result of a request that was answered `202` in async mode. | service |
+
+### Operational
+
+| Method | Path | What it does | Who |
+|---|---|---|---|
+| `GET` | [`/health`](#get-health) | Liveness: says the process is up. Touches nothing else. | open |
+| `GET` | [`/ready`](#get-ready) | Readiness and the main diagnostic: whether the models are loaded, which auth modes are on, the thresholds, and whether pictures are being checked. `503` when the text model is not loaded. | open |
+| `GET` | [`/demo`](#get-demo) | Browser demo page for trying moderation by hand. Only with `DEMO_PAGE=1`. | open |
+| `GET` | [`/articles`](#get-articles-and-get-articlespathname) | Reference front-end, including the admin dashboard. Only with `DEMO_PAGE=1`. | open |
+| `GET` | [`/articles/{name}`](#get-articles-and-get-articlespathname) | One file of that front-end (JS, CSS, HTML). | open |
+| `GET` | [`/docs`](#get-docs-and-get-openapiyaml) | Swagger UI, served from this service so "Try it out" works. | open |
+| `GET` | [`/openapi.yaml`](#get-docs-and-get-openapiyaml) | The OpenAPI document Swagger reads. | open |
+
+### Admin: sign-in and health
+
+| Method | Path | What it does | Who |
+|---|---|---|---|
+| `GET` | [`/v1/admin/auth/me`](#6-admin--authentication) | Says who the request is signed in as (the BONC `UserRowId` and role). The quickest check that a BONC token works. | admin |
+| `GET` | [`/v1/admin/health`](#get-v1adminhealth-) † | Runs each model and database once and reports what actually works, plus request traffic for the last hour and day. Powers the dashboard's health panel. | admin |
+
+### Admin: moderation levels
+
+| Method | Path | What it does | Who |
+|---|---|---|---|
+| `GET` | [`/v1/admin/moderation-levels`](#get-v1adminmoderation-levels) | Lists every named strictness level, the default policy, and each surface's own setting. | admin |
+| `PUT` | [`/v1/admin/moderation-levels/{content_type}`](#put-v1adminmoderation-levelscontent_type) | Changes one surface (e.g. `article`) live: switch it on or off, pick a level, or set the thresholds directly. | admin |
+| `DELETE` | [`/v1/admin/moderation-levels/{content_type}`](#delete-v1adminmoderation-levelscontent_type) | Removes one surface's own setting so it follows the default again. | admin |
+| `GET` | [`/v1/admin/moderation-settings`](#get-v1adminmoderation-settings) | The dashboard's summary: one on/off and one level across all surfaces, and whether they currently differ. | admin |
+| `PUT` | [`/v1/admin/moderation-settings`](#put-v1adminmoderation-settings) | Applies one on/off and one level to **every** surface, overwriting per-surface settings. | admin |
+| `POST` | [`/v1/admin/model/reload`](#post-v1adminmodelreload) | Hot-swaps the text model to the bundle in `MODEL_DIR`. It swaps only if the new model loads and warms up. | token |
+
+### Admin: audit log and repeat offenders
+
+| Method | Path | What it does | Who |
+|---|---|---|---|
+| `GET` | [`/v1/admin/moderation-logs`](#get-v1adminmoderation-logs) | Searches and pages through past decisions, with filters (verdict, surface, member, date range, text or image) and summary counts. | admin |
+| `GET` | [`/v1/admin/moderation-logs/{request_id}`](#get-v1adminmoderation-logsrequest_id) | One decision in full. | admin |
+| `POST` | [`/v1/admin/moderation-logs/{request_id}/override`](#post-v1adminmoderation-logsrequest_idoverride) | **Overturns a decision**: an admin approves something the model refused, or refuses something it approved. The log and the member's record follow the admin; .NET then publishes or keeps it refused. | admin |
+| `POST` | [`/v1/admin/moderation-logs/override`](#post-v1adminmoderation-logsoverride) | The same, found by the platform's own `content_type` + `content_id` instead of `request_id`. | admin |
+| `DELETE` | [`/v1/admin/moderation-logs/{request_id}/override`](#delete-v1adminmoderation-logsrequest_idoverride) | Undoes an override, so the model's verdict stands again. | admin |
+| `GET` | [`/v1/admin/moderation-logs/export`](#get-v1adminmoderation-logsexport) | Downloads the filtered log as a text, Word or Excel file. | admin |
+| `GET` | [`/v1/admin/moderation-logs/repeat-offenders`](#get-v1adminmoderation-logsrepeat-offenders) | Lists members refused too often in a time window (by count **and** rate). | admin |
+| `GET` | [`/v1/admin/moderation-logs/repeat-offenders/{user_id}`](#get-v1adminmoderation-logsrepeat-offendersuser_id) | One member's record, with a yes/no on whether they count as a repeat offender. | admin |
+| `DELETE` | [`/v1/admin/moderation-logs`](#delete-v1adminmoderation-logs) | Wipes the whole audit log. No filter, no undo. | admin |
+
+### Admin: blocking
+
+| Method | Path | What it does | Who |
+|---|---|---|---|
+| `GET` | [`/v1/admin/blocked-clients`](#9-admin--blocked-clients) | Lists every block (members, addresses, networks), newest first. | admin |
+| `POST` | [`/v1/admin/blocked-clients`](#post-v1adminblocked-clients) | Blocks a member (by `user_id`), an IP address or a network from submitting content. | admin |
+| `DELETE` | [`/v1/admin/blocked-clients/{value}`](#delete-v1adminblocked-clientsvalue) | Removes a block. | admin |
+
+### Admin: image dataset and training (Image Fine-Tuning screen)
+
+| Method | Path | What it does | Who |
+|---|---|---|---|
+| `GET` | [`/v1/admin/images/categories`](#categories) | Lists the image categories with their picture counts and default verdict, and the active policy preset. | admin |
+| `POST` | [`/v1/admin/images/categories`](#categories) | Creates a category. | admin |
+| `PUT` | [`/v1/admin/images/categories/{name}`](#categories) | Edits a category's display name, default verdict or description. | admin |
+| `GET` | [`/v1/admin/images`](#listing-and-files) | Pages through the dataset's pictures, filtered by category, verdict, selection or search. | admin |
+| `GET` | [`/v1/admin/images/{image_id}`](#listing-and-files) | One picture's record. | admin |
+| `GET` | [`/v1/admin/images/{image_id}/file`](#listing-and-files) | The picture itself (bytes), for thumbnails. | admin |
+| `POST` | [`/v1/admin/images/upload`](#post-v1adminimagesupload) | Adds a picture to the dataset under a category, and can teach its description to the policy. | admin |
+| `PUT` | [`/v1/admin/images/batch`](#put-v1adminimagesbatch) | Bulk edits: select or deselect what the grid shows, set a whole category to allow or block, or change individual pictures. | admin |
+| `POST` | [`/v1/admin/images/train`](#training) | Retrains the visual probe from the selected pictures and puts it live. | admin |
+| `POST` | [`/v1/admin/images/preset`](#training) | Switches the policy preset (e.g. `standard`, `child_products`). | admin |
+| `GET` | [`/v1/admin/images/history`](#training) | The last ten training runs and their results. | admin |
+| `POST` | [`/v1/admin/images/load-all`](#training) | Imports the `images/` folder on disk into the database. | admin |
+
+### Admin: visual policy (rules written in words)
+
+| Method | Path | What it does | Who |
+|---|---|---|---|
+| `GET` | [`/v1/admin/policy/labels`](#get-v1adminpolicylabels) | The picture rules as written (each rule's phrasings and whether it refuses or allows), and whether the live model matches them. | admin |
+| `PUT` | [`/v1/admin/policy/labels/{name}`](#put-v1adminpolicylabelsname) | Creates or replaces a rule. Stops with `409` if it contradicts another rule. | admin |
+| `DELETE` | [`/v1/admin/policy/labels/{name}`](#delete-v1adminpolicylabelsname) | Removes a rule. | admin |
+| `POST` | [`/v1/admin/policy/labels/{name}/phrasings`](#post-v1adminpolicylabelsnamephrasings) | Adds one phrasing to a rule without resending the rest. | admin |
+| `GET` | [`/v1/admin/policy/exemplars`](#exemplars--refuse-things-like-this) | Lists the pictures marked "refuse things like this" or "allow things like this". | admin |
+| `PUT` | [`/v1/admin/policy/exemplars`](#exemplars--refuse-things-like-this) | Marks or unmarks pictures that way, or with `preview` shows what a mark would catch first. | admin |
+| `POST` | [`/v1/admin/policy/preview`](#post-v1adminpolicypreview) | Ranks the stored pictures against candidate phrasings, to try wording before saving it. Changes nothing. | admin |
+| `POST` | [`/v1/admin/policy/reset`](#post-v1adminpolicyreset) | Puts the policy back to how it shipped. | admin |
+| `GET` | [`/v1/admin/policy/sync`](#get-v1adminpolicysync-) † | For each subject, says whether its rule and its Fine-Tuning category agree on refuse or allow. | admin |
+| `POST` | [`/v1/admin/policy/sync/{name}`](#post-v1adminpolicysyncname-) † | Settles one disagreement by keeping either the rule's verdict or the pictures'. | admin |
+| `POST` | [`/v1/admin/policy/test-image`](#post-v1adminpolicytest-image-) † | Runs one picture through the live visual check and says whether it would be refused, by which rule, and how close the others came. Stores nothing. | admin |
 
 ---
 
@@ -133,8 +245,11 @@ above, like everything else.
 |---|---|---|
 | **Service** | `/v1/moderate`, `/v1/moderate/media`, `/v1/moderate/unified`, `/v1/moderate/{request_id}` | `Authorization: Bearer <SERVICE_TOKEN>` — **or open, if `SERVICE_TOKEN` is unset** |
 | **Open** | `/health`, `/ready`, `/demo`, `/articles` | none |
-| **Admin** | most of `/v1/admin/*` | session cookie **or** `X-Admin-Token` |
+| **Admin** | all of `/v1/admin/*` except the one below | the admin's BONC sign-in, `Authorization: Bearer <AuthToken>` (Swagger: **Authorize → BoncAdmin**) — **or** `X-Admin-Token` for scripts |
 | **Token only** | `POST /v1/admin/model/reload` | `X-Admin-Token` only |
+
+`AUTH_DISABLED=1` switches every check off. Staging ran that way until 2026-11-24 and now
+enforces the BONC sign-in; `/ready` reports `admin_auth: enforced` and `admin_verifier: bonc`.
 
 #### The service tier
 
@@ -162,18 +277,34 @@ knowing to someone guessing.
 
 `check_admin()` in `app/admin_auth.py` implements the admin tier:
 
-- **There is no login on this service.** Admins sign in on BONC (.NET). When
-  `BONC_AUTH_VERIFY_URL` is set, a request carrying `Authorization: Bearer <token>` is
-  forwarded to that endpoint by the `bonc-auth` package: `200` with `adminId` lets it in (the
-  identity is in `g.admin`), `401` gives `401 unauthorized`, `403` gives `403 not_admin`, and
-  anything else - timeout, 5xx, a body without `adminId` - gives `503 auth_unavailable`. A
-  request with a bearer token is judged on that token alone.
+- **There is no login on this service.** Admins sign in on BONC (.NET), via
+  `POST https://api.boncnetwork.com/api/userService/login`, and bring the `AuthToken` from
+  that response as `Authorization: Bearer <token>`. When `BONC_AUTH_VERIFY_URL` is set, the
+  token is checked with .NET, in one of two ways chosen by `BONC_AUTH_STYLE`:
+  - **`user-detail`** (what staging uses): this service calls .NET's existing
+    `GET /api/userService/getUserDetail?userRowId=<the token's UserRowId>` with the token.
+    .NET answers `401` for an invalid, expired or signed-out token. Otherwise the request is
+    let in only if the returned record is the **same user** the token names, is active, and
+    has one of `BONC_AUTH_ADMIN_ROLES` (default `Admin,SuperAdmin`) in `UserRoles`.
+  - **`verify-admin`** (the default): a purpose-built .NET endpoint, via the `bonc-auth`
+    package, that answers `200 {adminId, role, sessionId}`, `401` or `403`.
+
+  Either way: an invalid token is `401 unauthorized`, a signed-in non-admin is
+  `403 not_admin`, and anything else (timeout, 5xx, an unexpected body, a record for a
+  different user) is `503 auth_unavailable` — it never lets a request through. An accepted
+  token is trusted for `BONC_AUTH_CACHE_SECONDS` (default 60) before .NET is asked again, so
+  a BONC sign-out takes up to that long to reach this service. A request with a bearer token
+  is judged on that token alone.
 - Otherwise `X-Admin-Token: <ADMIN_TOKEN>` is compared with `hmac.compare_digest`.
 - With neither `BONC_AUTH_VERIFY_URL` nor `ADMIN_TOKEN` set, admin endpoints return
   `404 not_found` rather than `401` - they are considered disabled, not protected.
 - `AUTH_DISABLED=1` skips all of it.
 
-Neither credential is attached by a browser on its own, so there is no CSRF check.
+Neither credential is attached by a browser on its own, so there is no CSRF check. The BONC
+admin frontend may call `/v1/admin/*` from the browser when its origin is listed in
+`ADMIN_CORS_ORIGINS` (staging: `https://admin.boncnetwork.com`, `https://stageadmin.boncnetwork.com`
+and `http://localhost:5173` for local testing); only those paths and those
+origins get CORS headers, and never `Allow-Credentials`.
 
 `POST /v1/admin/model/reload` deliberately does **not** use `check_admin()`. It accepts
 `ADMIN_TOKEN` only, so a BONC admin sign-in cannot hot-swap the model.
@@ -184,10 +315,15 @@ A `before_request` hook on the moderation blueprint resolves the caller's addres
 per request via `app/client_address.py`, honouring `X-Forwarded-For` to the depth of
 `trust_proxy_hops` (default `0`). The resolved address is attached to every audit row.
 
-For both **submission** endpoints only (`/v1/moderate` and `/v1/moderate/media`) the
-address is checked against the blocklist; a hit returns
-`403 client_blocked` with a deliberately vague message that names neither the address
-nor the scope. Admin endpoints are exempt, so an operator who blocks their own office
+For the three **submission** endpoints only (`/v1/moderate`, `/v1/moderate/media`,
+`/v1/moderate/unified`) the caller is checked against the blocklist:
+
+* the **address**: a hit returns `403 client_blocked` with a deliberately vague message
+  that names neither the address nor the scope;
+* the **member**: when the call names the member, either in the body (`user_id`, `userId`,
+  `UserId`, `author_id`, `authorId` or `AuthorId`) or in an `X-User-Id` header, a blocked
+  member gets `403 member_blocked`, from whatever address they post. The same member id is
+  what the repeat-offender endpoints count by, so **send it on every moderation call**. Admin endpoints are exempt, so an operator who blocks their own office
 network does not lock themselves out of the screen that would undo it.
 
 If the blocklist cannot be read, submissions **carry on** and the failure is logged —
@@ -766,6 +902,31 @@ them from published content:
 If the model fails to load at boot, the process **keeps serving**: `/ready` and
 `/v1/moderate` return `503` until an admin reload succeeds, rather than crash-looping.
 
+## `GET /v1/admin/health` †
+
+**Auth:** admin. **Not in Swagger yet**; the dashboard's health panel calls it.
+
+`/ready` says what is **loaded**; this says what **works**. It exercises each part once —
+one ordinary sentence through the text model, one blank picture through the vision encoder
+and through OCR, a count from each database — because a model can be loaded and still fail
+on every call, and that is exactly what an admin cannot see while uploads quietly fail.
+
+```json
+{ "status": "ok", "checked_at": 1764000000.0, "uptime_s": 3600, "mode": "sync",
+  "checks": [ { "name": "Text moderation model", "status": "ok", "detail": "bonc-v9-ver3 (onnx) - scored a test sentence" },
+              { "name": "Image moderation model", "status": "ok", "detail": "…" },
+              { "name": "OCR (text in images)",   "status": "ok", "detail": "…" },
+              { "name": "Audit log database",     "status": "ok", "detail": "12,345 moderation log rows" },
+              { "name": "Image store database",   "status": "ok", "detail": "17 image categories" } ],
+  "traffic": { "last_hour": { … }, "last_day": { … } },
+  "service_auth": "open", "moderation_disabled_for": [] }
+```
+
+Each check is `ok`, `off` (switched off in settings) or `down`. Overall `status` is
+`down` when the text model is down, `degraded` when anything else is, otherwise `ok`.
+Traffic comes from the audit log, so "no requests in the last hour" is as visible as
+"requests failing".
+
 ## `GET /demo`
 
 The browser demo UI. **Enabled only with `DEMO_PAGE=1`; never on in production.**
@@ -797,9 +958,14 @@ network. `/docs` then answers `404 not_found` with `"API docs are turned off
 (API_DOCS=0)"`.
 
 `/docs` deliberately serves Swagger UI **from this app's own origin**, so "Try it out"
-is a same-origin request. This service sends no CORS headers anywhere; reaching a
-Swagger UI hosted elsewhere would mean relaxing that on every endpoint, the
-unauthenticated submission endpoints included, for a developer convenience.
+is a same-origin request. Outside `/v1/admin/*` (see `ADMIN_CORS_ORIGINS`) this service
+sends no CORS headers; reaching a Swagger UI hosted elsewhere would mean relaxing that on
+every endpoint, the unauthenticated submission endpoints included, for a developer
+convenience.
+
+**Signing in on `/docs`.** **Authorize → BoncAdmin** is the only option in the dialog: paste
+the admin's BONC `AuthToken` without the word `Bearer`. `POST /v1/admin/model/reload` has
+its own `X-Admin-Token` field instead.
 
 `/openapi.yaml` is read from the repository's `docs/` directory, where the spec lives so
 it sits beside this file and cannot drift from a second copy. A deployment that ships
@@ -814,12 +980,25 @@ bare `404`.
 BONC (.NET), and `check_admin()` (section above) verifies what each request brings. The
 email/password accounts, sessions and emailed reset codes were removed.
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/v1/admin/auth/me` | Who the request is authenticated as: `{admin_id, role, session_id, via}`, `via` being `bonc`, `admin_token` or `open` |
+## `GET /v1/admin/auth/me`
 
-`/v1/admin/auth/me` is the quickest end-to-end check of `BONC_AUTH_VERIFY_URL`: with a BONC
-token it returns exactly what the .NET endpoint answered.
+Who the request is authenticated as. The quickest end-to-end check that a BONC token works:
+
+```json
+{ "admin_id": "01e94826-352a-4f6c-993b-43ec8fbd9453", "role": "SuperAdmin",
+  "session_id": null, "via": "bonc" }
+```
+
+| Field | Meaning |
+|---|---|
+| `admin_id` | The admin's BONC `UserRowId`. It is also what blocks record as `created_by`. |
+| `role` | The admin role that let them in (`Admin` or `SuperAdmin`). |
+| `session_id` | Always `null` with `BONC_AUTH_STYLE=user-detail`, because the .NET token carries none. |
+| `via` | `bonc` (a BONC token), `admin_token` (`X-Admin-Token`; ids are `null`) or `open` (`AUTH_DISABLED=1`). |
+
+Errors are the ones every admin endpoint gives: `401 unauthorized` (no token, or an invalid,
+expired or signed-out one), `403 not_admin` (signed in, but not an admin) and
+`503 auth_unavailable` (.NET could not be asked).
 
 > **Note.** There is no rate limiting anywhere in this service, `/v1/moderate` included. See
 > section 12.
@@ -932,8 +1111,9 @@ changed.
 
 ## `POST /v1/admin/model/reload`
 
-**Auth: `X-Admin-Token` only.** A logged-in session is *not* accepted here, unlike every
-other admin endpoint. Returns `404 not_found` when `ADMIN_TOKEN` is unset.
+**Auth: `X-Admin-Token` only.** A BONC admin sign-in is *not* accepted here, unlike every
+other admin endpoint. Returns `404 not_found` when `ADMIN_TOKEN` is unset. In Swagger the
+token is a field on this endpoint, not an Authorize option.
 
 Hot-swaps to the bundle in `MODEL_DIR` — for example after the ML team ships a new
 version. **It only swaps if the new model loads and warms up**; otherwise the old one
@@ -954,18 +1134,99 @@ sink keeps emitting whether or not the audit write succeeds.
 
 ## `GET /v1/admin/moderation-logs`
 
-Query parameters: `decision`, `content_type`, `severity`, `q` (free-text search),
-`limit` (default 50, **capped at 200**), `offset` (default 0). Malformed numbers fall
-back to the defaults rather than erroring.
+The audit log screen: every decision this service has made, searchable.
 
-Returns `{logs, total, limit, offset, stats}`. **The array is `logs`, not `items`** — the
-image listing uses `items`, and the two are not interchangeable. `total` counts the rows
-matching the filters, not the rows in this page, and `stats` carries `allow` / `revise` /
-`reject` / `total` over that same filtered set so the header tiles need no second request.
+| Query parameter | Meaning |
+|---|---|
+| `decision` | `allow`, `revise` or `reject` |
+| `content_type` | one surface, e.g. `article` |
+| `severity` | one severity |
+| `q` | free-text search |
+| `modality` | `text` or `image` decisions only |
+| `since`, `until` | a time window: epoch seconds or ISO 8601 (a bare date is the start of that day, UTC) |
+| `user` | one member's rows only (their `user_id`) |
+| `offender_min`, `offender_rate` | the repeat-offender rule for the highlight below (default 3 and 0.5) |
+| `limit`, `offset` | paging; `limit` default 50, **capped at 200** |
+
+Malformed numbers fall back to the defaults rather than erroring.
+
+Returns `{logs, total, limit, offset, stats, repeat_offenders, blocked_members}`.
+**The array is `logs`, not `items`** — the image listing uses `items`, and the two are not
+interchangeable. `total` counts the rows matching the filters, not the rows in this page,
+and `stats` carries `allow` / `revise` / `reject` / `total` over that same filtered set so
+the header tiles need no second request. `repeat_offenders` is the same list as the
+endpoint below, over the same window, each member flagged `blocked` or not;
+`blocked_members` lists the member ids currently blocked.
 
 ## `GET /v1/admin/moderation-logs/<request_id>`
 
-One decision in full. `404 not_found` if there is no such request.
+One decision in full. `404 not_found` if there is no such request. An overridden decision
+also carries `original_decision` (what the model said), `overridden_by`, `overridden_at` and
+`override_reason`; `decision` is the verdict that stands.
+
+## `POST /v1/admin/moderation-logs/<request_id>/override`
+
+An admin overturns a decision: approves content the model refused, or refuses content it
+approved.
+
+```json
+{ "decision": "approved", "reason": "Quoting a news headline, not abuse." }
+```
+
+`decision` is `approved` (publish it) or `reject` (keep it refused); `Action` is accepted as
+the same field. `reason` (or `Note`) is optional, up to 1,000 characters, and is shown to the
+next admin reading the log.
+
+```json
+{ "request_id": "3f1c9a52-…", "content_type": "article", "content_id": "123",
+  "user_id": "member-42",
+  "Action": "approved", "decision": "approved",
+  "overridden": true, "model_decision": "reject",
+  "overridden_by": "01e94826-352a-4f6c-993b-43ec8fbd9453", "overridden_at": 1764150000.0,
+  "reason": "Quoting a news headline, not abuse." }
+```
+
+**What it changes.** This service's record: the admin's verdict becomes the row's
+`decision`, so the log screen, its filters and counts, the export and the repeat-offender
+rule all follow it. A refusal approved on review no longer counts against the member. What
+the model said is kept as `original_decision` (`model_decision` in the answer).
+
+**What it does not do: publish.** The .NET side owns the content. After a `200`, it acts on
+`Action`: `approved` → publish, `reject` → keep it refused, with `reason` as the note if it
+wants one.
+
+* A second override replaces the first; the model's verdict is never lost.
+* Overriding back to the model's own verdict is an undo (`overridden: false`).
+* The admin is the BONC `UserRowId` from the sign-in (blank for a script on `X-Admin-Token`),
+  and every override is written to the service log with the admin, the content and the
+  reason.
+
+`request_id` is in every moderation response (`Data.request_id`), so the platform can keep it
+with the content. Without it, use the next endpoint.
+
+| Error | When |
+|---|---|
+| `400 bad_decision` | `decision` is not `approved` or `reject` |
+| `404 not_found` | no decision was recorded under that `request_id` |
+
+## `POST /v1/admin/moderation-logs/override`
+
+The same, for when the platform kept its own ids rather than the `request_id`:
+
+```json
+{ "content_type": "article", "content_id": "123", "decision": "approved", "reason": "Fine on review." }
+```
+
+It applies to the **newest** decision recorded for that content (an edited article that was
+moderated twice is overridden on its latest version). Same answer as above.
+`400 missing_content` without `content_type` and `content_id`; `404 not_found` when nothing
+was recorded for them, which also happens if the moderation call did not send `content_id`.
+
+## `DELETE /v1/admin/moderation-logs/<request_id>/override`
+
+Undoes an override: the model's verdict stands again, with the same answer shape
+(`overridden: false`). Undoing a decision that was never overridden is not an error.
+`404 not_found` for an unknown `request_id`.
 
 ## `GET /v1/admin/moderation-logs/export`
 
@@ -998,6 +1259,58 @@ Only the Excel path has an optional dependency. If `openpyxl` is missing it retu
 `503 export_unavailable` naming the missing package; **the text and Word exports still
 work**, so the button is not broken for everyone by one absent library.
 
+## `GET /v1/admin/moderation-logs/repeat-offenders`
+
+Members whose submissions are refused too often in a time window. It is the list the log
+screen highlights, on its own, for a caller that wants only the members, such as the portal
+deciding whom to send for manual review.
+
+A member qualifies only when **both** parts of the rule hold: at least `min_rejects`
+refusals **and** a refusal rate of at least `min_rate`. A count alone would flag the busiest
+honest member (ten refusals out of four hundred posts); a rate alone would flag a newcomer
+with one post refused out of one.
+
+| Query parameter | Meaning |
+|---|---|
+| `min_rejects` (alias `offender_min`) | minimum refusals, default 3 |
+| `min_rate` (alias `offender_rate`) | minimum share refused, 0–1, default 0.5 |
+| `since`, `until` | the window: epoch seconds or ISO 8601 |
+| `hours` | shorthand for `since` = now minus this many hours; ignored when `since` is given |
+| `content_type` | one surface only |
+| `modality` | `text` or `image` only |
+| `limit` | default 50, capped at 500 |
+
+```json
+{ "users": [ { "user_id": "member-42", "total": 9, "rejected": 6, "revised": 1,
+               "text_rejected": 4, "image_rejected": 2, "reject_rate": 0.6667,
+               "last_reject_at": 1764000000.0, "last_at": 1764000100.0, "blocked": false } ],
+  "min_rejects": 3, "min_rate": 0.5, "attributed_rows": 812,
+  "window": { "since": 1763913600.0, "until": null } }
+```
+
+**Counted per member id, never per address.** The portal calls from its own servers, so an
+address names the portal, not a member. The id comes from the moderation calls (`user_id` /
+`userId` in the body, or `X-User-Id`); submissions without one are not counted, and
+`attributed_rows` says how many could be. An empty `users` with `attributed_rows: 0` means
+"no member ids are being sent", not "no offenders".
+
+## `GET /v1/admin/moderation-logs/repeat-offenders/<user_id>`
+
+One member's record in the window, and a yes/no answer with the numbers behind it either
+way. Takes the same rule and window parameters as the list.
+
+```json
+{ "user_id": "member-42", "total": 9, "allowed": 2, "revised": 1, "rejected": 6,
+  "text_rejected": 4, "image_rejected": 2, "reject_rate": 0.6667,
+  "last_reject_at": 1764000000.0, "last_at": 1764000100.0,
+  "is_repeat_offender": true, "min_rejects": 3, "min_rate": 0.5,
+  "window": { "since": null, "until": null }, "blocked": false }
+```
+
+A member with no submissions in the window comes back with `total: 0` and
+`is_repeat_offender: false`, not `404`. `400 bad_user` for an empty id or `anonymous`. To
+block them, `POST /v1/admin/blocked-clients` with `scope: member`.
+
 ## `DELETE /v1/admin/moderation-logs`
 
 Clears the entire audit log and returns the number of rows removed. There is no
@@ -1007,35 +1320,61 @@ confirmation step and no filter — it takes everything.
 
 # 9. Admin — blocked clients
 
-**What this is and is not.** Blocking an address stops casual repetition from one
-connection — the same person posting the same thing eight times — and that is worth
-having. It is **not an identity control**: a mobile connection changes address by
-switching to cellular, and a VPN changes it by clicking.
+Stops a member, an address or a network from submitting content. A blocked caller gets
+`403 member_blocked` or `403 client_blocked` from the submission endpoints (see
+[Client identification and blocking](#client-identification-and-blocking)); the admin
+endpoints are never blocked.
+
+**What this is and is not.** A **member** block follows the person, wherever they post
+from, but only works when the portal sends the member's id on each moderation call.
+Blocking an **address** stops casual repetition from one connection — the same person
+posting the same thing eight times — and that is worth having. It is **not an identity
+control**: a mobile connection changes address by switching to cellular, and a VPN changes
+it by clicking.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/admin/blocked-clients` | List current blocks |
+| `GET` | `/v1/admin/blocked-clients` | List every block, newest first |
 | `POST` | `/v1/admin/blocked-clients` | Add one |
 | `DELETE` | `/v1/admin/blocked-clients/<value>?scope=` | Remove one |
+
+## `GET /v1/admin/blocked-clients`
+
+```json
+{ "blocked": [ { "id": 7, "value": "member-42", "scope": "member", "reason": "repeat scam listings",
+                 "created_by": "01e94826-352a-4f6c-993b-43ec8fbd9453", "created_at": 1764000000.0 } ] }
+```
+
+`scope` says what each block refuses; `created_by` is the BONC `UserRowId` of the admin who
+made it (blank when a script did, through `X-Admin-Token`).
 
 ## `POST /v1/admin/blocked-clients`
 
 ```json
-{ "value": "203.0.113.45", "scope": "ip", "reason": "repeat scam listings" }
+{ "value": "member-42",    "scope": "member",  "reason": "repeat scam listings" }
+{ "value": "203.0.113.45", "scope": "ip",      "reason": "repeat scam listings" }
+{ "value": "203.0.113.0/24", "scope": "network" }
 ```
 
-`scope` is `ip` or `network`. A network is normalised into the same form the resolver
-produces, or the two would never compare equal. The `reason` and the acting admin's email
-are recorded, because the person undoing this months later will not be the one who did
-it. A script authenticating by token has no session row, so the actor is recorded as
-blank rather than failing the call.
+`scope` is `member`, `ip` (the default) or `network`.
+
+* **`member`**: `value` is the member id the portal sends as `user_id`. An id that looks
+  like an address still blocks only the member. `anonymous` and ids over 128 characters
+  are refused (`400 bad_member`). There is no member table here to check the id against,
+  so a typo blocks nobody.
+* **`ip` / `network`**: a network is normalised into the same form the resolver produces,
+  or the two would never compare equal.
+
+The `reason` and the acting admin's id are recorded, because the person undoing this months
+later will not be the one who did it.
 
 Returns `201` with the stored row.
 
 | Error | When |
 |---|---|
-| `400 missing_value` | no address given |
-| `400 bad_scope` | scope is neither `ip` nor `network` |
+| `400 missing_value` | nothing to block was given |
+| `400 bad_scope` | scope is not `ip`, `network` or `member` |
+| `400 bad_member` | a member block for `anonymous`, or an id over 128 characters |
 | `400 bad_address` | not a valid address or network — caught here so a typo becomes a message rather than a row that silently blocks nothing |
 | `409 would_block_self` | **the address is your own connection** |
 
@@ -1048,8 +1387,10 @@ address it detected so you can check it before going ahead.
 
 ## `DELETE /v1/admin/blocked-clients/<value>`
 
-Optional `?scope=` narrows it. Returns the number of rows removed, or
-`404 not_blocked`.
+Removes a block, so that member or address can submit again. `value` is what was blocked
+(a member id, an address, or a network such as `203.0.113.0/24`, URL-encoded). Optional
+`?scope=` (`member`, `ip`, `network`) narrows it when the same value is blocked under two
+scopes. Returns `{unblocked: true, count, message}`, or `404 not_blocked`.
 
 ---
 
@@ -1216,6 +1557,11 @@ This is the half of policy an admin actually has. Writing phrasings is a skill; 
 at a picture they just looked at is not, and it is how the request arrives — somebody
 uploads an image and wants it refused, or changes their mind about one being refused now.
 
+`GET` lists the marked pictures:
+`{exemplars: [ {id, filename, category, action}, … ], count, reject_min}`, where `action`
+is `block` (refuse things like this) or `allow`, and `reject_min` is how similar an upload must be to a mark for the mark to decide it.
+The embeddings are left out of the rows (2 KB each).
+
 `PUT` takes `{ids: [...], mode: "block" | "allow" | "clear", preview?, resolve?}`.
 It takes effect **on the next upload**: no retraining, no dataset, and undoing it is
 clearing the same flag.
@@ -1293,69 +1639,111 @@ phrasings, then a dot product.
 Back to the policy as it shipped, from the startup snapshot. `409 no_default` when
 nothing has been edited yet, so there is nothing to go back to.
 
+## `GET /v1/admin/policy/sync` †
+
+**Not in Swagger yet**; the dashboard's policy screen calls it.
+
+A subject such as `physique` can exist on two screens: as a **rule** here (refuse or
+allow) and as a **category** on Image Fine-Tuning (default action block or allow, plus its
+pictures). This says, for every subject on either screen, whether the two halves agree:
+
+```json
+{ "subjects": [
+    { "name": "physique",
+      "rule": { "verdict": "refuse" },
+      "pictures": { "default_action": "block", "images": 72, "allowed": 30, "blocked": 42,
+                    "display_name": "Physique display" },
+      "state": "in_sync" },
+    { "name": "animal", "rule": { "verdict": "allow" },
+      "pictures": { "default_action": "block", "…": "…" }, "state": "disagree" },
+    { "name": "house", "rule": { "verdict": "refuse" }, "state": "rule_only" } ],
+  "disagreeing": ["animal"],
+  "pictures_only": [] }
+```
+
+`state` is `in_sync`, `disagree`, `rule_only` (a rule with no category) or
+`pictures_only` (a category with no rule). They **disagree** when the category's default points the other way from the rule, or when
+every one of its pictures does. A mix is not a disagreement: 42 of 72 pictures refused is an
+admin's per-picture judgement and is left alone.
+
+## `POST /v1/admin/policy/sync/<name>` †
+
+**Not in Swagger yet.** Settles one disagreement:
+
+```json
+{ "keep": "rule" }        // move the category and its pictures to the rule's verdict
+{ "keep": "pictures" }    // change the rule's verdict to the category's
+```
+
+Returns `{status: "ok", kept, …, sync}`, where `sync` is the fresh `GET /sync` answer. With
+`keep: "pictures"`, flipping the rule can clash with another rule; that is the same
+`409 policy_conflict` as editing a rule, answered by resending with `"resolve"`.
+
+| Error | When |
+|---|---|
+| `400 bad_keep` | `keep` is not `rule` or `pictures` |
+| `404 not_both` | the subject lacks either a rule or a category, so there is nothing to sync |
+| `409 policy_conflict` | keeping the pictures' verdict contradicts another rule |
+| `500 sync_failed` / `policy_build_failed` | the change could not be applied; nothing half-done is left live |
+
+## `POST /v1/admin/policy/test-image` †
+
+**Not in Swagger yet**; the dashboard's "Test a picture" button calls it.
+
+Runs one picture through the **live** visual check and says what it would do, and why.
+It is the same decision an upload gets, not an imitation of it. **Nothing is stored**: no
+audit row, no moderation result, and the picture never reaches the dataset.
+
+`multipart/form-data` with the picture in `file`.
+
+```json
+{ "checked": true, "filename": "gym.jpg",
+  "verdict": "refuse",
+  "decided_by": "policy",
+  "rule": "physique", "category": "physique_display",
+  "author_sees": "Physique display",
+  "top_label": "physique",
+  "labels": [ { "name": "physique", "score": 0.81, "unsafe": true, "bar": 0.55, "over": true },
+              { "name": "safe",     "score": 0.12, "unsafe": false, "bar": null, "over": false } ],
+  "reject_min": 0.9,
+  "note": "Only the picture itself was judged. On a real upload any writing in the image is also read and moderated as text." }
+```
+
+| Field | Meaning |
+|---|---|
+| `verdict` | `refuse` or `publish` |
+| `decided_by` | what refused it: `policy` (a written rule), `probe` (the trained probe) or `exemplar` (a "refuse things like this" mark); `allow_exemplar` when an "allow" mark overruled a rule; `null` otherwise |
+| `rule`, `category` | the deciding rule and the category it reports under |
+| `author_sees` | the category name the author would be shown |
+| `labels` | every rule's score, highest first, with its bar and whether it was over it, so you can see how close the others came |
+
+**It does not read writing in the picture.** On a real upload, OCR runs as well and the text
+is moderated as text, so a picture can publish here and still be refused for its caption.
+
+| Error | When |
+|---|---|
+| `400 no_file` / `empty_file` | no picture, or an empty one |
+| `413 media_too_large` | over the upload size limit |
+| `422` | the file is not a readable image |
+| `503 visual_unavailable` / `media_not_checkable` | the visual check is not running, or failed on this picture |
+
 ---
 
 # 12. Appendix
 
 ## 12.1 Complete endpoint index
 
-**Moderation** (`app/api.py`, blueprint `moderation`)
+The full list, with what each endpoint does and who may call it, is
+[section 0](#0-every-endpoint-at-a-glance). This is where each one lives in the code:
 
-| Method | Path | Auth |
+| Source file | Flask blueprint | Endpoints |
 |---|---|---|
-| `POST` | `/v1/moderate` | none |
-| `POST` | `/v1/moderate/media` | none |
-| `GET` | `/v1/moderate/<request_id>` | none |
-| `GET` | `/health` | none |
-| `GET` | `/ready` | none |
-| `GET` | `/demo` | none, `DEMO_PAGE=1` |
-| `GET` | `/articles`, `/articles/<path:name>` | none, `DEMO_PAGE=1` |
-| `GET` | `/docs` — Swagger UI, same origin | none, on unless `API_DOCS=0` |
-| `GET` | `/openapi.yaml` — the spec | none, on unless `API_DOCS=0` |
-| `GET` | `/v1/admin/moderation-levels` | admin |
-| `PUT` | `/v1/admin/moderation-levels/<content_type>` | admin |
-| `DELETE` | `/v1/admin/moderation-levels/<content_type>` | admin |
-| `POST` | `/v1/admin/model/reload` | **token only** |
+| `app/api.py` | `moderation` | `/v1/moderate`, `/v1/moderate/media`, `/v1/moderate/unified`, `/v1/moderate/<request_id>`, `/health`, `/ready`, `/demo`, `/articles…`, `/docs`, `/openapi.yaml`, `/v1/admin/health` †, `/v1/admin/moderation-levels…`, `/v1/admin/model/reload` |
+| `app/admin_auth.py` | `admin_auth` | `/v1/admin/auth/me`, `/v1/admin/moderation-settings`, `/v1/admin/moderation-logs…` (including export, repeat offenders and overrides), `/v1/admin/blocked-clients…` |
+| `app/admin_images.py` | `admin_images` | `/v1/admin/images…` |
+| `app/admin_policy.py` | `admin_policy` | `/v1/admin/policy/labels…`, `/v1/admin/policy/exemplars`, `/v1/admin/policy/preview`, `/v1/admin/policy/reset`, `/v1/admin/policy/sync…` †, `/v1/admin/policy/test-image` † |
 
-**Admin auth and audit** (`app/admin_auth.py`, blueprint `admin_auth`)
-
-| Method | Path |
-|---|---|
-| `GET` | `/v1/admin/auth/me` |
-| `GET` `PUT` | `/v1/admin/moderation-settings` |
-| `GET` | `/v1/admin/moderation-logs` |
-| `GET` | `/v1/admin/moderation-logs/export` |
-| `GET` | `/v1/admin/moderation-logs/<request_id>` |
-| `DELETE` | `/v1/admin/moderation-logs` |
-| `GET` `POST` | `/v1/admin/blocked-clients` |
-| `DELETE` | `/v1/admin/blocked-clients/<path:value>` |
-
-**Admin images** (`app/admin_images.py`, blueprint `admin_images`)
-
-| Method | Path |
-|---|---|
-| `GET` `POST` | `/v1/admin/images/categories` |
-| `PUT` | `/v1/admin/images/categories/<name>` |
-| `GET` | `/v1/admin/images` |
-| `GET` | `/v1/admin/images/<int:image_id>` |
-| `GET` | `/v1/admin/images/<int:image_id>/file` |
-| `POST` | `/v1/admin/images/upload` |
-| `PUT` | `/v1/admin/images/batch` |
-| `POST` | `/v1/admin/images/train` |
-| `POST` | `/v1/admin/images/preset` |
-| `GET` | `/v1/admin/images/history` |
-| `POST` | `/v1/admin/images/load-all` |
-
-**Admin visual policy** (`app/admin_policy.py`, blueprint `admin_policy`)
-
-| Method | Path |
-|---|---|
-| `GET` | `/v1/admin/policy/labels` |
-| `PUT` `DELETE` | `/v1/admin/policy/labels/<name>` |
-| `POST` | `/v1/admin/policy/labels/<name>/phrasings` |
-| `GET` `PUT` | `/v1/admin/policy/exemplars` |
-| `POST` | `/v1/admin/policy/preview` |
-| `POST` | `/v1/admin/policy/reset` |
+† not in Swagger (`docs/openapi.yaml`) yet.
 
 ## 12.2 Enums
 
@@ -1475,13 +1863,12 @@ pending the Data team's sign-off, despite being the API↔Data hand-off document
 
 **`/v1/moderate` has no authentication and no rate limit.** It is the public, expensive
 endpoint — every call runs ONNX inference, and the media variant also runs OCR and CLIP.
-The only thing in front of it is the IP blocklist. Rate limiting exists in this codebase
-(`Admin.limited`) but is wired only to the five auth endpoints. This is safe when the
-service listens on a private interface reachable only from the platform backend; confirm
-that is the deployment topology.
+The only thing in front of it is the blocklist (members and addresses). There is no rate
+limiting anywhere in the service. This is safe when the service is reachable only from the
+platform backend; confirm that is the deployment topology.
 
 **`POST /v1/admin/model/reload` does not use `check_admin()`.** It is the one admin
-endpoint that rejects a logged-in session. Defensible for a dangerous operation, but it
+endpoint that rejects a BONC admin sign-in. Defensible for a dangerous operation, but it
 is an inconsistency worth knowing about.
 
 **The two moderation-settings APIs collide.** See the warning in section 7.

@@ -692,6 +692,103 @@ def get_moderation_log_detail(request_id: str):
     return jsonify(item), 200
 
 
+# ---- an admin overturning a decision -----------------------------------------------------
+# The .NET side owns the content and does the publishing; what this service owns is the
+# record. So an override here changes the audit log - the verdict the screens, the counts and
+# the repeat-offender rule see - and answers with the verdict in the platform's own words
+# (`Action`), for .NET to act on. It does not publish anything itself.
+
+# The platform's words (and the pipeline's own) for the two verdicts an admin can give.
+_OVERRIDE_WORDS = {"approved": "allow", "approve": "allow", "allow": "allow",
+                   "allowed": "allow", "accept": "allow",
+                   "reject": "reject", "rejected": "reject"}
+_PLATFORM_WORD = {"allow": "approved", "reject": "reject", "revise": "revise"}
+
+
+def _override_view(row: dict) -> dict:
+    said = str(row.get("decision") or "").lower()
+    model = row.get("original_decision")
+    action = _PLATFORM_WORD.get(said, said)
+    return {
+        "request_id": row.get("request_id"),
+        "content_type": row.get("content_type"),
+        "content_id": row.get("content_id"),
+        "user_id": row.get("user_id"),
+        "Action": action,            # what .NET acts on: "approved" | "reject"
+        "decision": action,
+        "overridden": bool(model),
+        "model_decision": _PLATFORM_WORD.get(str(model or said).lower(), model or said),
+        "overridden_by": row.get("overridden_by") if model else None,
+        "overridden_at": row.get("overridden_at") if model else None,
+        "reason": row.get("override_reason") if model else None,
+    }
+
+
+def _apply_override(request_id: str):
+    a: Admin = current_app.extensions["admin"]
+    body = _body()
+    raw = str(body.get("decision") or body.get("Action") or "").strip().lower()
+    decision = _OVERRIDE_WORDS.get(raw)
+    if decision is None:
+        return _err(400, "bad_decision",
+                    "Send decision: 'approved' (publish it) or 'reject' (keep it refused).")
+    reason = str(body.get("reason") or body.get("Note") or "").strip()[:1000]
+    row = a.store.override_decision(request_id, decision, by=_actor(), reason=reason)
+    if row is None:
+        return _err(404, "not_found", f"No moderation decision was recorded for {request_id}.")
+    view = _override_view(row)
+    log.warning("admin %s overrode %s (%s %s): model said %s, now %s%s",
+                _actor() or "(admin token)", request_id, row.get("content_type"),
+                row.get("content_id") or "-", view["model_decision"], view["Action"],
+                f" - {reason}" if reason else "")
+    return jsonify(view), 200
+
+
+@admin_bp.post("/v1/admin/moderation-logs/<request_id>/override")
+def override_decision(request_id: str):
+    """Overturn one decision: {"decision": "approved" | "reject", "reason": "..."}."""
+    denied = check_admin()
+    if denied:
+        return denied
+    return _apply_override(request_id)
+
+
+@admin_bp.post("/v1/admin/moderation-logs/override")
+def override_decision_by_content():
+    """The same, found by the platform's own ids when it did not keep the request_id:
+    {"content_type": "article", "content_id": "123", "decision": ..., "reason": ...}.
+    Applies to the newest decision recorded for that content."""
+    denied = check_admin()
+    if denied:
+        return denied
+    body = _body()
+    ctype = str(body.get("content_type") or "").strip()
+    cid = str(body.get("content_id") or "").strip()
+    if not ctype or not cid:
+        return _err(400, "missing_content",
+                    "Give content_type and content_id, or use "
+                    "/v1/admin/moderation-logs/<request_id>/override.")
+    a: Admin = current_app.extensions["admin"]
+    request_id = a.store.find_request_id(ctype, cid)
+    if request_id is None:
+        return _err(404, "not_found", f"No moderation decision was recorded for {ctype} {cid}.")
+    return _apply_override(request_id)
+
+
+@admin_bp.delete("/v1/admin/moderation-logs/<request_id>/override")
+def clear_override(request_id: str):
+    """Undo an override: the model's verdict stands again."""
+    denied = check_admin()
+    if denied:
+        return denied
+    a: Admin = current_app.extensions["admin"]
+    row = a.store.clear_override(request_id)
+    if row is None:
+        return _err(404, "not_found", f"No moderation decision was recorded for {request_id}.")
+    log.warning("admin %s cleared the override on %s", _actor() or "(admin token)", request_id)
+    return jsonify(_override_view(row)), 200
+
+
 # ---- blocked addresses ----------------------------------------------------------------
 # WHAT THIS IS AND IS NOT. Blocking an address stops casual repetition from one connection -
 # the same person posting the same thing eight times - and that is worth having. It is not an
