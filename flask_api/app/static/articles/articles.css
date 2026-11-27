@@ -1050,3 +1050,4 @@ textarea.input { resize: vertical; min-height: 96px; }
 .log-override-btn.to-reject:hover:not(:disabled) { background: #fef2f2; }
 .btn.ovr-approve { background: #16a34a; border-color: #16a34a; color: #fff; }
 .btn.ovr-approve:hover:not(:disabled) { background: #15803d; border-color: #15803d; }
+.row-reason.override { color: #5b21b6; background: #f5f3ff; border-left: 3px solid #8b5cf6; padding: 4px 8px; border-radius: 4px; }

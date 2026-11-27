@@ -87,6 +87,13 @@
       const rewrite = n ? `${n} ${n === 1 ? "part" : "parts"} to rewrite. ` : "";
       reason = `<div class="row-reason danger">${rewrite}${esc(fb.message || "Can't be published.")}</div>`;
     }
+    if (a.override) {
+      // Say why it moved: an article that was refused and is now live, with nothing on the
+      // card to explain it, reads as a bug.
+      const what = a.status === "published" ? "Approved" : "Refused";
+      reason = `<div class="row-reason override">${what} by an admin on review${
+        a.override.reason ? ` — “${esc(a.override.reason)}”` : ""}.</div>`;
+    }
     return `<div class="row">
         <div class="row-main">
           <p class="row-title">${esc(a.title || "Untitled")}</p>
@@ -597,6 +604,81 @@
     (r.startContainer.parentElement || body).scrollIntoView({ block: "center", behavior: "smooth" });
   });
 
+  // ---------------- admin overrides: this page plays the BONC platform ----------------
+  // When an admin overturns a decision (Moderation Logs, or the override API), the moderation
+  // service only changes its record. Publishing - or taking down - is the platform's job: on
+  // BONC that is .NET acting on the override's `Action`. In this demo the articles live in the
+  // browser, so this page does that part itself, matching an article by the request_id its
+  // last moderation returned (or by its own id, sent as content_id).
+  //   * immediately, when the override is made on this page (the dashboard fires an event);
+  //   * when the Articles tab is opened or the page loads, by asking the log - which also
+  //     catches overrides made earlier, elsewhere, or through Swagger.
+
+  const STATUS_FOR = { approved: "published", allow: "published", reject: "rejected",
+                       revise: "needs_changes" };
+
+  function findArticle(requestId, contentId) {
+    return state.articles.find((x) =>
+      (requestId && x.moderation?.result?.request_id === requestId) || (contentId && x.id === contentId));
+  }
+
+  /** Put one article where the decision that now stands says. True if anything moved. */
+  function applyDecision(a, verdict, override) {
+    const status = STATUS_FOR[String(verdict || "").toLowerCase()];
+    if (!a || !status || a.status === "draft") return false;
+    const was = a.status;
+    a.override = override && override.overridden ? override : null;
+    if (a.status === status) { save(); return false; }
+    a.status = status;
+    a.updatedAt = Date.now();
+    if (status === "published" && !a.publishedAt) a.publishedAt = Date.now();
+    save();
+    return was !== status;
+  }
+
+  window.addEventListener("bonc:decision-overridden", (e) => {
+    const d = e.detail || {};
+    const a = findArticle(d.request_id, d.content_type === "article" ? d.content_id : null);
+    if (applyDecision(a, d.Action, d)) {
+      render();
+      toast(`“${a.title || "Untitled"}” is now ${a.status === "published" ? "published" : a.status.replace("_", " ")} (admin decision)`);
+    }
+  });
+
+  /** Ask the moderation log about every article that has a decision, and follow it. */
+  let syncing = false;
+  async function syncOverrides() {
+    if (syncing) return;
+    const withDecision = state.articles.filter((a) => a.status !== "draft" && a.moderation?.result?.request_id);
+    if (!withDecision.length) return;
+    syncing = true;
+    // The dashboard's sign-in, when it has one; nothing when sign-in is switched off.
+    const headers = (typeof window.boncAdminHeaders === "function" ? window.boncAdminHeaders() : {}) || {};
+    let moved = 0;
+    try {
+      for (const a of withDecision) {
+        const id = a.moderation.result.request_id;
+        const resp = await fetch(`/v1/admin/moderation-logs/${encodeURIComponent(id)}`, { headers }).catch(() => null);
+        if (!resp) return;                      // offline: try again next time
+        if (resp.status === 401 || resp.status === 403) return;   // no admin access here: nothing to learn
+        if (!resp.ok) continue;                 // that row was cleared from the log
+        const row = await resp.json().catch(() => null);
+        if (!row || !row.decision) continue;
+        const override = row.original_decision ? {
+          overridden: true, model_decision: row.original_decision, overridden_by: row.overridden_by,
+          overridden_at: row.overridden_at, reason: row.override_reason } : null;
+        if (applyDecision(a, row.decision, override)) moved++;
+      }
+    } finally {
+      syncing = false;
+      if (moved) { render(); toast(`${moved} article${moved === 1 ? "" : "s"} moved by an admin decision`); }
+    }
+  }
+
+  document.addEventListener("click", (e) => {
+    if (e.target.closest('.tab[data-surface="article"]')) syncOverrides();
+  });
+
   // ---------------- toast ----------------
   let toastTimer;
   function toast(text) {
@@ -607,4 +689,5 @@
   }
 
   render();
+  syncOverrides();
 })();
