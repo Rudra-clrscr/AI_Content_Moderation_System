@@ -28,7 +28,7 @@ The first downloads the CLIP vision encoder. The second should print
 | `probe.npz` | **yes**, 9 KB | fitted on 968 of BONC's own labelled pictures. Not regenerable from anything public |
 | `model_meta.json` | **yes** | which encoder the bundle expects, and the policy digest |
 | `vision_model.onnx` | no, 335 MB | third-party weights, licence not declared by the publisher |
-| `text_model.onnx` | no, 242 MB | same, and only needed to *edit* the policy |
+| `text_model.onnx` | no, 242 MB | same, and only needed to *edit* the policy - which the admin policy APIs do on the server, so a host that serves `/v1/admin/policy/*` needs it (`fetch_clip.py --with-text-encoder`) |
 
 577 MB of weights in Git LFS would also exhaust a free-tier quota by itself, and then every
 clone fails on the data limit rather than on anything we wrote. `fetch_clip.py` pins a specific

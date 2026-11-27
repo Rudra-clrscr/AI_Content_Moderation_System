@@ -146,11 +146,14 @@ sudo -u "$APP_USER" "$APP_DIR/.venv/bin/pip" install --quiet gunicorn
 # fetched here, verified against a pinned SHA256 by the script itself. Skip this and the
 # service still starts, still answers /ready with status "ready", and publishes every picture
 # unexamined - which is why check_deploy.py runs before the service does.
-say "image model (models/img_v1/vision_model.onnx, 352 MB)"
-sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/flask_api/scripts/fetch_clip.py"
+say "image model (models/img_v1: vision 352 MB + text encoder 254 MB)"
+sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/flask_api/scripts/fetch_clip.py" \
+    --with-text-encoder
 
-# The text encoder is deliberately NOT fetched: it is only needed to rebuild prompts.npz from
-# config/visual_policy.yaml, which is an offline step on whichever host edits the policy.
+# The text encoder is fetched too because the admin policy APIs run on this host:
+# /v1/admin/policy/preview, label edits, phrasings, sync and reset all encode wordings with it
+# (in a short-lived subprocess, ~370 MB peak, never in the web worker). Without it those
+# endpoints answer 500 encode_failed while moderation itself keeps working.
 
 # ---- 6. OCR language models ----------------------------------------------------------
 # settings.yaml ocr.rec_model_path points at models/ocr/devanagari_rec.onnx, not in git either.
