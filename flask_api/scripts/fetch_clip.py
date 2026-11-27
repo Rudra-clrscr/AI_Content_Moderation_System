@@ -20,8 +20,9 @@ Two files are needed to serve, and the second is built, not downloaded:
     prompts.npz         python scripts/build_clip_prompts.py   (needs --with-text-encoder once)
 
 The text encoder is only needed to build `prompts.npz` from `config/visual_policy.yaml`, which
-is an offline step. A serving host does not need it, and `--with-text-encoder` exists for the
-host that edits the policy.
+is an offline step. A host that only moderates does not need it; a host that serves the admin
+policy APIs (/v1/admin/policy/preview, label edits, sync, reset) does, because they encode
+wordings on the server - so deploy/install.sh fetches it with `--with-text-encoder`.
 
 Weights: openai/clip-vit-base-patch32, ONNX export by Xenova.
 

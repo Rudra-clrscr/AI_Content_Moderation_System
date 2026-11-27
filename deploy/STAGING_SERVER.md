@@ -77,6 +77,16 @@ labels.
 Run `scripts/fetch_clip.py` or `scripts/fetch_ocr_langs.py devanagari` only if
 `check_deploy.py` says the image model or OCR model is missing.
 
+The admin policy APIs (`policy/preview`, label edits, phrasings, sync, reset) also need the
+CLIP **text encoder**, which is not in git and which `check_deploy.py` does not check. If they
+answer `500 encode_failed` with "missing …/text_model.onnx", fetch it once (no restart needed):
+
+```bash
+cd /opt/moderation/flask_api
+sudo -u moderation /opt/moderation/.venv/bin/python scripts/fetch_clip.py --with-text-encoder
+sudo -u moderation /opt/moderation/.venv/bin/python scripts/fetch_clip.py --verify
+```
+
 **Never run `deploy/install.sh` on this server.** It is written for `/opt/bonc`, user `bonc`,
 unit `bonc-api` and port 8000, and would install a second, conflicting service.
 
