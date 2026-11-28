@@ -45,12 +45,12 @@ flask_api/models/v4.backup_pre_v5/
 # the SHA256 RapidOCR publishes.
 flask_api/models/ocr/
 
-# The image model (app/clip.py). A separate bundle from the text model in models/v5.
+# The image model (app/modra_image.py). A separate bundle from the text model in models/v5.
 #
-# The CLIP encoder (335 MB) and its text tower (242 MB) are NOT here. They are a third-party
-# download whose licence the publisher does not declare (see the note in scripts/fetch_clip.py),
+# The BONC Modra AI image encoder (CLIP ViT-B/32 weights, 335 MB) and its text tower (242 MB) are NOT here. They are a third-party
+# download whose licence the publisher does not declare (see the note in scripts/fetch_modra_image.py),
 # and 577 MB in LFS would exhaust a free-tier quota on its own - every colleague's clone then
-# fails on the data limit rather than on anything we did. `python scripts/fetch_clip.py` pulls
+# fails on the data limit rather than on anything we did. `python scripts/fetch_modra_image.py` pulls
 # them SHA256-pinned to a fixed revision, so everyone gets byte-identical weights.
 #
 # What BONC actually made IS tracked, all 383 KB of it:
@@ -81,9 +81,9 @@ flask_api/scripts/test_50_negatives_gen/
 flask_api/scripts/*.json
 flask_api/scripts/*.txt
 
-# Image datasets for the visual check (app/clip.py). Third-party photographs under their own
+# Image datasets for the visual check (app/modra_image.py). Third-party photographs under their own
 # licences, some of it graphic by design, plus BONC's own listing pictures — inputs we don't
-# redistribute, exactly like res/ above. `python flask_api/scripts/eval_clip_images.py` reads
+# redistribute, exactly like res/ above. `python flask_api/scripts/eval_modra_images.py` reads
 # them from here; images/labels.csv records where each one came from.
 images/
 
@@ -96,11 +96,11 @@ flask_api/models/nsfw_ref/
 flask_api/models/v6_candidate/
 
 # SigLIP 2 bundles, measured and not adopted (see contracts/moderation_result.md). Kept out of
-# git like every other third-party weight; scripts/build_clip_prompts.py --family siglip2 rebuilds.
+# git like every other third-party weight; scripts/build_modra_prompts.py --family siglip2 rebuilds.
 flask_api/models/img_v2/
 flask_api/models/img_v2_softmax/
 
-# The public-surface grievance model (app/grievance.py). A DeBERTa bundle, so another 371 MB
+# The public-surface grievance model (app/grievance.py). A BONC Modra AI text bundle (DeBERTa-v3 based), so another 371 MB
 # of LFS next to models/v6's 371 MB - 742 MB against a 1 GB free tier, and every clone would
 # pull both. Same reasoning as v5 above.
 #

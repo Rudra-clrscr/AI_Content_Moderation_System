@@ -346,7 +346,7 @@ def upload_image():
     #
     #   exemplar   the picture itself. Catches lookalikes from the next upload onward.
     #   phrasing   what the admin says it IS. Generalises far past this one picture, and is
-    #              the only channel that can, because it scores in CLIP's text space.
+    #              the only channel that can, because it scores in the image model's text space.
     #   probe      is_selected above. Learns from the accumulated set on the next retrain,
     #              which is where a visually diverse subject like `weapon` is eventually won.
     #
@@ -495,7 +495,7 @@ def apply_preset():
     # THE PRESET IS A VERDICT ON `minor`, SO THE WRITTEN RULE FOLLOWS IT. Child-products mode
     # used to leave the `minor` rule refusing and hide it behind an in-memory bar of 1.01 -
     # which the dashboard never showed, a restart forgot, and the combined
-    # max(score, unsafe_score) >= reject_min fallback in clip.decides_reject still crossed.
+    # max(score, unsafe_score) >= reject_min fallback in modra_image.decides_reject still crossed.
     # Done BEFORE training: the rebuild reloads prompts.npz, and train_probe's own threshold
     # override has to land after that, not be wiped by it.
     rule = None

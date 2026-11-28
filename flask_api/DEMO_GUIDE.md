@@ -25,15 +25,15 @@ the server is running, then come back here to section 2.
 Each piece of content passes through four steps:
 
 ```
- content ──► 1. Regex gate ──► 2. DeBERTa model ──► 3. Threshold routing ──► 4. Audit log
+ content ──► 1. Regex gate ──► 2. BONC Modra AI ──► 3. Threshold routing ──► 4. Audit log
              (instant rules)    (AI risk score)       (allow / revise / reject)
 ```
 
 | Step | What it does | Typical time |
 |---|---|---|
 | 1. Regex gate | Checks fixed rules: scam wording, abusive words, blocked domains. A **block** rejects immediately and skips the model. A **revise** rule highlights the problem so the author can fix it. A **flag** is only recorded. | ~0.1–0.5 ms |
-| 2. Model | bonc-v4: a fine-tuned DeBERTa-v3-small gives a calibrated risk from 0 to 1, the probability that the text is unsafe. | ~10–20 ms |
-| 1.5. Triage pre-filter | A tiny linear model clears obviously-safe sentences in ~0.1 ms each, so DeBERTa is only called for the rest. Removes about 73% of the model calls on a normal post, with no decision change. | ~0.1 ms per sentence |
+| 2. Model | bonc-v4: BONC Modra AI (a fine-tuned DeBERTa-v3-small) gives a calibrated risk from 0 to 1, the probability that the text is unsafe. | ~10–20 ms |
+| 1.5. Triage pre-filter | A tiny linear model clears obviously-safe sentences in ~0.1 ms each, so BONC Modra AI is only called for the rest. Removes about 73% of the model calls on a normal post, with no decision change. | ~0.1 ms per sentence |
 | 2c. Sentence and word scan | Every remaining sentence is scored on its own (in one batched call); long run-on sentences also in 40-word windows. For anything flagged, the **trigger words** are found word by word. Leetspeak is read as plain letters ("F1rst c0py" → "First copy"). | ~25–100 ms per article |
 | 3. Routing | Risk **≤ 0.5 is allowed**. Risk **> 0.5 is rejected**: the author sees the sentences to rewrite, with the trigger words in bold, and resubmits. A gate **revise** rule still sends content back for a small fix. There's no human-review queue. | — |
 | 4. Audit log | Every decision is stored with its score, the model and rule versions, and the thresholds used. | — |

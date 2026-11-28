@@ -21,7 +21,7 @@ Env overrides (all optional):
     WORD_SCAN             0 to turn off word windows and word-by-word trigger analysis
     TRIAGE                0 to turn off the linear pre-filter (every span then goes to the model)
     TRIAGE_THRESHOLD      float, overrides the threshold chosen when the filter was trained
-    VISUAL_CHECK          0 to turn off the CLIP visual check (app/clip.py); results then say
+    VISUAL_CHECK          0 to turn off the BONC Modra AI visual check (app/modra_image.py); results then say
                           visual_content_checked: false, as they did before it existed
     VISUAL_REJECT_MIN     float, overrides visual.reject_min
     VISUAL_PROBE_REJECT_MIN  float, overrides visual.probe_reject_min (the trained probe)
@@ -47,7 +47,7 @@ from dotenv import load_dotenv
 
 from app.routing import Thresholds
 from app.media import MediaLimits
-from app.clip import VisualCheck, VisualConfig
+from app.modra_image import VisualCheck, VisualConfig
 from app.ocr import OcrConfig, OcrEngine
 from app.targeted import DEFAULT_SUBJECTS, SentenceScan, TargetedAbuse, WordScan
 from app.grievance import GrievanceCheck
@@ -139,7 +139,7 @@ class Settings:
     media: MediaLimits = field(default_factory=MediaLimits)
     ocr: OcrEngine = field(default_factory=lambda: OcrEngine(OcrConfig(enabled=False)))
     # Off by default: the model files are not in the repo, so a deployment that has not run
-    # scripts/fetch_clip.py behaves exactly as it did before the visual check existed.
+    # scripts/fetch_modra_image.py behaves exactly as it did before the visual check existed.
     visual: VisualCheck = field(default_factory=lambda: VisualCheck(VisualConfig(enabled=False)))
 
     def model_kwargs(self) -> dict:

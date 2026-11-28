@@ -9,7 +9,7 @@ import io
 
 import pytest
 
-from app.clip import VisualCheck, VisualConfig, VisualResult, _providers
+from app.modra_image import VisualCheck, VisualConfig, VisualResult, _providers
 from app.media import MediaLimits, read_image
 
 
@@ -33,7 +33,7 @@ class FakeVisual:
     """
 
     def __init__(self, result: VisualResult, reject: bool = False, config=None):
-        from app.clip import VisualConfig
+        from app.modra_image import VisualConfig
 
         self.result, self.reject, self.calls = result, reject, 0
         self.config = config or VisualConfig(enabled=True)
@@ -191,7 +191,7 @@ def test_an_unchecked_result_is_never_a_reject():
 # ---- the check when its model isn't there ------------------------------------------
 
 def test_a_missing_model_turns_the_check_off_without_raising(tmp_path):
-    """A deployment that hasn't run fetch_clip.py behaves exactly as it did before the visual
+    """A deployment that hasn't run fetch_modra_image.py behaves exactly as it did before the visual
     check existed. It must never be a hard dependency for the Articles tab."""
     check = VisualCheck(VisualConfig(enabled=True, model_dir=str(tmp_path)))
     assert check.ready is False
@@ -480,7 +480,7 @@ def test_every_per_label_bar_is_a_probability():
 
 
 def test_only_unsafe_labels_carry_a_bar():
-    """build_clip_prompts.py only reads `reject_min` inside `if spec.get("unsafe")`, so one on a
+    """build_modra_prompts.py only reads `reject_min` inside `if spec.get("unsafe")`, so one on a
     safe label is silently ignored - exactly the shape of mistake that looks like it works."""
     for name, spec in shipped_policy().items():
         if spec.get("reject_min") is not None:

@@ -11,7 +11,7 @@ startup. That half looks after itself.
 
 The image model does not. Only four small files of models/img_v1 are in git - the prompts, the
 probe and the metadata. `vision_model.onnx` is 352 MB and is fetched on the host by
-scripts/fetch_clip.py. Miss that step and app/clip.py does what it is designed to do: it turns
+scripts/fetch_modra_image.py. Miss that step and app/modra_image.py does what it is designed to do: it turns
 the visual check OFF rather than taking the service down, because a missing model should not
 stop text moderation working.
 
@@ -75,12 +75,12 @@ def check_files() -> list[tuple[str, bool, str]]:
 
     vdir = ROOT / str(visual.get("model_dir") or "models/img_v1")
     out.append(("image model", *_file(vdir / "vision_model.onnx", vdir.name)))
-    # Built by build_clip_prompts.py and committed, so this is normally present - but it is
+    # Built by build_modra_prompts.py and committed, so this is normally present - but it is
     # half of what the check needs to run and is worth naming when it is not.
     prompts = vdir / "prompts.npz"
     out.append(("image prompts", prompts.is_file(),
                 "prompts.npz" if prompts.is_file()
-                else "missing prompts.npz - run scripts/build_clip_prompts.py"))
+                else "missing prompts.npz - run scripts/build_modra_prompts.py"))
 
     # Gitignored like vision_model.onnx, and it fails just as quietly: app/ocr.py logs one
     # error and falls back to the bundled Latin-only model, so Hindi writing in a picture
@@ -148,8 +148,8 @@ def main() -> int:
 
     if bad:
         print(f"\n{bad} check(s) failed. The image model is the one that fails quietly:")
-        print("    python scripts/fetch_clip.py          # vision_model.onnx, 352 MB")
-        print("    python scripts/build_clip_prompts.py  # only if prompts.npz is missing")
+        print("    python scripts/fetch_modra_image.py          # vision_model.onnx, 352 MB")
+        print("    python scripts/build_modra_prompts.py  # only if prompts.npz is missing")
         print("    git lfs pull                          # if a model is an LFS pointer")
         print("Until then the service answers /ready with status 'ready' and publishes every")
         print("picture unexamined (visual_content_checked: false).")

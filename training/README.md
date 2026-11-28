@@ -59,7 +59,7 @@ previously-losing quantization could start winning.
 ## The triage pre-filter
 
 `train_triage.py` and `tune_triage.py` build Layer 1.5, a logistic regression over hashed
-n-grams that keeps obviously-safe spans away from DeBERTa (see `flask_api/README.md` for how
+n-grams that keeps obviously-safe spans away from the BONC Modra AI text model (see `flask_api/README.md` for how
 the service uses it). Two things make it safe rather than just fast:
 
 - **It is distilled from the model, not from the labels.** The target is "would v4 have
@@ -118,7 +118,7 @@ data before trusting sigma levels.
 |---|---|
 | `synth_data.py` | Generates the synthetic dataset (a copy lives in `res/`) |
 | `prepare_data.py` | Relabels `res/`, adds spans, splits train/val/test, drops held-out eval texts |
-| `train.py` | Fine-tunes DeBERTa-v3-small on the GPU |
+| `train.py` | Fine-tunes the BONC Modra AI text model from DeBERTa-v3-small on the GPU |
 | `calibrate_export.py` | Temperature scaling, test metrics, ONNX export, quantization choice, bundle |
 | `shrink_embeddings.py`, `quantize_weight_only.py` | The quantization candidates `calibrate_export.py` compares |
 | `train_triage.py`, `tune_triage.py` | The linear pre-filter and its threshold |

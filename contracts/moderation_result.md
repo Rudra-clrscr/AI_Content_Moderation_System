@@ -42,8 +42,8 @@ Every one of these is clickable at `/articles` with `DEMO_PAGE=1`: the tab bar i
 tab opens its own form, and the `content_type` it sends is printed above that form.
 
 **Still pictures are now inspected; footage still is not.** *Changed in 1.7.* An uploaded
-image gets two passes: OCR reads any writing in it, and the CLIP visual check
-(`flask_api/app/clip.py`) scores the picture itself against the written policy in
+image gets two passes: OCR reads any writing in it, and the BONC Modra AI visual check
+(`flask_api/app/modra_image.py`) scores the picture itself against the written policy in
 `flask_api/config/visual_policy.yaml` — see "The visual check" below. **Video is still not
 analysed at all**: no frame or audio decoding, so a video's title and description are moderated
 while the footage is not.
@@ -325,10 +325,10 @@ their text is extracted, not guessed at, and reads as what the author wrote.
 
 Everything else in this service reads text. That left a hole this contract was always explicit
 about: an image was OCR'd for words and the *picture* was never judged, so a photograph of
-anything at all published as long as it carried no harmful words. `app/clip.py` closes it for
+anything at all published as long as it carried no harmful words. `app/modra_image.py` closes it for
 still images.
 
-**How it decides.** CLIP (Contrastive Language-Image Pre-training) embeds pictures and
+**How it decides.** BONC Modra AI's image model is built on CLIP (Contrastive Language-Image Pre-training), which embeds pictures and
 sentences into one space, so a picture can be scored against a written description rather than
 against trained classes. The policy is therefore a config file — a handful of phrasings per
 label in `flask_api/config/visual_policy.yaml` — and adding a category needs no retraining, no
@@ -347,9 +347,9 @@ wrong is in `media.visual`.
 (`clip-vit-b32-bonc-img-v1`) scores pictures; `models/v6` (`deberta-v3-small-bonc-v6`) scores
 words. They version apart, roll back independently, and neither stands in for the other. Only
 the 352 MB vision encoder is loaded at serving time: the text encoder runs once offline in
-`scripts/build_clip_prompts.py`, which bakes the prompt embeddings into `prompts.npz`.
+`scripts/build_modra_prompts.py`, which bakes the prompt embeddings into `prompts.npz`.
 
-**What it is measured at.** 1,168 sample images, `scripts/eval_clip_images.py`:
+**What it is measured at.** 1,168 sample images, `scripts/eval_modra_images.py`:
 
 | `reject_min` | weapons | gore | objects | BONC listings | human bodies |
 |---|---|---|---|---|---|
@@ -433,7 +433,7 @@ nothing measurable: `BONC_Positive` stays **0/62**, `crowds_safe` **8/206**, `al
 `body_parts` **19/105**. `romance` went *up*, 57% to 62%.
 
 *(`BONC_Positive` is 62 distinct pictures, not the 63 files it holds — two are byte-identical.
-It was quoted as 0/63 for most of this branch's life. `eval_clip_images.py` now de-duplicates
+It was quoted as 0/63 for most of this branch's life. `eval_modra_images.py` now de-duplicates
 every set by content hash, which is also what stopped `minors` from reporting 282 images once
 the walk went recursive and found `minors/kid_neg/`: 73 of its 74 files are byte-identical to
 pictures already in `minors/`, and counting them twice would have let a tenth of that set vote
@@ -520,7 +520,7 @@ generalise from, and the probe alone does **not** beat the prompts on weapons (7
 77%) — it is the combination that wins. `media.visual.probe_reject_min` in `settings.yaml`
 carries the full sweep; deleting `probe.npz` falls back to prompts alone.
 
-`app/clip.py` also serves SigLIP 2 bundles (`scoring: sigmoid`, independent per-label scores)
+`app/modra_image.py` also serves SigLIP 2 bundles (`scoring: sigmoid`, independent per-label scores)
 as well as CLIP's softmax. SigLIP was measured and **not** adopted: with its own sigmoid
 calibration it reaches 57% weapons / 68% gore at matched false positives, and with softmax it
 is roughly level with CLIP for about four times the compute (196 vision tokens against 49).

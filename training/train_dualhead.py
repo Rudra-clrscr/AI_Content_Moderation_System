@@ -5,7 +5,7 @@
         --data D:/AI/bonc-dual-data \\
         --out D:/AI/bonc-dual/ckpt
 
-WHAT THIS REPLACES. Today the system loads two DeBERTa bundles and calls them in sequence:
+WHAT THIS REPLACES. Today the system loads two BONC Modra AI text bundles (DeBERTa-v3 based) and calls them in sequence:
 models/v6 answers "is this harmful anywhere" on every surface and models/grievance-v7 answers
 "is this a grievance published where it does not belong" on the public ones. 742 MB of model
 and two inference calls per public post. This trains one network with two output logits that

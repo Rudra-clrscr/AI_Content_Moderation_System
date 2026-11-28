@@ -68,7 +68,7 @@ POST an image ->  200 allow,  "visual_content_checked": false
 ```
 
 The service is green, a load-balancer health check on `/ready` passes, text moderation works
-properly — and every picture publishes unexamined. `app/clip.py` does this deliberately: a
+properly — and every picture publishes unexamined. `app/modra_image.py` does this deliberately: a
 missing image model must not take text moderation down with it. The cost is that the failure
 is quiet, and `visual.ready` is nested two levels inside `/ready` where nobody looks on
 deployment day.
@@ -177,7 +177,7 @@ and ~21 GB of models. Add `GUNICORN_THREADS` instead: onnxruntime releases the G
 overlap without a second copy of a 1.24 GB model.
 
 CPU-only is fine and is what a standard Contabo VPS gives you — `requirements.txt` pins the
-CPU `onnxruntime`. Measured on this codebase, CLIP runs ~14.8 images/s on 6 CPU cores. Only
+CPU `onnxruntime`. Measured on this codebase, the BONC Modra AI image model runs ~14.8 images/s on 6 CPU cores. Only
 install `onnxruntime-gpu` if the plan actually has an NVIDIA card, and then remove the CPU
 build first — they provide the same module and must not be installed together.
 

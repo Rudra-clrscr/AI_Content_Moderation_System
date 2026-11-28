@@ -32,8 +32,8 @@ SCHEMA_VERSION = "1.9"  # 1.9: public-surface grievance model; decided_by "griev
                         # 1.7: two features shipped together, so this version means BOTH.
                         #      feedback.severity - the moderation rating shown to the author
                         #      (low/medium/high), reported from whatever actually decided; and
-                        #      media.visual - the CLIP visual check's verdict on the PICTURE
-                        #      itself (app/clip.py), with visual_content_checked now true for
+                        #      media.visual - the BONC Modra AI visual check's verdict on the PICTURE
+                        #      itself (app/modra_image.py), with visual_content_checked now true for
                         #      images that were actually looked at. A client seeing "1.7" has
                         #      both; there is no build with one and not the other.
 
@@ -497,7 +497,7 @@ class Pipeline:
         """The words most worth spending a model call on, ranked by the linear pre-filter.
 
         Removing the word that matters most gives the lowest score, whichever model is asked, and
-        the pre-filter answers in ~0.1 ms against ~11 ms for DeBERTa. It only picks the shortlist;
+        the pre-filter answers in ~0.1 ms against ~11 ms for the BONC Modra AI text model. It only picks the shortlist;
         the model still measures the contributions and decides the trigger words, so a poor
         shortlist costs highlight quality, never correctness. Without the filter loaded this is a
         no-op and every word is measured, as before.

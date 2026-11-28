@@ -387,10 +387,10 @@ listing once this is on the AI/ML server. The labels endpoint's own `balance.war
 approach it:
 
 > Measured at 88 against 85, adding twelve allowing phrasings moved the evaluation by four fewer
-> wrong refusals and eight fewer correct ones — so measure with `scripts/eval_clip_images.py`
+> wrong refusals and eight fewer correct ones — so measure with `scripts/eval_modra_images.py`
 > before and after rather than adding wordings until the number goes green.
 
-The script it means is [flask_api/scripts/eval_clip_images.py](../flask_api/scripts/eval_clip_images.py).
+The script it means is [flask_api/scripts/eval_modra_images.py](../flask_api/scripts/eval_modra_images.py).
 That is the next step for this, and it is a measurement job, not a tuning one.
 
 ### Resolution of Section 7 Findings
@@ -399,7 +399,7 @@ All six refusals noted in the seed-7 sample have been thoroughly investigated an
 
 1. **Exemplar Refusal on Physique (`id=350`, `visual.exemplar#1365`):**
    - Refused because exemplar #1365 over-indexed on bodybuilding physique images.
-   - Comprehensive evaluation across all 3,378 images with `scripts/eval_clip_images.py` proved that the 173 prompts in `visual_policy.yaml` achieve **99% recall (71/72)** on `gym_neg` on their own, while the three physique marks (#1365, #1375, #1377) caused **16 false rejections** on legitimate gym business listings (`gym_positive`).
+   - Comprehensive evaluation across all 3,378 images with `scripts/eval_modra_images.py` proved that the 173 prompts in `visual_policy.yaml` achieve **99% recall (71/72)** on `gym_neg` on their own, while the three physique marks (#1365, #1375, #1377) caused **16 false rejections** on legitimate gym business listings (`gym_positive`).
    - Marks #1365, #1375, and #1377 were pruned (`is_exemplar = 0` in `system.db`) and re-exported to `exemplars.npz`. This eliminated 68% of false refusals in `gym_positive` (dropping from 19 down to 6) with **zero** recall loss.
 
 2. **The Apparent "False Positives" (`id=2227` and `id=2258`):**
@@ -626,7 +626,7 @@ not "costs nothing". `exemplar_margin_min: 0.0` restores the previous behaviour 
 
 ### The eval script could not see any of this
 
-`scripts/eval_clip_images.py` — the script the labels endpoint tells admins to measure with —
+`scripts/eval_modra_images.py` — the script the labels endpoint tells admins to measure with —
 **never called `reload_exemplars()`**. It scored every set against the prompts and the probe
 only, so the entire exemplar channel was invisible to the one tool pointed at this problem.
 A mark refusing 11% of real listings could not have shown up in it.
@@ -649,7 +649,7 @@ now writes the cause and the mark id into each filename.
 ### Resolving the remaining open findings
 
 #### 1. The three physique marks (#1365, #1375, #1377) were not earning their keep
-We measured the exact impact of marks #1365, #1375, and #1377 across all 3,378 images using `scripts/eval_clip_images.py`:
+We measured the exact impact of marks #1365, #1375, and #1377 across all 3,378 images using `scripts/eval_modra_images.py`:
 * **On `gym_neg` (physique display recall):** The prompt policy in `config/visual_policy.yaml` alone achieves **99% recall (71/72 caught)**. The three marks added **zero unique recall** (0 new detections).
 * **On `gym_positive` (gym businesses):** The three marks caused **16 false refusals** (19 of 49 refused, a 39% false-positive rate).
 * **Resolution:** Clearing the three marks as active exemplars in `data/system.db` and re-exporting `models/img_v1/exemplars.npz` dropped `gym_positive` false refusals down from 19 to 6 (a 68% drop, saving 13 legitimate businesses) with zero loss in `gym_neg` recall. The remaining 6 refusals in `gym_positive` are the 5 shirtless advert posters and 1 borderline physique pose specifically documented in `visual_policy.yaml`.

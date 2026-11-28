@@ -1,13 +1,13 @@
-# What the visual check looks for in an uploaded picture (app/clip.py).
+# What the visual check looks for in an uploaded picture (app/modra_image.py).
 #
-# CLIP scores an image against written descriptions rather than against trained classes, so the
+# BONC Modra AI scores an image against written descriptions rather than against trained classes, so the
 # policy IS this file: add a label with a few phrasings and it is checked from the next restart,
 # with no retraining. The cost is that nothing here is learned from BONC's own pictures, so
 # every label is only as good as its wordings - measure a new one with
-# `python scripts/eval_clip_images.py` before trusting it.
+# `python scripts/eval_modra_images.py` before trusting it.
 #
 # Each label carries several phrasings and takes the best-matching one, which is how zero-shot
-# CLIP is normally ensembled: one wording can miss a picture that another catches. Scores are a
+# The image model is normally ensembled: one wording can miss a picture that another catches. Scores are a
 # softmax over every phrasing here, so the `safe` list is not decoration - it is what the unsafe
 # labels are judged against, and a thin one makes ordinary photographs look suspicious.
 
@@ -18,10 +18,10 @@ version: 1
 # measured medians on each label's own image set run from 0.57 (violence) to 0.97 (minors) -
 # so a single bar either lets the low scorers through untouched or refuses ordinary pictures
 # in order to catch them. Each bar below is set from where that label's own set actually sits.
-# Re-measure with scripts/eval_clip_images.py after changing any of them.
+# Re-measure with scripts/eval_modra_images.py after changing any of them.
 
 # Phrasings are lower case and start "a photo of ..." where it reads naturally: that is the
-# shape of the captions CLIP was trained on, and it scores better than a bare noun.
+# shape of the captions its CLIP base was trained on, and it scores better than a bare noun.
 labels:
   weapon:
     unsafe: true
@@ -264,7 +264,7 @@ labels:
     #
     # It is the same framing question `minor` asks (subject or incidental) and it is settled
     # the same way - in the prompts, not the probe. A linear model over one global embedding
-    # cannot ask who a picture is addressed to; CLIP's text encoder can.
+    # cannot ask who a picture is addressed to; the model's text encoder can.
     #
     # PROMOTING A BUSINESS DOES NOT LAUNDER THE PICTURE. A gym flyer, a fitness poster and a
     # supplement banner are all legitimate B2B postings, and they are still refused when they
@@ -364,7 +364,7 @@ labels:
       - a photo of a decorated event tent or marquee
       # A hand holding something, which is the pose the weapon prompts describe. Without these
       # an outstretched arm holding a black wallet scores 0.985 weapon: the object is right, the
-      # pose is what CLIP matches on, and only a safe label in the same pose competes with it.
+      # pose is what the model matches on, and only a safe label in the same pose competes with it.
       #
       # Each one names the object. Generic wordings ("a hand holding an everyday object", "an
       # outstretched arm holding an object") were tried and removed: they describe a hand

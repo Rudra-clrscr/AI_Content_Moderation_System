@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.clip import VisualCheck, VisualConfig, VisualResult
+from app.modra_image import VisualCheck, VisualConfig, VisualResult
 
 
 def check(margin=0.10, bar=0.60):

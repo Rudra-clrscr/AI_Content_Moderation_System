@@ -17,7 +17,7 @@ holds:
     retrained, 71 of them were still refused - by three exemplars nobody had taken back.
 
 So a category with pictures but none selected is recorded as WITHDRAWN when the probe is
-written, and clip.py honours it in both channels. What is left is the written policy, and a
+written, and modra_image.py honours it in both channels. What is left is the written policy, and a
 category with no refusing rule publishes.
 
 The test that matters most is the last one: withdrawing a category must not quieten any
@@ -35,7 +35,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.clip import VisualCheck, VisualConfig, VisualResult  # noqa: E402
+from app.modra_image import VisualCheck, VisualConfig, VisualResult  # noqa: E402
 from app.system_store import SystemStore  # noqa: E402
 
 MODEL = ROOT / "models" / "img_v1"

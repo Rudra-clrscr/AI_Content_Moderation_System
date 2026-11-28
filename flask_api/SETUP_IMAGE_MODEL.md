@@ -1,5 +1,7 @@
 # Setting up the image model
 
+The image side of **BONC Modra AI – Content Compliance Model (CCM)**, built on CLIP ViT-B/32.
+
 The service screens **pictures** as well as text: a weapon in a product photo, a wedding album,
 a gym selfie, a child as the subject. That is a separate model from the text one, it lives in
 `models/img_v1/`, and **two of its files are not in git**.
@@ -13,11 +15,11 @@ it is worth doing deliberately rather than discovering later.
 From `flask_api/`, with the virtualenv active:
 
 ```
-python scripts/fetch_clip.py          # 335 MB, SHA256-verified against a pinned revision
-python scripts/build_clip_prompts.py --check
+python scripts/fetch_modra_image.py          # 335 MB, SHA256-verified against a pinned revision
+python scripts/build_modra_prompts.py --check
 ```
 
-The first downloads the CLIP vision encoder. The second should print
+The first downloads the BONC Modra AI vision encoder (CLIP ViT-B/32 weights). The second should print
 `prompts.npz matches visual_policy.yaml`. If it does, you are done.
 
 ## Why those two are not in the repo
@@ -28,10 +30,10 @@ The first downloads the CLIP vision encoder. The second should print
 | `probe.npz` | **yes**, 9 KB | fitted on 968 of BONC's own labelled pictures. Not regenerable from anything public |
 | `model_meta.json` | **yes** | which encoder the bundle expects, and the policy digest |
 | `vision_model.onnx` | no, 335 MB | third-party weights, licence not declared by the publisher |
-| `text_model.onnx` | no, 242 MB | same, and only needed to *edit* the policy - which the admin policy APIs do on the server, so a host that serves `/v1/admin/policy/*` needs it (`fetch_clip.py --with-text-encoder`) |
+| `text_model.onnx` | no, 242 MB | same, and only needed to *edit* the policy - which the admin policy APIs do on the server, so a host that serves `/v1/admin/policy/*` needs it (`fetch_modra_image.py --with-text-encoder`) |
 
 577 MB of weights in Git LFS would also exhaust a free-tier quota by itself, and then every
-clone fails on the data limit rather than on anything we wrote. `fetch_clip.py` pins a specific
+clone fails on the data limit rather than on anything we wrote. `fetch_modra_image.py` pins a specific
 revision and checks SHA256 before moving anything into place, so everyone gets byte-identical
 weights without the repo carrying them.
 
@@ -50,9 +52,9 @@ is how you find out the picture check is off before a member does.
 YAML and it is tracked, so changes are reviewable in a pull request. After editing it:
 
 ```
-python scripts/fetch_clip.py --with-text-encoder     # once; 242 MB, only needed to rebuild
-python scripts/build_clip_prompts.py
-python scripts/eval_clip_images.py --images ../images --device cuda
+python scripts/fetch_modra_image.py --with-text-encoder     # once; 242 MB, only needed to rebuild
+python scripts/build_modra_prompts.py
+python scripts/eval_modra_images.py --images ../images --device cuda
 ```
 
 The last one prints what the change did to every image set. **Run it before opening the PR** —

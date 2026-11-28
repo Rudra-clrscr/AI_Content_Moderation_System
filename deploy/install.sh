@@ -147,7 +147,7 @@ sudo -u "$APP_USER" "$APP_DIR/.venv/bin/pip" install --quiet gunicorn
 # service still starts, still answers /ready with status "ready", and publishes every picture
 # unexamined - which is why check_deploy.py runs before the service does.
 say "image model (models/img_v1: vision 352 MB + text encoder 254 MB)"
-sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/flask_api/scripts/fetch_clip.py" \
+sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" "$APP_DIR/flask_api/scripts/fetch_modra_image.py" \
     --with-text-encoder
 
 # The text encoder is fetched too because the admin policy APIs run on this host:

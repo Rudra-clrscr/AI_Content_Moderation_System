@@ -61,7 +61,7 @@ class ImageTrainer:
         return None
 
     def compute_embedding(self, image_path: Path) -> np.ndarray | None:
-        """Compute 512-dim normalized CLIP embedding for an image."""
+        """Compute 512-dim normalized BONC Modra AI image embedding for an image."""
         if not self.visual_check:
             return None
         self.visual_check.ready
@@ -185,7 +185,7 @@ class ImageTrainer:
         # exactly what happened: 71 of 72 gym photographs stayed refused after every one of
         # them had been deselected, by three exemplars nobody had thought to take back.
         #
-        # So the withdrawal is recorded here, travelling with the probe, and clip.py honours
+        # So the withdrawal is recorded here, travelling with the probe, and modra_image.py honours
         # it in both channels.
         try:
             withdrawn = self.store.withdrawn_categories()

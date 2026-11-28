@@ -1,7 +1,7 @@
 """Image Policy Rules and Image Fine-Tuning are two views of ONE list of subjects.
 
 THE BUG THIS COMES FROM. A rule named `toy` scores the pictures filed under the category `toy`
-(app/clip.policy_category relies on the folder names being the label names), yet the two
+(app/modra_image.policy_category relies on the folder names being the label names), yet the two
 screens kept separate lists and never told each other anything:
 
   * a subject created on one screen could be created again on the other, and "New rule" with

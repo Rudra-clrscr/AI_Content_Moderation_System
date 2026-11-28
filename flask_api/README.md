@@ -1,6 +1,7 @@
 # flask_api: moderation service
 
-This service wraps the DeBERTa-v3-small ONNX model in a Flask API. A request goes
+This service wraps BONC Modra AI – Content Compliance Model (CCM) - the text model, an ONNX
+export built on DeBERTa-v3-small - in a Flask API. A request goes
 through three steps:
 
 1. **Layer 1 gate.** Regex and term-list rules in [config/gate_patterns.yaml](config/gate_patterns.yaml) can reject content on the spot (`block`), send it back to the author with the problem highlighted (`revise`), or just note it for the audit log (`flag`).
@@ -246,7 +247,7 @@ picture.
 
 | Kind | Read | Rule |
 |---|---|---|
-| Image | OCR for its writing, **and** the CLIP visual check on the picture itself | text is moderated; the picture is scored against `config/visual_policy.yaml`. An image with no text and nothing the check objects to is allowed |
+| Image | OCR for its writing, **and** the BONC Modra AI visual check on the picture itself | text is moderated; the picture is scored against `config/visual_policy.yaml`. An image with no text and nothing the check objects to is allowed |
 | PDF | **nothing** | **allowed with `checked: false`** while `media.allow_unchecked_pdf` is on (the shipped setting); **refused** when off |
 | Video | nothing | **allowed with `checked: false`** while `media.allow_unchecked_video` is on (the shipped setting); **refused** when off |
 
@@ -308,10 +309,10 @@ picture-heavy uploads should run in async mode.
 The scan above is the expensive part of an ordinary, allowed post: every sentence is a model
 call, and nearly all come back safe. Layer 1.5 is a logistic regression over hashed word and
 character n-grams ([app/triage.py](app/triage.py)) that clears the obviously-safe spans in
-about 0.1 ms each, so only the rest reach DeBERTa.
+about 0.1 ms each, so only the rest reach the BONC Modra AI text model.
 
 - **It is distilled from the model itself**, not trained on the dataset labels: the target is
-  "would DeBERTa have flagged this span?", because a span the model would allow is free to skip.
+  "would BONC Modra AI have flagged this span?", because a span the model would allow is free to skip.
 - **The threshold is chosen by decision impact, not by span accuracy.** `training/tune_triage.py`
   runs every held-out text through the real pipeline at each candidate threshold and takes the
   highest one that changes no decision, halved for margin. At 0.4 two harmful posts started
@@ -463,4 +464,4 @@ python scripts/bench_latency.py --n 500
 
 This measures the gate and the model separately, in-process. It exits non-zero when
 p95 inference is over `latency_budget_ms` (30 ms). With the dummy model, the gate
-p95 is about 0.1 ms. Real numbers need the INT8 DeBERTa export.
+p95 is about 0.1 ms. Real numbers need the INT8 export of the BONC Modra AI text model.

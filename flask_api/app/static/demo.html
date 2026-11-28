@@ -371,7 +371,7 @@ function showResult(b, roundTrip) {
     <h2>Decision</h2>
     <div class="pipeline">
       <span class="step on">1 · Regex gate</span><span class="arrow">→</span>
-      <span class="step ${gate ? "skip" : "on"}">2 · DeBERTa model</span><span class="arrow">→</span>
+      <span class="step ${gate ? "skip" : "on"}">2 · BONC Modra AI</span><span class="arrow">→</span>
       <span class="step ${b.targeted_segments.length ? "on" : "skip"}">2b · Sentence check</span><span class="arrow">→</span>
       <span class="step ${b.sentence_scores.length ? "on" : "skip"}">2c · Sentence scan</span><span class="arrow">→</span>
       <span class="step ${gate ? "skip" : "on"}">3 · Threshold routing</span><span class="arrow">→</span>

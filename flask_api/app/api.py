@@ -671,7 +671,7 @@ def moderate_media():
     What can be read differs by kind, and so does the rule (see app/media.py):
 
       * **Image** — two passes over the same picture. OCR reads any writing, which catches
-        the bypass of putting the scam in a screenshot; the CLIP visual check (app/clip.py)
+        the bypass of putting the scam in a screenshot; the BONC Modra AI visual check (app/modra_image.py)
         scores the picture itself against `config/visual_policy.yaml`, which catches a weapon
         or gore photograph carrying no words at all. With the visual check off or its model
         missing, the result says `visual_content_checked: false` and behaves as it used to.
@@ -703,7 +703,7 @@ def moderate_unified():
     """Unified moderation endpoint: intelligently moderates text, image/media, or both.
 
     Accepts multipart/form-data or application/json.
-      - If only text is provided: runs ONLY text moderation (DeBERTa pipeline).
+      - If only text is provided: runs ONLY text moderation (BONC Modra AI text pipeline).
       - If only image/media is provided: runs ONLY image moderation (visual check / OCR).
       - If both are provided: runs BOTH moderation checks and combines the results.
         If either check rejects, the final combined decision is reject.

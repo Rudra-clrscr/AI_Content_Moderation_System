@@ -192,7 +192,7 @@ def test_tipping_the_balance_is_reported():
     assert "refusing phrasings against" in b["warning"]
     # And it must keep pointing at the measurement rather than prescribing a fix: adding
     # allowing phrasings was measured and traded four wrong refusals for eight correct ones.
-    assert "eval_clip_images.py" in b["warning"]
+    assert "eval_modra_images.py" in b["warning"]
 
 
 def test_the_warning_travels_with_the_save_that_caused_it():
@@ -209,7 +209,7 @@ def test_the_warning_travels_with_the_save_that_caused_it():
 # "personal physique photos", and a mark on a picture from the allowed set said "safe".
 
 def test_a_marked_pictures_folder_is_translated_to_its_policy_category():
-    from app.clip import VisualCheck
+    from app.modra_image import VisualCheck
     from app.config import load_settings
 
     v = load_settings().visual

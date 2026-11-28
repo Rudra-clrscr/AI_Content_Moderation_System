@@ -40,7 +40,7 @@ def test_same_wording_opposite_verdicts_is_a_conflict():
 
 
 def test_case_and_punctuation_do_not_hide_a_conflict():
-    """"A photo of Rainbow." and "a photo of rainbow" are the same sentence to CLIP, so a
+    """"A photo of Rainbow." and "a photo of rainbow" are the same sentence to the image model, so a
     comparison that misses that would let the contradiction straight through."""
     doc = policy(rainbow={"unsafe": False, "prompts": ["a photo of rainbow"]})
     assert find_conflicts(doc, "unrest", ["A photo of Rainbow."], unsafe=True)

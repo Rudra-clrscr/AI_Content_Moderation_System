@@ -1,8 +1,8 @@
 """Automated tests for the Unified Moderation API (`POST /v1/moderate/unified`).
 
 Verifies the wrapper behavior across all 12 scenarios:
-1. Text only -> DeBERTa called; image model not called.
-2. Image only -> Image model called; DeBERTa not called.
+1. Text only -> text model called; image model not called.
+2. Image only -> Image model called; text model not called.
 3. Both text and image -> Both models called.
 4. Neither text nor image -> HTTP 400.
 5. Safe text + safe image -> Overall allow.
@@ -18,7 +18,7 @@ import io
 import pytest
 
 from app import create_app
-from app.clip import VisualConfig, VisualResult
+from app.modra_image import VisualConfig, VisualResult
 from app.model import ModelNotReady, ScoreResult
 from tests.conftest import FixedScorer
 
@@ -56,7 +56,7 @@ class FailingScorer:
     version = "failing-1"
 
     def score(self, text):
-        raise ModelNotReady("DeBERTa weights not loaded")
+        raise ModelNotReady("text model weights not loaded")
 
 
 def build_app(make_settings, scorer=None, visual=None, sink=None, **kw):
@@ -68,10 +68,10 @@ def build_app(make_settings, scorer=None, visual=None, sink=None, **kw):
 
 
 # --------------------------------------------------------------------------------
-# Scenario 1: Text only -> DeBERTa called; image model not called
+# Scenario 1: Text only -> text model called; image model not called
 # --------------------------------------------------------------------------------
 
-def test_1_text_only_calls_deberta_not_image_model(make_settings, sink):
+def test_1_text_only_calls_text_model_not_image_model(make_settings, sink):
     scorer = FixedScorer(0.1)
     visual = FakeVisual(VisualResult(checked=True, label="safe", score=0.99), reject=False)
     client = build_app(make_settings, scorer=scorer, visual=visual, sink=sink)
@@ -88,7 +88,7 @@ def test_1_text_only_calls_deberta_not_image_model(make_settings, sink):
     assert body["Success"] is True
     data = body["Data"]
 
-    # Verify DeBERTa was called and image model was NOT called
+    # Verify the text model was called and image model was NOT called
     assert scorer.calls == 1
     assert visual.calls == 0
 
@@ -125,10 +125,10 @@ def test_1_text_only_multipart_form(make_settings, sink):
 
 
 # --------------------------------------------------------------------------------
-# Scenario 2: Image only -> Image model called; DeBERTa not called
+# Scenario 2: Image only -> Image model called; text model not called
 # --------------------------------------------------------------------------------
 
-def test_2_image_only_calls_image_model_not_deberta(make_settings, sink):
+def test_2_image_only_calls_image_model_not_text_model(make_settings, sink):
     scorer = FixedScorer(0.1)
     visual = FakeVisual(VisualResult(checked=True, label="safe", score=0.99, scores={"safe": 0.99}), reject=False)
     client = build_app(make_settings, scorer=scorer, visual=visual, sink=sink)
@@ -145,7 +145,7 @@ def test_2_image_only_calls_image_model_not_deberta(make_settings, sink):
     assert body["Success"] is True
     data = body["Data"]
 
-    # Verify image model was called and DeBERTa was NOT called
+    # Verify image model was called and the text model was NOT called
     assert visual.calls == 1
     assert scorer.calls == 0
 

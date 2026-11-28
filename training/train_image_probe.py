@@ -184,8 +184,8 @@ def embed_all(encoder: Path, images: Path, device: str):
     import numpy as np
     from PIL import Image
 
-    from app.clip import VisualCheck, VisualConfig
-    from eval_clip_images import image_files
+    from app.modra_image import VisualCheck, VisualConfig
+    from eval_modra_images import image_files
 
     # Absolute: VisualCheck resolves a relative model_dir against the app root, which would
     # turn "flask_api/models/img_v1" into "flask_api/flask_api/models/img_v1".
@@ -204,7 +204,7 @@ def embed_all(encoder: Path, images: Path, device: str):
         if not folder.is_dir():
             print(f"  {rel}: missing, skipped")
             continue
-        # Recursive, by bytes, de-duplicated - the same walk eval_clip_images.py uses, imported
+        # Recursive, by bytes, de-duplicated - the same walk eval_modra_images.py uses, imported
         # rather than re-implemented because the two drifting apart is how this file came to
         # train on a different set of pictures than the one being measured.
         #
@@ -333,7 +333,7 @@ def main() -> int:
     # 73%, because 300 frames from a few videos are easy to memorise and hard to generalise.
     print("\ncombined decision (prompt softmax OR out-of-fold probe), as served:")
     from PIL import Image
-    from app.clip import VisualCheck, VisualConfig
+    from app.modra_image import VisualCheck, VisualConfig
 
     chk = VisualCheck(VisualConfig(enabled=True, model_dir=str(args.encoder.resolve()),
                                    device=args.device), root=ROOT / "flask_api")

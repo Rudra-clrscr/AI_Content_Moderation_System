@@ -27,7 +27,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.clip import VisualCheck, VisualConfig  # noqa: E402
+from app.modra_image import VisualCheck, VisualConfig  # noqa: E402
 from app.image_trainer import ImageTrainer  # noqa: E402
 from app.system_store import SystemStore  # noqa: E402
 

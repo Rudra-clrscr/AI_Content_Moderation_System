@@ -109,7 +109,7 @@ def test_the_differ_falls_back_loudly_rather_than_losing_the_policy():
 # ---- a label that stops refusing stops carrying a bar ---------------------------------
 
 def test_turning_a_rule_off_takes_its_bar_with_it():
-    """build_clip_prompts.py reads reject_min only inside `if spec.get("unsafe")`, so a bar on
+    """build_modra_prompts.py reads reject_min only inside `if spec.get("unsafe")`, so a bar on
     a safe label is silently ignored - config that reads as live and does nothing.
 
     Flipping `physique` to allow from the dashboard left exactly that behind: `unsafe: false`
