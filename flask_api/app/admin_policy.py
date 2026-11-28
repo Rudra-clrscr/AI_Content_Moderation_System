@@ -1,15 +1,15 @@
 """Write and edit the visual policy from the admin dashboard, with a default always available.
 
-WHAT A POLICY LABEL IS. config/visual_policy.yaml is the whole of the image policy: CLIP
+WHAT A POLICY LABEL IS. config/visual_policy.yaml is the whole of the image policy: BONC Modra AI
 scores a picture against written phrasings rather than against trained classes, so adding
 `weapon` with a few wordings is the entire act of teaching the system to refuse weapons. No
 retraining, no labelled dataset. That is the property worth exposing to an admin, and until
 now the only way to use it was to edit a file on the server.
 
 WHY THIS IS NOT JUST A FILE WRITE. The thing actually scored against is models/img_v1/
-prompts.npz - one L2-normalised vector per phrasing - which scripts/build_clip_prompts.py
+prompts.npz - one L2-normalised vector per phrasing - which scripts/build_modra_prompts.py
 bakes from the policy offline. It is offline on purpose: the text encoder is 254 MB and
-app/clip.py deliberately never loads it, so the serving process carries the vision encoder and
+app/modra_image.py deliberately never loads it, so the serving process carries the vision encoder and
 nothing else. Editing the YAML alone changes nothing; the npz has to be rebuilt, and it stamps
 the policy file's hash so a stale one is caught rather than quietly scored against.
 
@@ -88,7 +88,7 @@ def _paths() -> tuple[Path, Path, Path]:
 def _family(model_dir: Path) -> str:
     """Which encoder family the LIVE bundle is, read from its own model_meta.json.
 
-    build_clip_prompts.py defaults to --family clip, and img_v1 is CLIP, so hardcoding the
+    build_modra_prompts.py defaults to --family clip, and img_v1 is CLIP, so hardcoding the
     default would work today and break silently the day models/img_v2 (SigLIP 2) goes live:
     the embeddings would be built by a different text tower than the vision tower scoring
     against them, and every picture would be judged on noise while the service looked healthy.
@@ -160,7 +160,7 @@ def _validate(name: str, body: dict) -> tuple[str, dict] | tuple[None, object]:
     entry: dict = {"unsafe": bool(body.get("unsafe", True)), "prompts": cleaned}
     if entry["unsafe"]:
         entry["category"] = str(body.get("category") or name).strip().lower()
-    # Only an unsafe label has anything to refuse at, and build_clip_prompts.py reads
+    # Only an unsafe label has anything to refuse at, and build_modra_prompts.py reads
     # reject_min only inside `if spec.get("unsafe")`. A bar left on a label that has just been
     # set to allow is therefore dead config that reads as a live setting - which is what
     # flipping `physique` to allow produced: `unsafe: false` with `reject_min: 0.55` under it,
@@ -433,7 +433,7 @@ def _apply(policy: Path, doc: dict, model_dir: Path) -> tuple[bool, str]:
         # what the admin actually did.
         with policy.open("w", encoding="utf-8", newline="\n") as fh:
             fh.write(_render_preserving(before_text, yaml.safe_load(before_text) or {}, doc))
-        script = Path(current_app.extensions["moderation"].settings.visual.root) / "scripts" / "build_clip_prompts.py"
+        script = Path(current_app.extensions["moderation"].settings.visual.root) / "scripts" / "build_modra_prompts.py"
         if not script.exists():
             raise RuntimeError(f"{script} is missing, so prompts.npz cannot be rebuilt")
         t0 = time.time()
@@ -443,7 +443,7 @@ def _apply(policy: Path, doc: dict, model_dir: Path) -> tuple[bool, str]:
             capture_output=True, text=True, timeout=BUILD_TIMEOUT_S, cwd=str(script.parent.parent))
         if proc.returncode != 0:
             raise RuntimeError((proc.stderr or proc.stdout or "").strip()[-400:]
-                               or "build_clip_prompts.py failed")
+                               or "build_modra_prompts.py failed")
         log.info("rebuilt prompts.npz in %.1fs", time.time() - t0)
         visual = current_app.extensions["moderation"].settings.visual
         if not visual.reload_prompts():
@@ -607,7 +607,7 @@ def delete_label(name: str):
 
 # ---- one subject, two screens ----------------------------------------------------------
 # A policy rule and an Image Fine-Tuning category with the same name are ONE subject: the
-# rule `weapon` scores the pictures filed under `weapon`, and app/clip.policy_category relies
+# rule `weapon` scores the pictures filed under `weapon`, and app/modra_image.policy_category relies
 # on exactly that ("the folder names ARE the label names"). The two screens nonetheless kept
 # separate lists and never told each other anything, which produced two kinds of drift:
 #
@@ -873,7 +873,7 @@ def _semantic_clashes(doc: dict, label: str, prompts: list[str], unsafe: bool,
     to slip through - "a photo of a rainbow" against "a photo of rainbow" went undetected -
     so the guard existed and never fired on the case it was built for.
 
-    Compared in CLIP's own text space, because that is the space the rules are scored in: two
+    Compared in the image model's own text space, because that is the space the rules are scored in: two
     wordings the encoder places together WILL match the same pictures, whatever a human thinks
     of them. The existing wordings are already encoded in prompts.npz, so this costs one
     subprocess for the new sentences rather than re-encoding the whole policy.
@@ -1127,7 +1127,7 @@ def _prompt_balance(doc: dict) -> dict:
             "actually see are decided first by each rule's own bar and by the probe, and this "
             "total only decides the ones they leave over. Measured at 88 against 85, adding "
             "twelve allowing phrasings moved the evaluation by four fewer wrong refusals and "
-            "eight fewer correct ones - so measure with scripts/eval_clip_images.py before and "
+            "eight fewer correct ones - so measure with scripts/eval_modra_images.py before and "
             "after rather than adding wordings until the number goes green.")
     return out
 
@@ -1233,7 +1233,7 @@ def _written_verdict(visual, img) -> tuple[str | None, str | None, float | None]
 def _export_exemplars(model_dir: Path) -> dict:
     """Write models/img_v1/exemplars.npz from the marked pictures, then reload it live.
 
-    A file rather than a database read inside app/clip.py, for the same reason prompts.npz is
+    A file rather than a database read inside app/modra_image.py, for the same reason prompts.npz is
     a file: the serving layer owns the vision encoder and two npz files and knows nothing
     about data/system.db, which belongs to the admin side. Keeping that line means the
     moderation path has no dependency on the dashboard being installed, configured, or even
@@ -1449,7 +1449,7 @@ def preview_label():
     images at all: one subprocess to encode a handful of phrasings, then a dot product.
 
     THESE NUMBERS ARE NOT THE LIVE SCORES AND MUST NOT BE READ AS A THRESHOLD. They are raw
-    cosine similarities, which for CLIP sit in a narrow band - measured here, a wedding
+    cosine similarities, which for this encoder sit in a narrow band - measured here, a wedding
     photograph against "a photo of a wedding ceremony" is 0.32 while the same picture scores
     0.96 through classify(). The live check softmaxes across every label, which concentrates
     almost all the mass on the winner; a raw similarity does not. So `over_threshold` is

@@ -1,13 +1,13 @@
 """Turn config/visual_policy.yaml into the prompt embeddings the visual check scores against.
 
-    python scripts/build_clip_prompts.py              # after editing the policy file
+    python scripts/build_modra_prompts.py              # after editing the policy file
 
 Run this once offline, and again whenever the policy file changes. It writes
 `models/img_v1/prompts.npz`: one L2-normalised 512-float vector per phrasing, the label each
 belongs to, and which labels are unsafe.
 
 Doing it here rather than at startup is what keeps the text encoder (254 MB) and the CLIP
-tokenizer out of the serving image altogether - app/clip.py loads the vision encoder and this
+tokenizer out of the serving image altogether - app/modra_image.py loads the vision encoder and this
 file, nothing else. It also means the policy is frozen at a known point: the npz records the
 hash of the policy file it was built from, so a stale one is caught by
 `--check` instead of being quietly scored against.
@@ -138,7 +138,7 @@ def main() -> int:
     tokenizer = args.model_dir / "tokenizer.json"
     for p in (text_model, tokenizer):
         if not p.exists():
-            print(f"missing {p} - run `python scripts/fetch_clip.py --with-text-encoder` first",
+            print(f"missing {p} - run `python scripts/fetch_modra_image.py --with-text-encoder` first",
                   file=sys.stderr)
             return 2
 
@@ -188,11 +188,11 @@ def main() -> int:
         "prompt_counts": dict(sorted(by_label.items())),
         # Thresholds are per-family and NOT comparable: a softmax 0.90 (one label beating the
         # others) and a sigmoid 0.90 (one label confident on its own) are different statements.
-        # Re-measure with scripts/eval_clip_images.py after changing family.
+        # Re-measure with scripts/eval_modra_images.py after changing family.
         "recommended_thresholds": {"reject_min": 0.90 if args.family == "clip" else None},
         "note": ("The text encoder is NOT needed to serve and is not part of the serving set - "
                  "this script runs it offline to bake prompts.npz. Re-run after any change to "
-                 "the policy file; app/clip.py scores against whatever is in prompts.npz."),
+                 "the policy file; app/modra_image.py scores against whatever is in prompts.npz."),
     }
     (args.model_dir / "model_meta.json").write_text(
         json.dumps(meta, indent=2) + chr(10), encoding="utf-8")

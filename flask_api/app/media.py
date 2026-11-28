@@ -6,7 +6,7 @@ clean article, put the scam in the picture. Each kind gets the strictest rule we
 support, and the rules differ because what we can read differs.
 
 **Image** — two passes over the same decoded picture. OCR reads any writing, which catches
-the common bypass of putting the scam in a screenshot; and the CLIP visual check (app/clip.py)
+the common bypass of putting the scam in a screenshot; and the BONC Modra AI visual check (app/modra_image.py)
 scores the picture itself against the written policy in `config/visual_policy.yaml`, which
 catches what no amount of reading would — a weapon listing or a gore photograph with no words
 on it at all. An image with no text and nothing the visual check objects to is allowed: a
@@ -91,7 +91,7 @@ class MediaLimits:
     allow_unreadable_image: bool = False
     # An image whose writing OCR could not read, but whose PICTURE the visual check looked at
     # and cleared. Refusing those was right while nothing inspected the picture; now that
-    # app/clip.py does, it refuses 13% of real listings over logos and number plates. What is
+    # app/modra_image.py does, it refuses 13% of real listings over logos and number plates. What is
     # still unchecked is the WORDS, so this is only ever reached when the visual check actually
     # ran and found nothing - never when it is off or missing.
     allow_unreadable_image_when_seen: bool = True
@@ -150,7 +150,7 @@ class ImageRead:
     """Everything we were able to make of one picture: its words, and the picture itself."""
 
     text: "ImageText"
-    visual: "object"          # app.clip.VisualResult; typed loosely to keep clip.py optional
+    visual: "object"          # app.modra_image.VisualResult; typed loosely to keep modra_image.py optional
 
 
 def read_image(data: bytes, ocr, limits: MediaLimits, visual=None) -> ImageRead:
@@ -218,7 +218,7 @@ def _ocr_image(frame, ocr) -> "ImageText":
 
 
 def _visual_image(frame, visual):
-    from app.clip import VisualResult
+    from app.modra_image import VisualResult
 
     if frame is None or visual is None:
         return VisualResult(checked=False)

@@ -1,6 +1,6 @@
 """Measure the visual check against the sample images, and pick its threshold.
 
-    python scripts/eval_clip_images.py --images ../images
+    python scripts/eval_modra_images.py --images ../images
 
 The policy in `config/visual_policy.yaml` is written in English, not learned from BONC's
 pictures, so nothing about it is self-evident: a wording that sounds right can miss half a
@@ -36,7 +36,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.clip import VisualCheck, VisualConfig  # noqa: E402
+from app.modra_image import VisualCheck, VisualConfig  # noqa: E402
 
 # .avif included: Unsplash and other stock sources serve it by default now, and leaving it out
 # silently skipped 73 supplied images - the run came back with byte-identical metrics and no
@@ -167,7 +167,7 @@ def score_dir(check: VisualCheck, directory: Path,
             continue
         if not result.checked:
             raise SystemExit("the visual check is not loaded - is visual.enabled on, and have "
-                             "fetch_clip.py and build_clip_prompts.py been run?")
+                             "fetch_modra_image.py and build_modra_prompts.py been run?")
         # The shipped verdict travels with the score. The sweep below moves one global bar,
         # which is not how the service decides any more - each label has its own, and
         # `decides_reject` is the only thing that knows all of them.

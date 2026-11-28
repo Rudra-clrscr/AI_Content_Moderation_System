@@ -1,13 +1,17 @@
 # AI Content Moderation System — BONC Network
 
+**Model: BONC Modra AI – Content Compliance Model (CCM)** — one name for both the text and the image model.
+It is built on DeBERTa-v3-small (text) and CLIP ViT-B/32 (pictures); see
+[docs/MODEL_NAMING.md](docs/MODEL_NAMING.md).
+
 Screens business profiles, product listings, posts, articles and ads **before they go live** —
 the words and the pictures. There is no moderator queue: content that breaks policy is refused,
 and the author is shown what to change.
 
 | | |
 |---|---|
-| **Text** | DeBERTa-v3-small, ONNX (`models/v6`) + a regex gate + a linear triage filter |
-| **Pictures** | CLIP ViT-B/32 zero-shot against a written policy (`models/img_v1`) + a 5-class probe |
+| **Text** | BONC Modra AI text model (built on DeBERTa-v3-small), ONNX (`models/v6`) + a regex gate + a linear triage filter |
+| **Pictures** | BONC Modra AI image model (built on CLIP ViT-B/32), zero-shot against a written policy (`models/img_v1`) + a 5-class probe |
 | **Serving** | Flask + ONNX Runtime, SQL Server for the audit trail, Celery/Redis for async |
 | **Tests** | 450, `python -m pytest` from `flask_api/` |
 
@@ -23,13 +27,13 @@ cd flask_api
 python -m venv .venv && .venv/Scripts/activate # Windows; use bin/activate elsewhere
 pip install -r requirements.txt
 
-python scripts/fetch_clip.py                   # 335 MB image encoder, NOT in git
-python scripts/build_clip_prompts.py --check   # must say "matches visual_policy.yaml"
+python scripts/fetch_modra_image.py                   # 335 MB image encoder, NOT in git
+python scripts/build_modra_prompts.py --check   # must say "matches visual_policy.yaml"
 
 python wsgi.py
 ```
 
-**Do not skip the two `fetch_clip` lines.** Without them the service still starts and still
+**Do not skip the two `fetch_modra_image` lines.** Without them the service still starts and still
 answers `200` — it just never looks at pictures, and every result says
 `"visual_content_checked": false`. Nothing fails loudly. Check with:
 
@@ -97,9 +101,9 @@ Author-facing wording is in [`config/feedback_messages.yaml`](flask_api/config/f
 After editing it:
 
 ```bash
-python scripts/fetch_clip.py --with-text-encoder     # once; needed only to rebuild
-python scripts/build_clip_prompts.py
-python scripts/eval_clip_images.py --images ../images --device cuda
+python scripts/fetch_modra_image.py --with-text-encoder     # once; needed only to rebuild
+python scripts/build_modra_prompts.py
+python scripts/eval_modra_images.py --images ../images --device cuda
 ```
 
 Commit the rebuilt `prompts.npz` and `model_meta.json` with the YAML. `--check` fails if they
@@ -119,7 +123,7 @@ drift apart.
 ## Measuring before you ship
 
 ```bash
-python scripts/eval_clip_images.py --images ../images --device cuda
+python scripts/eval_modra_images.py --images ../images --device cuda
 ```
 
 Prints every set, then the **shipped decision** — per-label bars, the combined unsafe score and

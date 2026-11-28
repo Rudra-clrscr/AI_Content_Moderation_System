@@ -156,8 +156,8 @@ media:                      # POST /v1/moderate/media: attachments on an article
   # removed along with its dependencies, so there is no `video:` block any more. What happens
   # to an uploaded video is decided by allow_unchecked_video above, which is the rule that
   # predated that check.
-  visual:                   # LOOK AT THE PICTURE, not just the words in it (app/clip.py).
-    enabled: true           # CLIP scores the image against the written descriptions in
+  visual:                   # LOOK AT THE PICTURE, not just the words in it (app/modra_image.py).
+    enabled: true           # BONC Modra AI scores the image against the written descriptions in
                             # config/visual_policy.yaml, so the policy is that file and adding
                             # a category needs no retraining. VISUAL_CHECK=0 turns it off, and
                             # so does a missing model: results then say
@@ -165,15 +165,15 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # existed. It is never a hard dependency for the Articles tab.
                             #
                             # Set up (once, offline - nothing is fetched while serving):
-                            #   python scripts/fetch_clip.py
-                            #   python scripts/build_clip_prompts.py
+                            #   python scripts/fetch_modra_image.py
+                            #   python scripts/build_modra_prompts.py
     model_dir: models/img_v1
                             # the image bundle, separate from the text model in models/v5:
                             # vision_model.onnx (352 MB) + prompts.npz. The TEXT encoder is not
-                            # needed to serve: build_clip_prompts.py runs it offline and bakes
+                            # needed to serve: build_modra_prompts.py runs it offline and bakes
                             # the prompt embeddings into prompts.npz.
     reject_min: 0.90        # an unsafe label this confident refuses the upload. MEASURED on
-                            # 1168 sample images with scripts/eval_clip_images.py:
+                            # 1168 sample images with scripts/eval_modra_images.py:
                             #
                             #   reject_min  weapons  gore   false positives
                             #                              objects  BONC   bodies
@@ -290,7 +290,7 @@ media:                      # POST /v1/moderate/media: attachments on an article
                             # is what takes minors from 64% to 96% and nudity from 68% to 95%
                             # at the shipped bars, by answering "not safe" on pictures well
                             # outside weapons and gore. Worth re-measuring deliberately rather
-                            # than relying on; scripts/eval_clip_images.py --device cuda prints
+                            # than relying on; scripts/eval_modra_images.py --device cuda prints
                             # the shipped decision for every set.
     device: auto            # auto | cuda | directml | cpu. "auto" takes the best execution
                             # provider onnxruntime actually offers, so a host with the stock
@@ -323,7 +323,7 @@ media:                      # POST /v1/moderate/media: attachments on an article
   allow_unreadable_image_when_seen: true
                             # ...unless the VISUAL CHECK looked at the picture and cleared it.
                             # Refusing unreadable writing was right while nothing inspected the
-                            # picture; app/clip.py now does, and the blanket refusal was turning
+                            # picture; app/modra_image.py now does, and the blanket refusal was turning
                             # away 19% of real BONC listings over logos, number plates and
                             # watermarks ("D", "CRUK", "00 0000"). What stays unknown is the
                             # WORDS, so the record still says checked: false - a narrower claim

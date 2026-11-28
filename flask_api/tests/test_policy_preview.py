@@ -1,6 +1,6 @@
 """The policy preview must encode phrasings the same way the live policy does.
 
-scripts/encode_prompts.py duplicates eleven lines from scripts/build_clip_prompts.py -
+scripts/encode_prompts.py duplicates eleven lines from scripts/build_modra_prompts.py -
 tokenise, pad, run the text encoder, L2-normalise - because those lines sit inside the
 builder's main() between reading the policy file and writing the npz, and importing them would
 mean refactoring the script every serving path depends on.
@@ -32,7 +32,7 @@ SCRIPT = ROOT / "scripts" / "encode_prompts.py"
 
 pytestmark = pytest.mark.skipif(
     not (PROMPTS.exists() and ENCODER.exists() and SCRIPT.exists()),
-    reason="needs models/img_v1 with the 254 MB text encoder (scripts/fetch_clip.py "
+    reason="needs models/img_v1 with the 254 MB text encoder (scripts/fetch_modra_image.py "
            "--with-text-encoder); it is not in git",
 )
 
@@ -62,9 +62,9 @@ def test_preview_encodes_identically_to_the_baked_policy():
         cos = float(row @ baked[i])
         assert cos > 0.999, (
             f"phrasing {sample[n]!r} encodes differently in scripts/encode_prompts.py than it "
-            f"does in scripts/build_clip_prompts.py (cosine {cos:.5f}). The policy preview "
+            f"does in scripts/build_modra_prompts.py (cosine {cos:.5f}). The policy preview "
             f"would rank pictures in a different vector space from the live check. Re-sync "
-            f"the encoding block in encode_prompts.py with the one in build_clip_prompts.py.")
+            f"the encoding block in encode_prompts.py with the one in build_modra_prompts.py.")
 
 
 def test_preview_output_is_normalised():

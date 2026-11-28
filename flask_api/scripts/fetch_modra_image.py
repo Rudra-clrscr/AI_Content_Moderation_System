@@ -1,8 +1,8 @@
-"""Download the CLIP image model into models/img_v1, verified against pinned SHA256s.
+"""Download the BONC Modra AI image model (CLIP ViT-B/32 weights) into models/img_v1, verified against pinned SHA256s.
 
-    python scripts/fetch_clip.py                      # the serving file (352 MB)
-    python scripts/fetch_clip.py --with-text-encoder  # also the 254 MB text encoder
-    python scripts/fetch_clip.py --dest models/img_v1
+    python scripts/fetch_modra_image.py                      # the serving file (352 MB)
+    python scripts/fetch_modra_image.py --with-text-encoder  # also the 254 MB text encoder
+    python scripts/fetch_modra_image.py --dest models/img_v1
 
 This is the image bundle. It is a **separate model from the text moderation model** in
 `models/v5`: that one scores words, this one scores pictures, they version apart, and neither
@@ -17,7 +17,7 @@ than becoming a model that silently scores differently.
 Two files are needed to serve, and the second is built, not downloaded:
 
     vision_model.onnx   this script
-    prompts.npz         python scripts/build_clip_prompts.py   (needs --with-text-encoder once)
+    prompts.npz         python scripts/build_modra_prompts.py   (needs --with-text-encoder once)
 
 The text encoder is only needed to build `prompts.npz` from `config/visual_policy.yaml`, which
 is an offline step. A host that only moderates does not need it; a host that serves the admin
@@ -127,7 +127,7 @@ def main() -> int:
     ap.add_argument("--dest", type=Path, default=DEFAULT_DEST)
     ap.add_argument("--with-text-encoder", action="store_true",
                     help="also fetch the text encoder and tokenizer, needed only to run "
-                         "scripts/build_clip_prompts.py after editing the policy file")
+                         "scripts/build_modra_prompts.py after editing the policy file")
     ap.add_argument("--verify", action="store_true", help="check what is there and download nothing")
     args = ap.parse_args()
 
@@ -155,7 +155,7 @@ def main() -> int:
 
     print(f"\n{len(wanted)} file(s) in {args.dest}")
     if not (args.dest / "prompts.npz").exists():
-        print("\nNext: python scripts/build_clip_prompts.py"
+        print("\nNext: python scripts/build_modra_prompts.py"
               + ("" if args.with_text_encoder else
                  "\n  (needs the text encoder: re-run this with --with-text-encoder)"))
     return 0

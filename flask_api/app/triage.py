@@ -1,4 +1,4 @@
-"""Layer 1.5: a linear pre-filter that keeps most spans away from the DeBERTa model.
+"""Layer 1.5: a linear pre-filter that keeps most spans away from the BONC Modra AI text model.
 
 The sentence scan scores every sentence of a post on its own, and long sentences in word
 windows too (app/targeted.py). For a clean 40-sentence article that is 40+ model calls,
@@ -7,7 +7,7 @@ word and character n-grams: ~0.1 ms per span, no tokenizer and no ONNX session. 
 is confident about never reach the model.
 
 It is deliberately one-sided. The threshold is chosen on held-out spans so that it clears
-only text the DeBERTa model would also have allowed; `training/train_triage.py` picks it
+only text the BONC Modra AI text model would also have allowed; `training/train_triage.py` picks it
 and reports the misses. Anything the filter is unsure about goes to the model exactly as
 before, so it can only cost recall if the threshold is set too high, never by design. It
 also never sees the whole-text score, the targeted check or the word-by-word scan: those

@@ -51,7 +51,7 @@ engraving.
 ## What this means for the numbers
 
 - **`violence` 47% and `threats` 38% must not be quoted as recall.** Both sets are registered
-  as `None` (mixed expectation) in `scripts/eval_clip_images.py`, exactly as `non_graphic` is,
+  as `None` (mixed expectation) in `scripts/eval_modra_images.py`, exactly as `non_graphic` is,
   and are reported but excluded from recall and false-positive aggregates.
 - Read the other way, the model *refused* 69 of 147 and 33 of 86 of these. Since so few are
   genuinely either thing, a good share of those refusals were false positives hiding inside a
@@ -119,7 +119,7 @@ because it produces a number that looks like evidence.
 | `weddings` | 205 | block | supplied | arrived in four batches |
 | `weddings_commons` | 14 | block | collected | split out of `crowds_safe`; mostly paintings |
 
-`scripts/eval_clip_images.py` walks these recursively and de-duplicates by content hash, so a
+`scripts/eval_modra_images.py` walks these recursively and de-duplicates by content hash, so a
 foldered drop and a duplicated copy are both handled without changing the count silently.
 
 ## If you want the weak categories measured properly

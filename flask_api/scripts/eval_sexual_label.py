@@ -29,7 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.clip import VisualCheck, VisualConfig  # noqa: E402
+from app.modra_image import VisualCheck, VisualConfig  # noqa: E402
 
 # .avif included: Unsplash and other stock sources serve it by default now, and leaving it out
 # silently skipped 73 supplied images - the run came back with byte-identical metrics and no
@@ -47,7 +47,7 @@ class Reference:
         import numpy as np
         import onnxruntime as ort
 
-        from app.clip import _preload_gpu_dlls, _providers
+        from app.modra_image import _preload_gpu_dlls, _providers
 
         self.np = np
         model = model_dir / "model.onnx"

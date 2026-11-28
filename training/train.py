@@ -1,4 +1,4 @@
-"""Fine-tune DeBERTa-v3-small as the bonc-v4 binary moderation model (GPU).
+"""Fine-tune DeBERTa-v3-small into the BONC Modra AI text model (bonc-v4 binary moderation, GPU).
 
     python train.py --data D:/AI/bonc-data --out D:/AI/bonc-v4/ckpt
 

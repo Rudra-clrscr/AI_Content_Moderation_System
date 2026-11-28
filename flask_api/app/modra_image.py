@@ -1,20 +1,22 @@
-"""Looking at the picture, not just reading the words in it.
+"""BONC Modra AI – Content Compliance Model (CCM): the image model. Looking at the picture, not just reading
+the words in it.
 
 Everything else in this service reads text. That left a hole the contract has always been
 explicit about: an image was OCR'd for writing and the *picture* was never judged, so a
 photograph of anything at all published as long as it carried no harmful words. This is the
 piece that closes it.
 
-CLIP (Contrastive Language-Image Pre-training) embeds pictures and sentences into one space, so
+BONC Modra AI's image model is built on CLIP (Contrastive Language-Image Pre-training), which embeds
+pictures and sentences into one space, so
 an image can be scored against a written description instead of against trained classes. The
 policy is therefore `config/visual_policy.yaml` - a few phrasings per label - and adding a
 label needs no retraining, no labelled pictures and no code change. What it costs is that
 nothing is learned from BONC's own uploads: a label is only as good as its wordings, which is
-why `scripts/eval_clip_images.py` exists and why the shipped threshold was measured rather
+why `scripts/eval_modra_images.py` exists and why the shipped threshold was measured rather
 than guessed.
 
 **Only the vision encoder is loaded here.** The text side runs once, offline, in
-`scripts/build_clip_prompts.py`, which writes the prompt embeddings to `prompts.npz`. Serving
+`scripts/build_modra_prompts.py`, which writes the prompt embeddings to `prompts.npz`. Serving
 therefore needs no tokenizer and no text model: 352 MB instead of 606 MB, and a matrix multiply
 against a few dozen 512-float vectors instead of a second forward pass. Changing the policy
 file means re-running that script, which is the point at which the prompts are version-stamped
@@ -40,7 +42,7 @@ log = logging.getLogger(__name__)
 
 # Preprocessing and scoring are properties of the BUNDLE, not of this file: CLIP and SigLIP
 # normalise differently, resize differently and score differently, and a bundle that lies about
-# any of it scores every picture wrongly while looking fine. build_clip_prompts.py writes these
+# any of it scores every picture wrongly while looking fine. build_modra_prompts.py writes these
 # into prompts.npz; the values here are only the fallback for a bundle built before it did.
 IMAGE_SIZE = 224
 MEAN = (0.48145466, 0.4578275, 0.40821073)      # CLIP
@@ -111,7 +113,7 @@ class VisualConfig:
     enabled: bool = False
     model_dir: str = "models/img_v1"
     # Above this, an unsafe label is acted on. Measured, not guessed - see
-    # scripts/eval_clip_images.py and the table in contracts/moderation_result.md.
+    # scripts/eval_modra_images.py and the table in contracts/moderation_result.md.
     reject_min: float = 0.90
     # The trained probe's own boundary (training/train_image_probe.py, probe.npz). Separate
     # from reject_min because the two answer differently-shaped questions: the prompts compete
@@ -337,7 +339,7 @@ class VisualCheck:
             missing = [p.name for p in (model, prompts) if not p.exists()]
             if missing:
                 self._unavailable = (f"{', '.join(missing)} not in {self.model_dir} - run "
-                                     "scripts/fetch_clip.py and scripts/build_clip_prompts.py")
+                                     "scripts/fetch_modra_image.py and scripts/build_modra_prompts.py")
                 log.warning("visual check off: %s", self._unavailable)
                 return False
 
@@ -555,7 +557,7 @@ class VisualCheck:
         """Re-read prompts.npz after the policy has been rebuilt, without a restart.
 
         The policy is config/visual_policy.yaml and the thing actually scored against is
-        prompts.npz, which scripts/build_clip_prompts.py bakes from it offline - the text
+        prompts.npz, which scripts/build_modra_prompts.py bakes from it offline - the text
         encoder is 254 MB and deliberately never enters the serving process. So an admin who
         edits the policy produces a new npz, and this swaps it in: the labels, their
         categories, their per-label thresholds and the embedding matrix, all replaced together

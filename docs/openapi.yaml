@@ -308,7 +308,7 @@ paths:
         Post **one** file per request — each gets its own decision and its own audit row.
         The kind is detected from the file's bytes, never its name.
 
-        - **Image** — two passes. OCR reads any writing; the CLIP visual check scores the
+        - **Image** — two passes. OCR reads any writing; the BONC Modra AI visual check scores the
           picture itself. Text read off a picture is judged at a raised bar (0.99) with no
           revise band.
         - **PDF** — **not examined.** Extraction was removed while the scanned-page path is
@@ -403,8 +403,8 @@ paths:
       description: |
         Intelligently moderates text, image/media, or both in a single unified wrapper API.
 
-        - **Text only** (Case 1): Calls ONLY the DeBERTa model pipeline; skips image model.
-        - **Image only** (Case 2): Calls ONLY the image moderation model; skips DeBERTa.
+        - **Text only** (Case 1): Calls ONLY the BONC Modra AI text pipeline; skips image model.
+        - **Image only** (Case 2): Calls ONLY the image moderation model; skips the BONC Modra AI text model.
         - **Both text and image** (Case 3): Calls both text and image moderation models.
           If either check rejects, the final combined decision is reject.
       requestBody:
@@ -2090,7 +2090,7 @@ paths:
 
         > ### These numbers are not the live scores
         >
-        > They are **raw cosine similarities**, which for CLIP sit in a narrow band:
+        > They are **raw cosine similarities**, which for the BONC Modra AI image encoder (CLIP-based) sit in a narrow band:
         > measured, a wedding photograph against "a photo of a wedding ceremony" is
         > **0.32** here while the same picture scores **0.96** through the live
         > `classify()`. The live check softmaxes across every label, which concentrates

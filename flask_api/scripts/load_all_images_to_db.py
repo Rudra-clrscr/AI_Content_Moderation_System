@@ -1,4 +1,4 @@
-"""Load all images from images/ into system.db and pre-compute their CLIP embeddings.
+"""Load all images from images/ into system.db and pre-compute their BONC Modra AI image embeddings.
 
 Usage:
     python scripts/load_all_images_to_db.py
@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 from PIL import Image
 
-from app.clip import VisualCheck, VisualConfig
+from app.modra_image import VisualCheck, VisualConfig
 from app.system_store import SystemStore
 
 
@@ -37,7 +37,7 @@ def main():
         print("All images already have embeddings cached! Done.")
         return
 
-    print("Initializing CLIP vision model on CUDA/DirectML/CPU...")
+    print("Initializing BONC Modra AI vision model on CUDA/DirectML/CPU...")
     vc = VisualCheck(VisualConfig(enabled=True, model_dir=str(ROOT / "models" / "img_v1"), device="auto"), root=ROOT)
     if not vc.ready:
         print(f"Warning: VisualCheck could not load: {vc.status.get('reason')}. Exiting embedding pre-computation.")

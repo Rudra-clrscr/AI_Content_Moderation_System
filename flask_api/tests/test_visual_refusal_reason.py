@@ -33,7 +33,7 @@ class _Config:
 
 
 def _result(**kw):
-    from app.clip import VisualResult
+    from app.modra_image import VisualResult
     base = dict(checked=True, label="safe", category="", score=0.4633, unsafe_score=0.05,
                 scores={"safe": 0.4633, "rainbow": 0.4114})
     base.update(kw)
@@ -79,7 +79,7 @@ def test_an_allow_exemplar_overrides_and_reports_no_refusal():
 
 
 def test_nothing_is_reported_when_the_check_did_not_run():
-    from app.clip import VisualResult
+    from app.modra_image import VisualResult
     assert VisualResult(checked=False).refused_by(_Config()) is None
     assert "visual" not in VisualResult(checked=False).as_dict()
 

@@ -1,4 +1,7 @@
-"""Model layer: ONNX Runtime session + tokenizer, loaded once and hot-swappable.
+"""BONC Modra AI – Content Compliance Model (CCM): the text model.
+
+Model layer: ONNX Runtime session + tokenizer, loaded once and hot-swappable.
+Built on DeBERTa-v3-small (see docs/MODEL_NAMING.md).
 
 The on-disk bundle format is the contract with the ML team — see
 contracts/model_bundle.md. onnxruntime / tokenizers / numpy are imported
@@ -86,7 +89,7 @@ _TERMINATORS = ".!?।॥"
 def _with_terminator(text: str) -> str:
     """`text` with an implied full stop appended if it has no terminal punctuation.
 
-    Transformer language models (like DeBERTa) are calibrated on punctuated sentences. When
+    Transformer language models (like the DeBERTa-v3 base BONC Modra AI is built on) are calibrated on punctuated sentences. When
     an author omits punctuation (e.g. typing a single sentence with no full stop, or at the
     end of an unpunctuated article), the model's self-attention can treat the statement as an
     open/incomplete clause rather than a declarative claim. Evaluating an implied-terminator

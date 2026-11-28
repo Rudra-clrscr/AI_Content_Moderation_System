@@ -4,14 +4,14 @@
 
 Reads a JSON list of strings on stdin, writes {"embeds": [[...], ...], "dim": n} on stdout.
 
-WHY A SEPARATE PROCESS, AND WHY SO SMALL. The text encoder is 254 MB and app/clip.py
+WHY A SEPARATE PROCESS, AND WHY SO SMALL. The text encoder is 254 MB and app/modra_image.py
 deliberately never loads it - the serving process carries the vision tower and prompts.npz and
-nothing else. build_clip_prompts.py honours that by running offline, and the policy preview
+nothing else. build_modra_prompts.py honours that by running offline, and the policy preview
 needs exactly the same thing for a handful of candidate phrasings, so it honours it the same
 way: the admin API shells out, the encoder lives and dies here, and the web process stays as
 small as it was.
 
-Encoding is a copy of the eleven lines in build_clip_prompts.py rather than an import of them,
+Encoding is a copy of the eleven lines in build_modra_prompts.py rather than an import of them,
 and that is a deliberate trade. Those lines sit inside its main() between reading the policy
 and writing the npz, so importing would mean refactoring the script every serving path depends
 on. The duplication is bounded (tokenise, pad, run, L2-normalise) and it is pinned by
@@ -36,7 +36,7 @@ def encode(prompts: list[str], model_dir: Path):
     tokenizer = model_dir / "tokenizer.json"
     for p in (text_model, tokenizer):
         if not p.exists():
-            raise SystemExit(f"missing {p} - run `python scripts/fetch_clip.py "
+            raise SystemExit(f"missing {p} - run `python scripts/fetch_modra_image.py "
                              f"--with-text-encoder` first")
 
     tok = Tokenizer.from_file(str(tokenizer))

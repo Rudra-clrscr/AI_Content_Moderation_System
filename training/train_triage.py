@@ -2,7 +2,7 @@
 
     python train_triage.py --out ../flask_api/models/triage-v1
 
-The scan scores every sentence (and every word window over a long sentence) with DeBERTa.
+The scan scores every sentence (and every word window over a long sentence) with the BONC Modra AI text model.
 Nearly all of them come back safe, so most of that work is wasted. This trains a logistic
 regression over hashed n-grams to recognise the obviously-safe ones in ~0.1 ms, so the
 model is only called for the rest.

@@ -1,6 +1,6 @@
 """100,000 Sentence Comprehensive System Evaluation Suite.
 
-Evaluates the live moderation system (Layer 1 Gate + Layer 2 DeBERTa-v3 ONNX Model v5 + Routing)
+Evaluates the live moderation system (Layer 1 Gate + Layer 2 BONC Modra AI text model (DeBERTa-v3 ONNX, v5) + Routing)
 against a randomized, held-out sample of 100,000 sentences from out-of-sample test and validation sets.
 
 Measures:

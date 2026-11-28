@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app import create_app  # noqa: E402
-from app.clip import VisualResult  # noqa: E402
+from app.modra_image import VisualResult  # noqa: E402
 from app.media import MediaLimits  # noqa: E402
 from app.model import ScoreResult  # noqa: E402
 from app.ocr import PageText  # noqa: E402

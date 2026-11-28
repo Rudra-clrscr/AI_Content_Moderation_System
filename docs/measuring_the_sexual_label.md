@@ -33,7 +33,7 @@ downloads. Expect to sign something and to state a research purpose.
 | [LSPD](https://inass.org/wp-content/uploads/2021/09/2022022819.pdf) | 500,000 labelled images, 4,000 videos, with sexual-object annotations | Request from the authors of the paper |
 
 Once a set is on disk, no code change is needed: put it in `images/sexual_positive/` and
-`flask_api/scripts/eval_clip_images.py` picks it up as a set expected to be caught, alongside
+`flask_api/scripts/eval_modra_images.py` picks it up as a set expected to be caught, alongside
 weapons and gore. It is skipped when absent, so nothing breaks in the meantime.
 
 Handle whatever arrives as the agreement requires, keep it off shared machines, and do not
@@ -102,7 +102,7 @@ advance.
   label would refuse 17 of 105 ordinary body pictures and 5 of 200 safe objects.
 - **Do not add more `sexual` prompts untested.** Three prompt changes have cost recall in this
   project already, each one measured only after the fact. The rule in `visual_policy.yaml`
-  holds here too: name the scene, not the pose — and re-run `eval_clip_images.py` after.
+  holds here too: name the scene, not the pose — and re-run `eval_modra_images.py` after.
 - **Do not report the label as working.** Until one of the routes above produces a number, a
   result carrying `category: sexual_content` means the prompts matched, not that the label has
   a known hit rate.

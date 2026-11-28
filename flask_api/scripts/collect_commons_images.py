@@ -271,7 +271,7 @@ def search(term: str, want: int, exclude=None, phrase: bool = True) -> list[dict
                      "prop": "imageinfo|categories", "cllimit": "20",
                      # Thumbnails, not originals. upload.wikimedia.org rate-limits bulk access
                      # to full-resolution files and its own 429 asks for thumbs instead - and
-                     # 1024px is already far more than CLIP needs, since it resizes to 224.
+                     # 1024px is already far more than the image model needs, since it resizes to 224.
                      "iiurlwidth": "1024",
                      "iiprop": "url|size|extmetadata"})
     except (urllib.error.URLError, OSError, TimeoutError) as e:

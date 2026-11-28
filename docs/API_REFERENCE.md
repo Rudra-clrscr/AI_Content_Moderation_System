@@ -522,7 +522,7 @@ An uploaded image gets looked at **twice**, because the two bypasses are differe
 | Pass | Catches | Implementation |
 |---|---|---|
 | **OCR** | the scam put in a screenshot so no text field contains it | `app/ocr.py`, RapidOCR on onnxruntime |
-| **Visual (CLIP)** | a weapon or gore photograph carrying no words at all | `app/clip.py`, CLIP ViT-B/32 against `config/visual_policy.yaml` |
+| **Visual (BONC Modra AI)** | a weapon or gore photograph carrying no words at all | `app/modra_image.py`, BONC Modra AI image model (built on CLIP ViT-B/32) against `config/visual_policy.yaml` |
 
 ### Order of operations
 
